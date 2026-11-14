@@ -74,6 +74,8 @@ pricing, and a finance approval before a quote goes out.
   that agent may read.
 - **Invites.** A supervisor adds a person, who gets a desk and sets their own
   password.
+- **Settings.** A supervisor can add rooms, agents and roles, edit each role's
+  access, move workflow stages between rooms, or start from an empty office.
 - **A walkable office.** An overview from above, and a first-person mode with
   a map.
 
@@ -160,8 +162,29 @@ participant's permission tokens, with *Copy token* and *Revoke token*.
 **Activity** (bottom left) is a plain-language log of what each action did,
 limited to rooms you can read.
 
-**Supervisor controls** (title card). *Invite* adds a person. *Restore demo*
-puts the seeded tasks and rules back, keeping people and accounts.
+**Supervisor controls** (title card). *Invite* adds a person. *Settings* opens
+the set-up screen described next.
+
+### Settings
+
+Supervisors can change how the office is set up without touching code. Every
+change is checked on the server, stored, and written to the audit log.
+
+| Tab | What you can do |
+| --- | --- |
+| Office | Rename the office. Choose which room hosts each workflow stage. Clear all work, start an empty office, or load the demo office. |
+| Rooms | Rename a room or change its purpose. Add a room against a wall of an existing one, with a door between them. Remove an empty room. |
+| People and agents | Add an agent with a desk and a role. Rename anyone, change their role, or move their desk to another room. Remove someone who has no history. |
+| Roles | Add or remove a role. Set allow, deny or nothing for each scope in each room. Mark a role as supervising. |
+| Access rules | See every individual rule, revoke one, or add one with a reason. |
+
+The screen refuses changes that would leave the office broken, and says why: a
+room that hosts a stage or still has people in it cannot be removed, the last
+supervising person cannot lose that power, and a role still in use cannot be
+deleted.
+
+An **empty office** has one room and you in it. Add rooms, assign the stages,
+add agents and set the roles from there.
 
 ## Example workflows
 
@@ -292,7 +315,7 @@ flowchart TB
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>38 tables in 3NF")]
+  db[("SQLite<br/>39 tables in 3NF")]
   llm["Model API<br/>optional"]
 
   hook -->|"action"| http
@@ -345,6 +368,7 @@ next action must start from the state the previous one left behind.
 lib/model.ts              types and the access resolver
 lib/engine.ts             state transitions and the AgentRuntime interface
 lib/policy.ts             who may dispatch which action, and what each viewer may read
+lib/admin.ts              set-up changes: rooms, roles, people, agents, a blank office
 lib/seed.ts               the demo office: floorplan, roles, people, rules, tasks
 lib/referenceData.ts      mock business records kept in each room
 lib/geometry.ts           walls, doors, walking collision, desk placement
@@ -360,8 +384,8 @@ lib/server/modelRuntime.ts   the model-backed agent runtime
 app/api/                  route handlers
 app/page.tsx              the office, for a signed-in person
 app/login, app/invite     sign-in and invite pages
-components/               3D scene, panels, sign-in and invite forms
-scripts/                  five check scripts
+components/               3D scene, panels, settings, sign-in and invite forms
+scripts/                  six check scripts
 Dockerfile, compose.yaml  container build and run
 ```
 
@@ -574,7 +598,8 @@ last reason, until `r-02` is revoked.
 | `POST /api/auth/logout` | signed in | Revoke the session |
 | `GET /api/office` | signed in | The office as this viewer may see it |
 | `POST /api/office/actions` | signed in | Apply one action |
-| `POST /api/office/restore` | supervisor | Put the seeded work back |
+| `POST /api/admin` | supervisor | Apply one set-up change |
+| `POST /api/admin/reset` | supervisor | Replace the office with an empty one or the demo |
 | `POST /api/invites` | supervisor | Create a person, a desk and an invite link |
 | `POST /api/invites/accept` | invite holder | Set email and password, sign in |
 | `POST /api/tokens/:id` | supervisor, or holder to reveal | Reveal or revoke a permission token |
@@ -596,7 +621,7 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 38 tables. The schema is in third normal form:
+SQLite, one file, 39 tables. The schema is in third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
   question options are rows in child tables. There are no JSON or delimited
@@ -610,6 +635,8 @@ SQLite, one file, 38 tables. The schema is in third normal form:
   fields, so the shared part lives in `messages` and the rest in a detail
   table keyed by the message id.
 - **A NULL room on a grant or rule means every room.**
+- **Schema changes are migrations.** An older database is brought forward on
+  open, one version at a time, each step in its own transaction.
 - **`position` columns record order.** Rules and grants are evaluated in
   sequence and threads are read in sequence, so order is data.
 
@@ -625,6 +652,8 @@ erDiagram
   floorplans ||--o{ rooms : contains
   rooms ||--o{ doors : has
   rooms ||--o{ desks : holds
+  rooms ||--o{ stage_rooms : hosts
+  offices ||--o{ stage_rooms : maps
   offices ||--o{ roles : defines
   roles ||--o{ role_grants : grants
   role_grants ||--|{ role_grant_scopes : covers
@@ -659,6 +688,11 @@ erDiagram
     real x
     real z
     real facing
+  }
+  stage_rooms {
+    text office_id PK
+    text stage PK
+    text room_id FK
   }
   roles {
     text id PK
@@ -875,6 +909,8 @@ foreign keys, so an entry survives the task or rule it describes.
   authorization.
 - Permission tokens and the room thread endpoint they open.
 - Persistence in SQLite and the audit log.
+- The settings screen: rooms, people and agents, roles, access rules, and
+  starting over with an empty or demo office.
 - The 3D office, walking, the map.
 - The model-backed runtime's code path: prompt assembly from what the agent may
   read, the structured call, and validation of the reply.
@@ -903,7 +939,8 @@ carries a `simulated` flag.
 
 - Connectors to real systems such as the storefront, inventory and accounting,
   in place of the invented room records.
-- A visual floorplan and policy editor.
+- A drag-and-drop floorplan editor. Rooms are added today through a form.
+- Workflows with a different number of stages.
 - Live updates pushed to the browser. Today each browser re-reads the office
   every five seconds.
 - Several offices in one deployment.
@@ -933,7 +970,8 @@ carries a `simulated` flag.
 
 ## Limitations
 
-- One office per deployment, with one fixed pipeline of five stages.
+- One office per deployment. The workflow always has the same five stages,
+  though each office chooses which room hosts each one.
 - A model-backed step takes several seconds, and the interface waits for it.
 - Agents take a step when work arrives. An agent that was blocked does not
   redo its step after access is granted. The task moves on at the next
@@ -942,7 +980,10 @@ carries a `simulated` flag.
 - Browsers poll for changes every five seconds.
 - SQLite suits one server process. More than one would need a different
   database.
-- The floorplan is data, edited in `lib/seed.ts`. There is no editor for it.
+- Rooms are rectangles placed against an existing room's wall. A room cannot
+  be moved or resized once it exists.
+- A person or agent who appears in tasks or messages cannot be removed until
+  the work is cleared.
 - The layout targets desktop screens. Panels overlap on a phone.
 - The time shown in the office is a fixed demo clock that steps forward three
   minutes per action.
@@ -956,7 +997,7 @@ Requires Node 24 or later, for the built-in SQLite module.
 ```bash
 npm install
 npm run dev       # http://localhost:3000
-npm run verify    # type check, then all five check scripts
+npm run verify    # type check, then all six check scripts
 npm run build     # production server in .next/standalone
 ```
 
@@ -976,6 +1017,8 @@ All optional. See `.env.example`.
 | `AGENT_MODEL` | `claude-opus-5-5` | The model agents run on. |
 | `ANTHROPIC_API_KEY` | unset | Needed only with `AGENT_RUNTIME=model`. |
 | `OFFICE_DB_PATH` | `./data/office.db` | Where the SQLite file lives. |
+| `OFFICE_SEED` | unset (demo office) | `empty` starts a new database with a blank office. |
+| `ADMIN_NAME` | `Administrator` | The administrator's name in a blank office. |
 
 ### Docker
 
@@ -1016,9 +1059,10 @@ Every script runs under Node with an in-memory database and no network.
 | --- | --- | --- |
 | Access precedence, expiry, read gating, walking through doors, desk placement | `npm run check` | 34 of 34 pass |
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
-| Database round trip after every action, foreign keys, integrity | `npm run store` | 18 of 18 pass |
+| Database round trip after every action and every set-up change, foreign keys, integrity | `npm run store` | 34 of 34 pass |
 | Passwords, sessions, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 39 of 39 pass |
 | What an agent is shown, and cleaning of a model's reply | `npm run agents` | 20 of 20 pass |
+| Set-up changes, their refusals, and an office built from nothing | `npm run admin` | 45 of 45 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
