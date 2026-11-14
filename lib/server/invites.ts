@@ -1,7 +1,7 @@
 /**
  * Inviting a person into the office.
  *
- * A supervisor names the person, their title, a role and a room. That creates
+ * Someone whose role may invite names the person, their title, a role and a room. That creates
  * a human participant with a desk in that room, and a single-use link. The
  * invited person opens the link and chooses their own email and password, so
  * nobody else ever handles their credentials. Only a hash of the link's token
@@ -10,7 +10,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { freeDeskSpot } from "../geometry";
 import type { Desk, Participant } from "../model";
-import { supervises } from "../policy";
+import { may } from "../model";
 import {
   addMembership,
   authenticate,
@@ -43,8 +43,8 @@ export function createInvite(session: Session, request: InviteRequest): { path: 
   const state = session.officeId ? loadEngineState(db, session.officeId) : null;
   const inviter = state?.office.participants.find((p) => p.id === session.participantId);
   if (!state || !inviter) throw new OfficeError(404, "You are not in an office.");
-  if (!supervises(state.office, inviter)) {
-    throw new OfficeError(403, "Only a supervising role can invite people.");
+  if (!may(state.office, inviter, "invite_people")) {
+    throw new OfficeError(403, "Your role does not have the permission to invite people.");
   }
 
   const displayName = request.displayName.trim();
@@ -53,6 +53,10 @@ export function createInvite(session: Session, request: InviteRequest): { path: 
   if (title.length < 2 || title.length > 60) throw new OfficeError(400, "Enter the person's job title.");
   const role = state.office.roles[request.roleId];
   if (!role) throw new OfficeError(400, "Choose a role.");
+  const own = state.office.roles[inviter.roleId]?.permissions ?? [];
+  if (role.permissions.some((p) => !own.includes(p))) {
+    throw new OfficeError(403, `You can only invite into a role whose permissions you hold yourself. ${role.name} has more.`);
+  }
   const room = state.office.floorplan.rooms.find((r) => r.id === request.roomId);
   if (!room) throw new OfficeError(400, "Choose a room.");
   const spot = freeDeskSpot(state.office.floorplan, room.id);
@@ -75,6 +79,10 @@ export function createInvite(session: Session, request: InviteRequest): { path: 
     deskId: desk.id,
     capabilities: [],
     backing: null,
+    agentType: null,
+    providerId: null,
+    model: null,
+    playbook: [],
     appearance: { color: COLOURS[state.office.participants.length % COLOURS.length] },
   };
 

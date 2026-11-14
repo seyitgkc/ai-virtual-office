@@ -16,7 +16,11 @@ import {
   type IndividualRule,
   type Message,
   type Office,
+  PERMISSIONS,
+  type AgentType,
   type Participant,
+  type Permission,
+  type PlaybookStep,
   type Role,
   type Room,
   type RoomSelector,
@@ -180,19 +184,25 @@ function writeStageRooms(db: Db, office: Office): void {
   }
 }
 
+function writeRolePermissions(db: Db, role: Role): void {
+  run(db, "DELETE FROM role_permissions WHERE role_id = ?", role.id);
+  for (const permission of new Set(role.permissions)) {
+    run(db, "INSERT INTO role_permissions (role_id, permission) VALUES (?, ?)", role.id, permission);
+  }
+}
+
 function writeRoles(db: Db, office: Office): void {
   Object.values(office.roles).forEach((role, position) => {
     run(
       db,
-      `INSERT INTO roles (id, office_id, position, name, description, supervises)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      "INSERT INTO roles (id, office_id, position, name, description) VALUES (?, ?, ?, ?, ?)",
       role.id,
       office.id,
       position,
       role.name,
       role.description,
-      flag(role.supervises),
     );
+    writeRolePermissions(db, role);
     role.grants.forEach((grant, grantPosition) => {
       run(
         db,
@@ -258,16 +268,78 @@ export function writeParticipant(db: Db, officeId: string, p: Participant): void
       capability,
     );
   });
-  run(db, "DELETE FROM agent_backings WHERE participant_id = ?", p.id);
-  if (p.backing) {
+  run(db, "DELETE FROM agent_settings WHERE participant_id = ?", p.id);
+  if (p.kind === "agent") {
     run(
       db,
-      "INSERT INTO agent_backings (participant_id, provider, model) VALUES (?, ?, ?)",
+      "INSERT INTO agent_settings (participant_id, agent_type, provider_id, model) VALUES (?, ?, ?, ?)",
       p.id,
-      p.backing.provider,
-      p.backing.model,
+      p.agentType ?? "playbook",
+      p.providerId,
+      p.model,
     );
   }
+
+  // Deleting the steps removes their outputs, questions, assumptions and needs.
+  run(db, "DELETE FROM playbook_steps WHERE participant_id = ?", p.id);
+  p.playbook.forEach((step, position) => {
+    run(
+      db,
+      `INSERT INTO playbook_steps
+         (id, participant_id, position, stage, request_contains, requested_by, status_note)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      step.id,
+      p.id,
+      position,
+      step.when.stage === "any" ? null : step.when.stage,
+      step.when.requestContains,
+      step.when.requestedBy === "anyone" ? null : step.when.requestedBy,
+      step.then.statusNote,
+    );
+    const { output, question, assumption, need } = step.then;
+    if (output) {
+      run(db, "INSERT INTO playbook_outputs (step_id, label, body) VALUES (?, ?, ?)", step.id, output.label, output.body);
+    }
+    if (question) {
+      run(
+        db,
+        "INSERT INTO playbook_questions (step_id, body, to_participant_id, blocking) VALUES (?, ?, ?, ?)",
+        step.id,
+        question.body,
+        question.to === "requester" ? null : question.to,
+        flag(question.blocking),
+      );
+      question.options.forEach((label, optionPosition) => {
+        run(
+          db,
+          "INSERT INTO playbook_question_options (step_id, position, label) VALUES (?, ?, ?)",
+          step.id,
+          optionPosition,
+          label,
+        );
+      });
+    }
+    if (assumption) {
+      run(
+        db,
+        "INSERT INTO playbook_assumptions (step_id, assumed, because, confidence) VALUES (?, ?, ?, ?)",
+        step.id,
+        assumption.assumed,
+        assumption.because,
+        assumption.confidence,
+      );
+    }
+    if (need) {
+      run(
+        db,
+        "INSERT INTO playbook_needs (step_id, room_id, scope, purpose) VALUES (?, ?, ?, ?)",
+        step.id,
+        need.room,
+        need.scope,
+        need.purpose,
+      );
+    }
+  });
 }
 
 function writeRule(db: Db, rule: IndividualRule): void {
@@ -714,18 +786,17 @@ function syncRoles(db: Db, after: Office): void {
   Object.values(after.roles).forEach((role, position) => {
     run(
       db,
-      `INSERT INTO roles (id, office_id, position, name, description, supervises)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO roles (id, office_id, position, name, description)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
-         position = excluded.position, name = excluded.name,
-         description = excluded.description, supervises = excluded.supervises`,
+         position = excluded.position, name = excluded.name, description = excluded.description`,
       role.id,
       after.id,
       position,
       role.name,
       role.description,
-      flag(role.supervises),
     );
+    writeRolePermissions(db, role);
     run(db, "DELETE FROM role_grants WHERE role_id = ?", role.id);
     role.grants.forEach((grant, grantPosition) => {
       run(
@@ -903,16 +974,21 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     (g) => g.role_id,
   );
   const roles: Record<string, Role> = {};
-  for (const r of all<{ id: string; name: string; description: string; supervises: number }>(
+  const rolePermissions = groupBy(
+    all<{ role_id: string; permission: Permission }>(db, "SELECT role_id, permission FROM role_permissions"),
+    (r) => r.role_id,
+  );
+  for (const r of all<{ id: string; name: string; description: string }>(
     db,
-    "SELECT id, name, description, supervises FROM roles WHERE office_id = ? ORDER BY position",
+    "SELECT id, name, description FROM roles WHERE office_id = ? ORDER BY position",
     officeRow.id,
   )) {
+    const held = (rolePermissions.get(r.id) ?? []).map((p) => p.permission);
     roles[r.id] = {
       id: r.id,
       name: r.name,
       description: r.description,
-      supervises: r.supervises === 1,
+      permissions: PERMISSIONS.filter((p) => held.includes(p)),
       grants: (grantsByRole.get(r.id) ?? []).map((g) => ({
         room: roomOrAny(g.room_id),
         scopes: inScopeOrder((grantScopes.get(`${g.role_id}:${g.position}`) ?? []).map((s) => s.scope)),
@@ -929,12 +1005,108 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     ),
     (c) => c.participant_id,
   );
-  const backings = new Map(
-    all<{ participant_id: string; provider: string; model: string }>(
+  const settings = new Map(
+    all<{
+      participant_id: string;
+      agent_type: AgentType;
+      provider_id: string | null;
+      model: string | null;
+      provider_name: string | null;
+      default_model: string | null;
+      has_key: number;
+    }>(
       db,
-      "SELECT * FROM agent_backings",
-    ).map((b) => [b.participant_id, { provider: b.provider, model: b.model }]),
+      `SELECT a.participant_id, a.agent_type, a.provider_id, a.model,
+              v.name AS provider_name, v.default_model, v.api_key_cipher IS NOT NULL AS has_key
+         FROM agent_settings a LEFT JOIN ai_providers v ON v.id = a.provider_id`,
+    ).map((a) => [a.participant_id, a]),
   );
+
+  // Playbooks, assembled from the step rows and their detail tables.
+  const byStep = <T extends { step_id: string }>(table: string): Map<string, T> =>
+    new Map(all<T>(db, `SELECT * FROM ${table}`).map((row) => [row.step_id, row]));
+  const stepOutputs = byStep<{ step_id: string; label: string; body: string }>("playbook_outputs");
+  const stepQuestions = byStep<{
+    step_id: string;
+    body: string;
+    to_participant_id: string | null;
+    blocking: number;
+  }>("playbook_questions");
+  const stepOptions = groupBy(
+    all<{ step_id: string; label: string }>(
+      db,
+      "SELECT step_id, label FROM playbook_question_options ORDER BY step_id, position",
+    ),
+    (o) => o.step_id,
+  );
+  const stepAssumptions = byStep<{
+    step_id: string;
+    assumed: string;
+    because: string;
+    confidence: "low" | "medium" | "high";
+  }>("playbook_assumptions");
+  const stepNeeds = byStep<{ step_id: string; room_id: string; scope: AccessScope; purpose: string }>(
+    "playbook_needs",
+  );
+  const playbooks = groupBy(
+    all<{
+      id: string;
+      participant_id: string;
+      stage: PlaybookStep["when"]["stage"] | null;
+      request_contains: string;
+      requested_by: string | null;
+      status_note: string;
+    }>(db, "SELECT * FROM playbook_steps ORDER BY participant_id, position"),
+    (row) => row.participant_id,
+  );
+  const playbookOf = (participantId: string): PlaybookStep[] =>
+    (playbooks.get(participantId) ?? []).map((row) => {
+      const output = stepOutputs.get(row.id);
+      const question = stepQuestions.get(row.id);
+      const assumption = stepAssumptions.get(row.id);
+      const need = stepNeeds.get(row.id);
+      return {
+        id: row.id,
+        when: {
+          stage: row.stage ?? "any",
+          requestContains: row.request_contains,
+          requestedBy: row.requested_by ?? "anyone",
+        },
+        then: {
+          statusNote: row.status_note,
+          output: output ? { label: output.label, body: output.body } : null,
+          question: question
+            ? {
+                body: question.body,
+                to: question.to_participant_id ?? "requester",
+                blocking: question.blocking === 1,
+                options: (stepOptions.get(row.id) ?? []).map((o) => o.label),
+              }
+            : null,
+          assumption: assumption
+            ? { assumed: assumption.assumed, because: assumption.because, confidence: assumption.confidence }
+            : null,
+          need: need ? { room: need.room_id, scope: need.scope, purpose: need.purpose } : null,
+        },
+      };
+    });
+  // An AI agent is "backed" only while its provider exists and holds a key.
+  const agentFields = (
+    id: string,
+    kind: Participant["kind"],
+  ): Pick<Participant, "backing" | "agentType" | "providerId" | "model"> => {
+    if (kind !== "agent") return { backing: null, agentType: null, providerId: null, model: null };
+    const a = settings.get(id);
+    const agentType: AgentType = a?.agent_type ?? "playbook";
+    const live = agentType === "ai" && a?.provider_name && a.has_key === 1;
+    return {
+      backing: live ? { provider: a.provider_name!, model: a.model ?? a.default_model! } : null,
+      agentType,
+      providerId: agentType === "ai" ? (a?.provider_id ?? null) : null,
+      model: agentType === "ai" ? (a?.model ?? null) : null,
+    };
+  };
+
   const participants: Participant[] = all<{
     id: string;
     kind: Participant["kind"];
@@ -951,7 +1123,8 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     roleId: p.role_id,
     deskId: p.desk_id,
     capabilities: (capabilities.get(p.id) ?? []).map((c) => c.capability),
-    backing: backings.get(p.id) ?? null,
+    ...agentFields(p.id, p.kind),
+    playbook: playbookOf(p.id),
     appearance: { color: p.color },
   }));
 

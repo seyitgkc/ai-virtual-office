@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   expect("one room", view.office.floorplan.rooms.length, 1);
   expect("one person, the administrator", view.office.participants.map((p) => p.displayName).join(), "Alex Kim");
   expect("nothing from the demo leaked in", JSON.stringify(view).includes("Dana Reyes") || JSON.stringify(view).includes("Northline"), false);
-  expect("it supervises its own office", view.viewer.supervises, true);
+  expect("it holds every permission in its own office", view.viewer.permissions.length, 10);
 
   console.log("\n-- demo access is limited --");
   const dana = await sessionFor(demoPeople.find((u) => u.participantId === "p-dana")!.email, "p-dana");
@@ -76,7 +76,8 @@ async function main(): Promise<void> {
   expect("a demo sign-in sees only the demo office", demoView.offices.length, 1);
   expect("demo access cannot add an office", await refusal(async () => service.createOffice(await dana.read(), "Sneaky")), 403);
   expect("nor remove the demo office", await refusal(async () => service.removeOffice(await dana.read(), service.DEMO_OFFICE_ID)), 403);
-  expect("nor store an API key in it", await refusal(async () => service.saveAiSettings(await dana.read(), { runtime: "scripted", model: "claude-opus-5-5", apiKey: "sk-test-not-a-real-key-000000000000" })), 403);
+  expect("nor store an API key in it", await refusal(async () => service.saveProviderSettings(await dana.read(), { name: "Sneaky", kind: "anthropic", defaultModel: "claude-opus-5-5", apiKey: "sk-test-not-a-real-key-000000000000" })), 403);
+  expect("the demo agents are playbook agents with steps", demoView.office.participants.filter((p) => p.kind === "agent").every((p) => p.agentType === "playbook" && p.playbook.length > 0), true);
 
   console.log("\n-- several offices on one account --");
   const second = await service.createOffice(await owner.read(), "Second branch");
@@ -87,8 +88,20 @@ async function main(): Promise<void> {
   expect("an office needs a name", await refusal(async () => service.createOffice(await owner.read(), " ")), 400);
 
   const mainRoom = view.office.floorplan.rooms[0].id;
-  const memberRole = Object.values(view.office.roles).find((r) => !r.supervises)!.id;
-  view = await service.applyAdminOperation(await owner.read(), { type: "ADD_AGENT", displayName: "Nova", title: "Assistant", roleId: memberRole, roomId: mainRoom, capabilities: [] });
+  const memberRole = Object.values(view.office.roles).find((r) => r.permissions.length === 0)!.id;
+  view = await service.applyAdminOperation(await owner.read(), { type: "ADD_AGENT", displayName: "Nova", title: "Assistant", roleId: memberRole, roomId: mainRoom, capabilities: [], agentType: "playbook" });
+  const nova = view.office.participants.find((p) => p.displayName === "Nova")!.id;
+  view = await service.applyAdminOperation(await owner.read(), {
+    type: "SET_PLAYBOOK",
+    participantId: nova,
+    steps: [
+      {
+        id: "",
+        when: { stage: "intake", requestContains: "", requestedBy: "anyone" },
+        then: { statusNote: "Logged by Nova", output: null, question: null, assumption: null, need: null },
+      },
+    ],
+  });
   view = await service.applyAction(await owner.read(), { type: "SUBMIT_REQUEST", title: "First job", detail: "Do the thing.", requestedById: "" });
   const task = view.office.tasks[0];
   expect("work in the new office gets ids of its own", /^T-[a-z0-9]{4}-1$/.test(task.id), true);
@@ -99,30 +112,85 @@ async function main(): Promise<void> {
   expect(
     "an action naming another office's task does nothing there",
     await refusal(async () => service.applyAction(await owner.read(), { type: "ADVANCE", taskId: "T-1001" })),
-    409,
+    403,
   );
   expect("the demo task did not move", service.getView(await dana.read()).office.tasks[0].stage, "execution");
   expect("switching to an office you have no seat in is refused", await refusal(async () => service.switchOffice(await owner.read(), service.DEMO_OFFICE_ID)), 404);
 
-  console.log("\n-- AI provider settings --");
+  console.log("\n-- AI providers --");
   service.switchOffice(await owner.read(), second.officeId);
   const fakeKey = `sk-ant-test-${randomBytes(24).toString("hex")}`;
-  expect("a live model needs a key first", await refusal(async () => service.saveAiSettings(await owner.read(), { runtime: "model", model: "claude-opus-5-5" })), 400);
-  expect("a malformed model id is refused", await refusal(async () => service.saveAiSettings(await owner.read(), { runtime: "scripted", model: "gpt please" })), 400);
-  view = await service.saveAiSettings(await owner.read(), { runtime: "model", model: "claude-sonnet-5-5", apiKey: fakeKey });
-  expect("the office now runs on a model", view.runtime, "model");
-  expect("the view says a key is stored", view.ai?.hasKey, true);
-  expect("and shows only its last four characters", view.ai?.keyHint, fakeKey.slice(-4));
-  expect("the key is nowhere in what the browser receives", JSON.stringify(view).includes(fakeKey), false);
-  expect("nor in the audit log", JSON.stringify(all(db, "SELECT note FROM audit_notes")).includes(fakeKey), false);
-  expect("nor readable in the database file", readFileSync(databaseFile).includes(fakeKey) || readFileSync(`${databaseFile}-wal`).includes(fakeKey), false);
-  expect("agents are labelled with the model", view.office.participants.find((p) => p.kind === "agent")?.backing?.model, "claude-sonnet-5-5");
-  expect("the other office still follows the script", count("SELECT COUNT(*) AS n FROM office_ai"), 1);
-  view = await service.saveAiSettings(await owner.read(), { runtime: "scripted", model: "claude-sonnet-5-5" });
-  expect("switching back to the script keeps the key", `${view.runtime}/${view.ai?.hasKey}`, "scripted/true");
-  expect("and unlabels the agents", view.office.participants.find((p) => p.kind === "agent")?.backing, null);
-  view = await service.saveAiSettings(await owner.read(), { runtime: "scripted", model: "claude-sonnet-5-5", removeKey: true });
-  expect("the key can be removed", view.ai?.hasKey, false);
+  const otherKey = `sk-test-${randomBytes(24).toString("hex")}`;
+  const anthropic = { name: "Claude", kind: "anthropic" as const, defaultModel: "claude-sonnet-5-5" };
+  expect("an Anthropic provider needs a key", await refusal(async () => service.saveProviderSettings(await owner.read(), anthropic)), 400);
+  expect("a malformed model id is refused", await refusal(async () => service.saveProviderSettings(await owner.read(), { ...anthropic, defaultModel: "gpt please", apiKey: fakeKey })), 400);
+  expect("an OpenAI compatible provider needs an address", await refusal(async () => service.saveProviderSettings(await owner.read(), { name: "Local", kind: "openai_compatible", defaultModel: "llama3" })), 400);
+  expect("which must be a web address", await refusal(async () => service.saveProviderSettings(await owner.read(), { name: "Local", kind: "openai_compatible", baseUrl: "file:///etc/passwd", defaultModel: "llama3" })), 400);
+  expect("and not a machine's metadata service", await refusal(async () => service.saveProviderSettings(await owner.read(), { name: "Local", kind: "openai_compatible", baseUrl: "http://169.254.169.254/latest", defaultModel: "llama3" })), 400);
+  view = await service.saveProviderSettings(await owner.read(), { ...anthropic, apiKey: fakeKey });
+  view = await service.saveProviderSettings(await owner.read(), { name: "Gateway", kind: "openai_compatible", baseUrl: "https://llm.example.test/v1/", defaultModel: "gpt-4.1-mini", apiKey: otherKey });
+  view = await service.saveProviderSettings(await owner.read(), { name: "Local", kind: "openai_compatible", baseUrl: "http://127.0.0.1:1/v1", defaultModel: "llama3" });
+  expect("an office can hold several providers", view.providers.map((p) => p.name).join(), "Claude,Gateway,Local");
+  const [claude, gateway, local] = view.providers;
+  expect("of both kinds", `${claude.kind}/${gateway.kind}`, "anthropic/openai_compatible");
+  expect("the address is stored without a trailing slash", gateway.baseUrl, "https://llm.example.test/v1");
+  expect("the view says a key is stored", claude.hasKey, true);
+  expect("and shows only its last four characters", claude.keyHint, fakeKey.slice(-4));
+  expect("a compatible provider may have no key and still be usable", `${local.hasKey}/${local.usable}`, "false/true");
+  const everything = () => JSON.stringify(view) + JSON.stringify(all(db, "SELECT note FROM audit_notes"));
+  expect("no key is in what the browser receives or in the audit log", everything().includes(fakeKey) || everything().includes(otherKey), false);
+  const onDisk = () => Buffer.concat([readFileSync(databaseFile), readFileSync(`${databaseFile}-wal`)]);
+  expect("nor readable in the database file", onDisk().includes(fakeKey) || onDisk().includes(otherKey), false);
+  expect("providers belong to one office", count("SELECT COUNT(DISTINCT office_id) AS n FROM ai_providers"), 1);
+
+  view = await service.applyAdminOperation(await owner.read(), { type: "ADD_AGENT", displayName: "Echo", title: "Analyst", roleId: memberRole, roomId: mainRoom, capabilities: [], agentType: "ai", providerId: gateway.id, model: "gpt-4.1" });
+  const echo = () => view.office.participants.find((p) => p.displayName === "Echo")!;
+  expect("an AI agent names its provider", echo().providerId, gateway.id);
+  expect("and is labelled with the model it will use", `${echo().backing?.provider} ${echo().backing?.model}`, "Gateway gpt-4.1");
+  expect("a playbook agent is not labelled with a model", view.office.participants.find((p) => p.displayName === "Nova")!.backing, null);
+  expect("an agent cannot name a provider the office does not have", await refusal(async () => service.applyAdminOperation(await owner.read(), { type: "UPDATE_PARTICIPANT", participantId: echo().id, providerId: "prov-nope" })), 409);
+  view = await service.applyAdminOperation(await owner.read(), { type: "UPDATE_PARTICIPANT", participantId: echo().id, providerId: claude.id, model: null });
+  expect("the provider can be changed, and the model falls back to its default", `${echo().backing?.provider} ${echo().backing?.model}`, "Claude claude-sonnet-5-5");
+  view = await service.saveProviderSettings(await owner.read(), { ...anthropic, id: claude.id, defaultModel: "claude-opus-5-5" });
+  expect("changing a provider keeps its key", view.providers[0].hasKey, true);
+  expect("and its agents follow the new default model", echo().backing?.model, "claude-opus-5-5");
+  view = await service.saveProviderSettings(await owner.read(), { ...anthropic, id: claude.id, removeKey: true });
+  expect("the key can be removed", `${view.providers[0].hasKey}/${view.providers[0].usable}`, "false/false");
+  expect("which leaves its agents without a working model", echo().backing, null);
+  expect("testing a provider with no key is refused", await refusal(async () => service.testProviderSettings(await owner.read(), claude.id)), 400);
+  expect("testing one that cannot be reached reports a provider problem", await refusal(async () => service.testProviderSettings(await owner.read(), local.id)), 502);
+  view = await service.removeProviderSettings(await owner.read(), claude.id);
+  expect("a provider can be removed", view.providers.length, 2);
+  expect("its agents are left with none", echo().providerId, null);
+  view = await service.applyAction(await owner.read(), { type: "SUBMIT_REQUEST", title: "Second job", detail: "Another thing.", requestedById: "" });
+  expect("a playbook agent still does its work", view.office.messages.some((m) => m.body.includes("Logged by Nova")), true);
+
+  console.log("\n-- permissions decide what a person may change --");
+  view = await service.applyAdminOperation(await owner.read(), { type: "ADD_ROLE", name: "Office manager", description: "" });
+  const managerRole = Object.values(view.office.roles).find((r) => r.name === "Office manager")!.id;
+  view = await service.applyAdminOperation(await owner.read(), { type: "SET_ROLE_PERMISSION", roleId: managerRole, permission: "manage_rooms", allowed: true });
+  const invites = await import("../lib/server/invites");
+  const invite = invites.createInvite(await owner.read(), { displayName: "Robin Park", title: "Manager", roleId: managerRole, roomId: mainRoom });
+  const robinPassword = randomBytes(18).toString("base64url");
+  await invites.acceptInvite(invite.path.split("/").pop()!, "robin@example.test", robinPassword);
+  const robinSeat = auth.seatsOf(db, auth.userByEmail(db, "robin@example.test")!.id)[0];
+  expect("an invited person's seat carries the role's permissions", robinSeat.permissions.join(), "manage_rooms");
+  const robin = await sessionFor("robin@example.test", robinSeat.participantId);
+  let robinView = await service.applyAdminOperation(await robin.read(), { type: "ADD_ROOM", name: "Annex", purpose: "", width: 6, depth: 6, attachTo: mainRoom, side: "east" });
+  expect("with manage rooms, a room can be added", robinView.office.floorplan.rooms.length, 2);
+  expect("but not a role", await refusal(async () => service.applyAdminOperation(await robin.read(), { type: "ADD_ROLE", name: "Shadow", description: "" })), 403);
+  expect("nor an agent", await refusal(async () => service.applyAdminOperation(await robin.read(), { type: "ADD_AGENT", displayName: "Mole", title: "Agent", roleId: memberRole, roomId: mainRoom, capabilities: [], agentType: "playbook" })), 403);
+  expect("nor a provider", await refusal(async () => service.saveProviderSettings(await robin.read(), { ...anthropic, apiKey: fakeKey })), 403);
+  expect("nor an invite", await refusal(async () => invites.createInvite(await robin.read(), { displayName: "Friend", title: "Guest", roleId: memberRole, roomId: mainRoom })), 403);
+  expect("nor the office's removal", await refusal(async () => service.removeOffice(await robin.read(), second.officeId)), 403);
+  expect("the provider list is not sent to them", robinView.providers.length, 0);
+  expect("their view lists what they may do", robinView.viewer.permissions.join(), "manage_rooms");
+  view = await service.applyAdminOperation(await owner.read(), { type: "SET_ROLE_PERMISSION", roleId: managerRole, permission: "invite_people", allowed: true });
+  expect("with invite people, an invite into a plain role works", invites.createInvite(await robin.read(), { displayName: "Friend", title: "Guest", roleId: memberRole, roomId: mainRoom }).path.startsWith("/invite/"), true);
+  const adminRole = view.office.roles[view.office.participants[0].roleId].id;
+  expect("but not into a role that holds more than the inviter", await refusal(async () => invites.createInvite(await robin.read(), { displayName: "Boss", title: "Chief", roleId: adminRole, roomId: mainRoom })), 403);
+  robinView = service.getView(await robin.read());
+  expect("someone who invites can see the office's sign-in accounts", robinView.accounts.length > 0, true);
 
   console.log("\n-- removing offices --");
   const participantsBefore = count("SELECT COUNT(*) AS n FROM participants WHERE office_id = ?", second.officeId);

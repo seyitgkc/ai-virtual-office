@@ -5,7 +5,8 @@
  */
 import { ALL_SCOPES, type AccessScope } from "../lib/model";
 import { applyAdminOp, type AdminOp } from "../lib/admin";
-import { reduce, ScriptedRuntime, type Action, type EngineState } from "../lib/engine";
+import { reduce, type Action, type EngineState } from "../lib/engine";
+import { PlaybookRuntime } from "../lib/playbook";
 import { initialState } from "../lib/initialState";
 import { all, openDatabase, transaction } from "../lib/server/db";
 import { loadEngineState, saveEngineState, seedDatabase } from "../lib/server/officeStore";
@@ -38,7 +39,7 @@ function firstDifference(a: string, b: string): string {
 
 async function main(): Promise<void> {
   const db = openDatabase(":memory:");
-  const runtime = new ScriptedRuntime();
+  const runtime = new PlaybookRuntime();
 
   console.log("\n-- seed round trip --");
   seedDatabase(db, initialState);
@@ -126,14 +127,49 @@ async function main(): Promise<void> {
   const warehouse = () => state.office.floorplan.rooms.find((r) => r.name === "Warehouse")!.id;
   admin("rename a room", { type: "UPDATE_ROOM", roomId: warehouse(), name: "Warehouse", purpose: "Stock held on site" });
   admin("move a stage to it", { type: "SET_STAGE_ROOM", stage: "execution", roomId: warehouse() });
-  admin("add a role", { type: "ADD_ROLE", name: "Warehouse staff", description: "Works the stock", supervises: false });
+  admin("add a role", { type: "ADD_ROLE", name: "Warehouse staff", description: "Works the stock" });
   const staffRole = () => Object.values(state.office.roles).find((r) => r.name === "Warehouse staff")!.id;
   admin("give the role access", { type: "SET_ROLE_GRANT", roleId: staffRole(), room: warehouse(), scope: "act", effect: "allow" });
   admin("and a deny elsewhere", { type: "SET_ROLE_GRANT", roleId: staffRole(), room: "finance", scope: "read", effect: "deny" });
   admin("clear one cell", { type: "SET_ROLE_GRANT", roleId: "intake", room: "planning", scope: "read", effect: "none" });
-  admin("add an agent", { type: "ADD_AGENT", displayName: "Scout", title: "Stock Agent", roleId: staffRole(), roomId: warehouse(), capabilities: ["Count stock", "Flag shortages"] });
+  admin("add an agent", { type: "ADD_AGENT", displayName: "Scout", title: "Stock Agent", roleId: staffRole(), roomId: warehouse(), capabilities: ["Count stock", "Flag shortages"], agentType: "playbook" });
   const scout = () => state.office.participants.find((p) => p.displayName === "Scout")!.id;
   admin("move the agent to another room", { type: "UPDATE_PARTICIPANT", participantId: scout(), roomId: "planning", title: "Planning Aide" });
+  admin("give the agent a playbook", {
+    type: "SET_PLAYBOOK",
+    participantId: scout(),
+    steps: [
+      {
+        id: "",
+        when: { stage: "execution", requestContains: "stock", requestedBy: "p-dana" },
+        then: {
+          statusNote: "Stock counted",
+          output: { label: "Count", body: "Twelve on the shelf." },
+          question: { body: "Which shelf?", to: "requester", blocking: true, options: ["A", "B"] },
+          assumption: { assumed: "Counts are current", because: "Counted this morning", confidence: "high" },
+          need: { room: "finance", scope: "read", purpose: "Unit cost" },
+        },
+      },
+      {
+        id: "",
+        when: { stage: "any", requestContains: "", requestedBy: "anyone" },
+        then: { statusNote: "Nothing to count", output: null, question: null, assumption: null, need: null },
+      },
+    ],
+  });
+  admin("reorder and trim the playbook", {
+    type: "SET_PLAYBOOK",
+    participantId: scout(),
+    steps: [...state.office.participants.find((p) => p.id === scout())!.playbook].reverse().slice(0, 1),
+  });
+  admin("switch the agent to an AI agent", { type: "UPDATE_PARTICIPANT", participantId: scout(), agentType: "ai", model: "some-model" });
+  admin("and back to a playbook agent", { type: "UPDATE_PARTICIPANT", participantId: scout(), agentType: "playbook" });
+  admin("add a role for people", { type: "ADD_ROLE", name: "Reviewer", description: "Signs off work" });
+  const reviewer = () => Object.values(state.office.roles).find((r) => r.name === "Reviewer")!.id;
+  admin("give it a permission", { type: "SET_ROLE_PERMISSION", roleId: reviewer(), permission: "decide_reviews", allowed: true });
+  admin("and a second", { type: "SET_ROLE_PERMISSION", roleId: reviewer(), permission: "see_everything", allowed: true });
+  admin("take the first away", { type: "SET_ROLE_PERMISSION", roleId: reviewer(), permission: "decide_reviews", allowed: false });
+  admin("remove that role", { type: "REMOVE_ROLE", roleId: reviewer() });
   admin("move the stage back", { type: "SET_STAGE_ROOM", stage: "execution", roomId: "fulfilment" });
   admin("remove the agent", { type: "REMOVE_PARTICIPANT", participantId: scout() });
   admin("remove the role", { type: "REMOVE_ROLE", roleId: staffRole() });

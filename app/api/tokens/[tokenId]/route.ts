@@ -1,12 +1,12 @@
 import { listAccessTokens, officeOfToken, revokeAccessToken, signAccessToken } from "@/lib/server/accessTokens";
 import { readJson, withSession } from "@/lib/server/http";
-import { supervises } from "@/lib/policy";
+import { may } from "@/lib/model";
 import { getView, OfficeError, officeDatabase, recordAudit } from "@/lib/server/officeService";
 import { loadEngineState } from "@/lib/server/officeStore";
 
 /**
  * Reveal or revoke one permission token of the office you are in.
- * A supervisor may do both. A token's own holder may reveal it.
+ * Someone who manages access may do both. A token's own holder may reveal it.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ tokenId: string }> }) {
   const { tokenId } = await params;
@@ -20,17 +20,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     const token = listAccessTokens(db, officeId).find((t) => t.id === tokenId);
     const viewer = state?.office.participants.find((p) => p.id === session.participantId);
     if (!state || !token || !viewer) throw new OfficeError(404, "No such token.");
-    const isSupervisor = supervises(state.office, viewer);
+    const managesAccess = may(state.office, viewer, "manage_access");
 
     if (operation === "reveal") {
-      if (!isSupervisor && token.participantId !== viewer.id) {
+      if (!managesAccess && token.participantId !== viewer.id) {
         throw new OfficeError(403, "You can only reveal your own tokens.");
       }
       return { token: await signAccessToken(db, tokenId) };
     }
 
     if (operation === "revoke") {
-      if (!isSupervisor) throw new OfficeError(403, "Only a supervising role can revoke a token.");
+      if (!managesAccess) throw new OfficeError(403, "Your role does not have the permission to manage access.");
       if (!revokeAccessToken(db, tokenId)) throw new OfficeError(409, "That token is already revoked.");
       const holder = state.office.participants.find((p) => p.id === token.participantId);
       const room = state.office.floorplan.rooms.find((r) => r.id === token.roomId)?.name ?? "every room";

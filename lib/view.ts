@@ -1,4 +1,4 @@
-import type { AccessScope, Office, TaskId } from "./model";
+import type { AccessScope, Office, Permission, TaskId } from "./model";
 
 export interface FeedEntry {
   id: number;
@@ -23,18 +23,23 @@ export interface TokenView {
   problem: string | null;
 }
 
-/** How an office's agents think. The API key itself is never included. */
-export interface AiView {
-  runtime: "scripted" | "model";
-  provider: "anthropic";
-  model: string;
+export type ProviderKind = "anthropic" | "openai_compatible";
+
+/** One of an office's AI providers. The API key itself is never included. */
+export interface ProviderView {
+  id: string;
+  name: string;
+  kind: ProviderKind;
+  /** The service address, for OpenAI-compatible providers. */
+  baseUrl: string | null;
+  defaultModel: string;
   hasKey: boolean;
   /** The last characters of the stored key, to recognise it by. */
   keyHint: string | null;
   /** A key is stored but can no longer be decrypted, so it must be re-entered. */
   keyUnreadable: boolean;
-  /** Whether this viewer may change these settings. */
-  editable: boolean;
+  /** Whether an agent can use this provider as it stands. */
+  usable: boolean;
 }
 
 /** Everything the browser receives: the office as this viewer may see it. */
@@ -46,22 +51,23 @@ export interface OfficeView {
     displayName: string;
     title: string;
     email: string;
-    supervises: boolean;
+    /** What this person's role lets them do beyond working in rooms. */
+    permissions: Permission[];
   };
   feed: FeedEntry[];
   /** Per task, how many messages this viewer is not allowed to read. */
   hiddenMessages: Record<TaskId, number>;
-  /** Whether agents answer from the fixed script or from a live model. */
-  runtime: "scripted" | "model";
-  /** AI provider settings. Null unless the viewer supervises. */
-  ai: AiView | null;
+  /** The office's AI providers, for people who manage agents or providers. */
+  providers: ProviderView[];
+  /** Whether this viewer may add or change providers here. */
+  providersEditable: boolean;
   /** The signed-in account, as distinct from the seat in this office. */
   account: { email: string; displayName: string; isDemo: boolean };
   /** Every office this account has a seat in. */
-  offices: { officeId: string; name: string; supervises: boolean; isDemo: boolean; active: boolean }[];
+  offices: { officeId: string; name: string; canRemove: boolean; isDemo: boolean; active: boolean }[];
   /** True in the shared demo office, where some settings are locked. */
   isDemoOffice: boolean;
   accessTokens: TokenView[];
-  /** Sign-in accounts. Empty unless the viewer supervises. */
+  /** Sign-in accounts. Empty unless the viewer manages people. */
   accounts: { participantId: string; email: string; hasPassword: boolean }[];
 }

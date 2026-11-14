@@ -7,12 +7,13 @@
  * the engine, then write the changes and an audit entry in one transaction.
  */
 import { randomUUID } from "node:crypto";
-import { AdminError, applyAdminOp, blankOffice, type AdminOp } from "../admin";
-import { reduce, ScriptedRuntime, type Action, type AgentRuntime, type EngineState } from "../engine";
+import { AdminError, applyAdminOp, blankOffice, permissionFor, type AdminOp } from "../admin";
+import { reduce, type Action, type AgentRuntime, type EngineState } from "../engine";
 import { initialState } from "../initialState";
-import type { Office, Participant } from "../model";
-import { authorize, contextOf, mayRead, stampActor, supervises, viewFor } from "../policy";
-import type { AiView, FeedEntry, OfficeView } from "../view";
+import { may, PERMISSION_INFO, type Office, type Participant, type Permission } from "../model";
+import { runPlaybook } from "../playbook";
+import { authorize, contextOf, mayRead, stampActor, viewFor } from "../policy";
+import type { FeedEntry, OfficeView } from "../view";
 import { listAccessTokens, syncAccessTokens, tokenProblem } from "./accessTokens";
 import {
   addMembership,
@@ -27,7 +28,6 @@ import {
   type User,
 } from "./auth";
 import { all, database, get, run, transaction, type Db } from "./db";
-import { DEFAULT_AGENT_MODEL, ModelRuntime, testProvider, validModelId } from "./modelRuntime";
 import {
   deleteOffice,
   freshIdScope,
@@ -37,7 +37,16 @@ import {
   writeParticipant,
   writeWholeOffice,
 } from "./officeStore";
-import { seal, unseal } from "./secrets";
+import {
+  ProviderError,
+  providerIds,
+  providerViews,
+  removeProvider,
+  runtimeForAgent,
+  saveProvider,
+  testStoredProvider,
+  type ProviderInput,
+} from "./providers";
 
 /** The seeded distributor. It exists only for password-free demo sign-in. */
 export const DEMO_OFFICE_ID = initialState.office.id;
@@ -130,6 +139,27 @@ function ensureAdminAccount(db: Db): void {
   if (seatsOf(db, user.id).length === 0) createBlankOfficeFor(db, user, "My office");
 }
 
+/**
+ * A demo office stored before agents had playbooks comes back with none. Give
+ * its agents the seeded ones, so the demo scenario still plays out.
+ */
+function restoreDemoPlaybooks(db: Db, office: Office): void {
+  const agents = office.participants.filter((p) => p.kind === "agent");
+  if (agents.some((p) => p.agentType === "ai" || p.playbook.length > 0)) return;
+  const rooms = new Set(office.floorplan.rooms.map((r) => r.id));
+  const people = new Set(office.participants.map((p) => p.id));
+  for (const agent of agents) {
+    const seeded = initialState.office.participants.find((p) => p.id === agent.id)?.playbook ?? [];
+    const playbook = seeded.filter(
+      (step) =>
+        (step.when.requestedBy === "anyone" || people.has(step.when.requestedBy)) &&
+        (!step.then.need || rooms.has(step.then.need.room)) &&
+        (!step.then.question || step.then.question.to === "requester" || people.has(step.then.question.to)),
+    );
+    if (playbook.length > 0) writeParticipant(db, office.id, { ...agent, agentType: "playbook", playbook });
+  }
+}
+
 /** Open the database and make sure the demo office and the administrator exist. */
 export function officeDatabase(): Db {
   const db = database();
@@ -138,7 +168,10 @@ export function officeDatabase(): Db {
     if (demoLoginEnabled() && !hasOffice(db, DEMO_OFFICE_ID)) writeWholeOffice(db, initialState);
     ensureAdminAccount(db);
     const demo = loadEngineState(db, DEMO_OFFICE_ID);
-    if (demo) ensureDemoAccounts(db, demo.office);
+    if (demo) {
+      ensureDemoAccounts(db, demo.office);
+      restoreDemoPlaybooks(db, demo.office);
+    }
     syncAccessTokens(db);
   });
   boot.__officeBooted = true;
@@ -146,39 +179,9 @@ export function officeDatabase(): Db {
 }
 
 // ---------------------------------------------------------------------------
-// AI provider settings
+// Agent runtimes
 // ---------------------------------------------------------------------------
 
-interface AiRow {
-  runtime: "scripted" | "model";
-  provider: string;
-  model: string;
-  api_key_cipher: string | null;
-  key_hint: string | null;
-  updated_at: number;
-}
-
-const aiRow = (db: Db, officeId: string): AiRow | undefined =>
-  get<AiRow>(db, "SELECT * FROM office_ai WHERE office_id = ?", officeId);
-
-function aiView(db: Db, officeId: string, session: Session): AiView {
-  const row = aiRow(db, officeId);
-  const key = unseal(row?.api_key_cipher ?? null);
-  return {
-    runtime: row?.runtime === "model" && key ? "model" : "scripted",
-    provider: "anthropic",
-    model: row?.model ?? DEFAULT_AGENT_MODEL,
-    hasKey: key !== null,
-    keyHint: key !== null ? (row?.key_hint ?? null) : null,
-    // A stored key that can no longer be read was encrypted under an older
-    // signing key and has to be entered again.
-    keyUnreadable: Boolean(row?.api_key_cipher) && key === null,
-    editable: session.hasPassword && !isDemoOffice(officeId),
-  };
-}
-
-const scripted = new ScriptedRuntime();
-const runtimes = new Map<string, { stamp: number; runtime: AgentRuntime }>();
 const overrides = globalThis as unknown as { __officeRuntime?: AgentRuntime };
 
 /** For tests: answer every agent step with this runtime, in every office. */
@@ -186,31 +189,18 @@ export function useAgentRuntime(runtime: AgentRuntime | undefined): void {
   overrides.__officeRuntime = runtime;
 }
 
-/** The runtime an office's agents use: its connected model, or the script. */
+/**
+ * How an office's agents answer. Each agent answers for itself: a playbook
+ * agent from its written steps, an AI agent through the provider it names.
+ */
 function runtimeFor(db: Db, officeId: string): AgentRuntime {
   if (overrides.__officeRuntime) return overrides.__officeRuntime;
-  const row = aiRow(db, officeId);
-  if (!row || row.runtime !== "model") return scripted;
-  const cached = runtimes.get(officeId);
-  if (cached && cached.stamp === row.updated_at) return cached.runtime;
-  const apiKey = unseal(row.api_key_cipher);
-  const runtime = apiKey ? new ModelRuntime({ apiKey, model: row.model }) : scripted;
-  runtimes.set(officeId, { stamp: row.updated_at, runtime });
-  return runtime;
-}
-
-/**
- * Keep each agent's stored backing in step with the runtime in use, so the
- * interface labels an agent as live only when a model really answers for it.
- */
-function recordAgentBacking(db: Db, office: Office): void {
-  const runtime = runtimeFor(db, office.id);
-  const wanted = runtime instanceof ModelRuntime ? { provider: "Anthropic", model: runtime.model } : null;
-  for (const p of office.participants) {
-    if (p.kind !== "agent") continue;
-    const same = wanted === null ? p.backing === null : p.backing?.model === wanted.model;
-    if (!same) writeParticipant(db, office.id, { ...p, backing: wanted });
-  }
+  return {
+    step: async (input) =>
+      input.participant.agentType === "ai"
+        ? runtimeForAgent(db, officeId, input.participant).step(input)
+        : runPlaybook(input),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -232,15 +222,21 @@ function viewerOf(office: Office, session: Session): Participant {
   return viewer;
 }
 
-function requireSupervisor(state: EngineState, session: Session, what: string): Participant {
+/** The signed-in person, provided their role carries this permission. */
+function requirePermission(state: EngineState, session: Session, permission: Permission): Participant {
   const actor = viewerOf(state.office, session);
-  if (!supervises(state.office, actor)) throw new OfficeError(403, `Only a supervising role can ${what}.`);
+  if (!may(state.office, actor, permission)) {
+    throw new OfficeError(
+      403,
+      `Your role does not have the "${PERMISSION_INFO[permission].label}" permission in this office.`,
+    );
+  }
   return actor;
 }
 
 function feedFor(db: Db, state: EngineState, viewer: Participant): FeedEntry[] {
   const ctx = contextOf(state.office, state.now);
-  const seesAll = supervises(state.office, viewer);
+  const seesAll = may(state.office, viewer, "see_everything");
   const rows = all<{
     audit_id: number;
     position: number;
@@ -272,8 +268,8 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
   const viewer = viewerOf(state.office, session);
   const ctx = contextOf(state.office, state.now);
   const { office, hiddenMessages } = viewFor(state.office, ctx, viewer);
-  const isSupervisor = supervises(state.office, viewer);
-  const ai = aiView(db, office.id, session);
+  const can = (permission: Permission): boolean => may(state.office, viewer, permission);
+  const permissions = state.office.roles[viewer.roleId]?.permissions ?? [];
 
   return {
     office,
@@ -283,26 +279,28 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
       displayName: viewer.displayName,
       title: viewer.title,
       email: session.email,
-      supervises: isSupervisor,
+      permissions,
     },
     account: { email: session.email, displayName: session.displayName, isDemo: !session.hasPassword },
     offices: seatsOf(db, session.userId).map((seat) => ({
       officeId: seat.officeId,
       name: seat.officeName,
-      supervises: seat.supervises,
+      canRemove: seat.permissions.includes("manage_office") && !isDemoOffice(seat.officeId),
       isDemo: isDemoOffice(seat.officeId),
       active: seat.officeId === office.id,
     })),
     isDemoOffice: isDemoOffice(office.id),
     feed: feedFor(db, state, viewer),
     hiddenMessages,
-    runtime: ai.runtime,
-    ai: isSupervisor ? ai : null,
-    // Token details are for supervisors and for the holder's own tokens.
+    // Keys never leave the server. The list is for people who connect
+    // providers or choose one for an agent.
+    providers: can("manage_providers") || can("manage_people") ? providerViews(db, office.id) : [],
+    providersEditable: can("manage_providers") && session.hasPassword && !isDemoOffice(office.id),
+    // Token details are for people who manage access and for the holder.
     accessTokens: listAccessTokens(db, office.id)
-      .filter((t) => isSupervisor || t.participantId === viewer.id)
+      .filter((t) => can("manage_access") || t.participantId === viewer.id)
       .map((t) => ({ ...t, problem: tokenProblem(t, state.office, ctx) })),
-    accounts: isSupervisor
+    accounts: can("manage_people") || can("invite_people")
       ? usersInOffice(db, office.id).map((u) => ({
           participantId: u.participantId,
           email: u.email,
@@ -473,9 +471,13 @@ function describeAdminOp(op: AdminOp, before: Office, after: Office, actor: Part
     case "CLEAR_WORK":
       return `${who} cleared all work: ${before.tasks.length} tasks and ${before.messages.length} messages`;
     case "ADD_AGENT":
-      return `${who} added the agent ${op.displayName.trim()} with a desk in ${quoted(after, op.roomId)}`;
+      return `${who} added the ${op.agentType === "ai" ? "AI" : "playbook"} agent ${op.displayName.trim()} with a desk in ${quoted(after, op.roomId)}`;
     case "UPDATE_PARTICIPANT":
       return `${who} updated ${quoted(after, op.participantId)}`;
+    case "SET_PLAYBOOK":
+      return `${who} changed the playbook of ${quoted(after, op.participantId)}: ${op.steps.length} step${op.steps.length === 1 ? "" : "s"}`;
+    case "SET_ROLE_PERMISSION":
+      return `${who} ${op.allowed ? "gave" : "took away"} the "${PERMISSION_INFO[op.permission].label}" permission ${op.allowed ? "to" : "from"} the role ${quoted(after, op.roleId)}`;
     case "REMOVE_PARTICIPANT":
       return `${who} removed ${quoted(before, op.participantId)} from the office`;
     case "ADD_ROLE":
@@ -500,16 +502,22 @@ function describeAdminOp(op: AdminOp, before: Office, after: Office, actor: Part
   }
 }
 
-/** Apply one change to how the office is set up, on behalf of a supervisor. */
+/** Apply one change to how the office is set up, if the person's role allows it. */
 export function applyAdminOperation(session: Session, op: AdminOp): Promise<OfficeView> {
   return inTurn(async () => {
     const db = officeDatabase();
     const before = loadOffice(db, session);
-    const actor = requireSupervisor(before, session, "change how the office is set up");
+    const actor = requirePermission(before, session, permissionFor(op));
 
     let office: Office;
     try {
-      office = applyAdminOp(before.office, op, actor.id, () => randomUUID().slice(0, 8));
+      office = applyAdminOp(
+        before.office,
+        op,
+        actor.id,
+        () => randomUUID().slice(0, 8),
+        providerIds(db, before.office.id),
+      );
     } catch (error) {
       if (error instanceof AdminError) throw new OfficeError(409, error.message);
       throw error;
@@ -521,7 +529,6 @@ export function applyAdminOperation(session: Session, op: AdminOp): Promise<Offi
         saveEngineState(db, before, after);
         if (isDemoOffice(after.office.id)) ensureDemoAccounts(db, after.office);
         syncAccessTokens(db);
-        recordAgentBacking(db, after.office);
         recordAudit(db, {
           officeId: after.office.id,
           officeClock: after.now,
@@ -544,81 +551,81 @@ export function applyAdminOperation(session: Session, op: AdminOp): Promise<Offi
   });
 }
 
+/** The person and office for a change to AI providers, or a refusal. */
+function providerEditor(db: Db, session: Session): { state: EngineState; actor: Participant } {
+  const state = loadOffice(db, session);
+  const actor = requirePermission(state, session, "manage_providers");
+  if (isDemoOffice(state.office.id)) {
+    throw new OfficeError(403, "The demo office is shared, so no API key can be stored in it.");
+  }
+  if (!session.hasPassword) throw new OfficeError(403, "Sign in with a password account to connect a provider.");
+  return { state, actor };
+}
+
 /**
- * Change how an office's agents think: scripted, or a model reached with the
- * given API key. The key is stored encrypted and is never returned.
+ * Add an AI provider to the office, or change one. The API key is stored
+ * encrypted and is never returned or written to the log.
  */
-export function saveAiSettings(
-  session: Session,
-  input: { runtime: "scripted" | "model"; model: string; apiKey?: string; removeKey?: boolean },
-): Promise<OfficeView> {
+export function saveProviderSettings(session: Session, input: ProviderInput): Promise<OfficeView> {
   return inTurn(async () => {
     const db = officeDatabase();
-    const state = loadOffice(db, session);
-    const actor = requireSupervisor(state, session, "change the AI provider");
-    const officeId = state.office.id;
-    if (isDemoOffice(officeId)) {
-      throw new OfficeError(403, "The demo office is shared, so no API key can be stored in it.");
-    }
-    if (!session.hasPassword) throw new OfficeError(403, "Sign in with a password account to connect a model.");
-
-    const model = input.model.trim();
-    if (!validModelId(model)) throw new OfficeError(400, "Enter a model id such as claude-opus-5-5.");
-    const existing = aiRow(db, officeId);
-    const typed = input.apiKey?.trim();
-    if (typed !== undefined && typed !== "" && (typed.length < 20 || typed.length > 300 || /\s/.test(typed))) {
-      throw new OfficeError(400, "That does not look like an API key.");
-    }
-    const cipher = input.removeKey ? null : typed ? seal(typed) : (existing?.api_key_cipher ?? null);
-    const hint = input.removeKey ? null : typed ? typed.slice(-4) : (existing?.key_hint ?? null);
-    if (input.runtime === "model" && unseal(cipher) === null) {
-      throw new OfficeError(400, "Enter an API key before switching the agents to a live model.");
-    }
-
-    transaction(db, () => {
-      run(
-        db,
-        `INSERT INTO office_ai (office_id, runtime, provider, model, api_key_cipher, key_hint, updated_at)
-         VALUES (?, ?, 'anthropic', ?, ?, ?, ?)
-         ON CONFLICT(office_id) DO UPDATE SET
-           runtime = excluded.runtime, model = excluded.model,
-           api_key_cipher = excluded.api_key_cipher, key_hint = excluded.key_hint,
-           updated_at = excluded.updated_at`,
-        officeId,
-        input.runtime,
-        model,
-        cipher,
-        hint,
-        Date.now(),
-      );
-      recordAgentBacking(db, state.office);
-      const what = input.runtime === "model" ? `a live model (${model})` : "the fixed script";
-      const keyNote = input.removeKey ? " and removed the stored API key" : typed ? " and stored a new API key" : "";
-      recordAudit(db, {
-        officeId,
-        officeClock: state.now,
-        actorId: actor.id,
-        actionType: "SET_AI_PROVIDER",
-        subject: NO_SUBJECT,
-        // The key itself is never written to the log.
-        notes: [`${actor.displayName} set the agents to ${what}${keyNote}`],
+    const { state, actor } = providerEditor(db, session);
+    try {
+      transaction(db, () => {
+        saveProvider(db, state.office.id, input);
+        const keyNote = input.removeKey ? " and removed its API key" : input.apiKey?.trim() ? " and stored its API key" : "";
+        recordAudit(db, {
+          officeId: state.office.id,
+          officeClock: state.now,
+          actorId: actor.id,
+          actionType: input.id ? "UPDATE_AI_PROVIDER" : "ADD_AI_PROVIDER",
+          subject: NO_SUBJECT,
+          notes: [
+            `${actor.displayName} ${input.id ? "changed" : "added"} the AI provider ${input.name.trim()} (${input.defaultModel.trim()})${keyNote}`,
+          ],
+        });
       });
-    });
+    } catch (error) {
+      if (error instanceof ProviderError) throw new OfficeError(400, error.message);
+      throw error;
+    }
     return buildView(db, loadOffice(db, session), session);
   });
 }
 
-/** Check the stored key and model against the provider. Nothing is generated. */
-export async function testAiSettings(session: Session): Promise<{ ok: true; model: string }> {
+/** Remove an AI provider. Agents that used it are left without one. */
+export function removeProviderSettings(session: Session, providerId: string): Promise<OfficeView> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    const { state, actor } = providerEditor(db, session);
+    try {
+      transaction(db, () => {
+        const name = removeProvider(db, state.office.id, providerId);
+        recordAudit(db, {
+          officeId: state.office.id,
+          officeClock: state.now,
+          actorId: actor.id,
+          actionType: "REMOVE_AI_PROVIDER",
+          subject: NO_SUBJECT,
+          notes: [`${actor.displayName} removed the AI provider ${name}`],
+        });
+      });
+    } catch (error) {
+      if (error instanceof ProviderError) throw new OfficeError(404, error.message);
+      throw error;
+    }
+    return buildView(db, loadOffice(db, session), session);
+  });
+}
+
+/** Check a stored provider with the service itself. Nothing is generated. */
+export async function testProviderSettings(session: Session, providerId: string): Promise<{ ok: true; model: string }> {
   const db = officeDatabase();
-  const state = loadOffice(db, session);
-  requireSupervisor(state, session, "test the AI provider");
-  const row = aiRow(db, state.office.id);
-  const apiKey = unseal(row?.api_key_cipher ?? null);
-  if (!row || !apiKey) throw new OfficeError(400, "No API key is stored for this office yet.");
+  providerEditor(db, session);
   try {
-    return { ok: true, model: await testProvider(apiKey, row.model) };
+    return { ok: true, model: await testStoredProvider(db, session.officeId ?? "", providerId) };
   } catch (error) {
+    if (error instanceof ProviderError) throw new OfficeError(400, error.message);
     throw new OfficeError(502, error instanceof Error ? error.message : "The connection test failed.");
   }
 }
@@ -674,8 +681,8 @@ export function switchOffice(session: Session, officeId: string): void {
 }
 
 /**
- * Delete an office and everything in it. Only someone who supervises it may,
- * and the shared demo office cannot be deleted at all.
+ * Delete an office and everything in it. The person's role there must allow
+ * it, and the shared demo office cannot be deleted at all.
  */
 export function removeOffice(session: Session, officeId: string): Promise<{ ok: true }> {
   return inTurn(async () => {
@@ -683,9 +690,10 @@ export function removeOffice(session: Session, officeId: string): Promise<{ ok: 
     if (isDemoOffice(officeId)) throw new OfficeError(403, "The demo office cannot be removed.");
     const seat = seatsOf(db, session.userId).find((s) => s.officeId === officeId);
     if (!seat) throw new OfficeError(404, "You have no seat in that office.");
-    if (!seat.supervises) throw new OfficeError(403, "Only someone who supervises an office can remove it.");
+    if (!seat.permissions.includes("manage_office")) {
+      throw new OfficeError(403, `Your role there does not have the "${PERMISSION_INFO.manage_office.label}" permission.`);
+    }
     transaction(db, () => deleteOffice(db, officeId));
-    runtimes.delete(officeId);
     return { ok: true };
   });
 }

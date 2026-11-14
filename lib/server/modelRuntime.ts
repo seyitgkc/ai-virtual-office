@@ -1,8 +1,8 @@
 /**
- * An agent runtime backed by a language model.
+ * An AI agent's runtime for Anthropic models.
  *
- * It implements the same `AgentRuntime` interface as the scripted runtime, so
- * the engine does not know which one it is talking to. What the model is shown
+ * It implements the same `AgentRuntime` interface a playbook agent answers
+ * through, so the engine does not know which one it is talking to. What the model is shown
  * is decided before the call, by the access model: the thread arrives already
  * limited to what this agent may read, and room records are included only for
  * rooms where the agent holds `read`.
@@ -76,7 +76,7 @@ export async function testProvider(apiKey: string, model: string): Promise<strin
   }
 }
 
-const StepSchema = z.object({
+export const StepSchema = z.object({
   statusNote: z.string(),
   questions: z.array(
     z.object({
@@ -103,9 +103,9 @@ const StepSchema = z.object({
   output: z.object({ label: z.string(), body: z.string() }).nullable(),
 });
 
-type RawStep = z.infer<typeof StepSchema>;
+export type RawStep = z.infer<typeof StepSchema>;
 
-const SYSTEM_PROMPT = `You are an AI agent with a desk, a role and limited access in the office of a multi-branch HVAC distributor. You work alongside people, and a person supervises the office.
+export const SYSTEM_PROMPT = `You are an AI agent with a desk, a role and limited access in the office of a multi-branch HVAC distributor. You work alongside people, and a person supervises the office.
 
 You take one step of one task and then hand back. Your name, title, capabilities and the step you are on are given in the message.
 
@@ -231,7 +231,6 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
 }
 
 export class ModelRuntime implements AgentRuntime {
-  readonly kind = "model" as const;
   readonly model: string;
   private readonly client: Anthropic;
 

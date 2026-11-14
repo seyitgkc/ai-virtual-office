@@ -12,6 +12,7 @@ import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { SignJWT, jwtVerify } from "jose";
+import type { Permission } from "../model";
 import { all, databasePath, get, run, type Db } from "./db";
 
 export const SESSION_COOKIE = "office_session";
@@ -166,18 +167,19 @@ export interface Seat {
   participantId: string;
   officeId: string;
   officeName: string;
-  supervises: boolean;
+  /** What the seat's role lets its holder do in that office. */
+  permissions: Permission[];
 }
 
 /** Every office this user has a seat in, oldest first. */
 export function seatsOf(db: Db, userId: string): Seat[] {
-  return all<{ participant_id: string; office_id: string; name: string; supervises: number }>(
+  return all<{ participant_id: string; office_id: string; name: string; permissions: string | null }>(
     db,
-    `SELECT m.participant_id, p.office_id, o.name, r.supervises
+    `SELECT m.participant_id, p.office_id, o.name,
+            (SELECT group_concat(rp.permission) FROM role_permissions rp WHERE rp.role_id = p.role_id) AS permissions
        FROM memberships m
        JOIN participants p ON p.id = m.participant_id
        JOIN offices o ON o.id = p.office_id
-       JOIN roles r ON r.id = p.role_id
       WHERE m.user_id = ?
       ORDER BY o.rowid`,
     userId,
@@ -185,7 +187,7 @@ export function seatsOf(db: Db, userId: string): Seat[] {
     participantId: r.participant_id,
     officeId: r.office_id,
     officeName: r.name,
-    supervises: r.supervises === 1,
+    permissions: (r.permissions?.split(",") ?? []) as Permission[],
   }));
 }
 

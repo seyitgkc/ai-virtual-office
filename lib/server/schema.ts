@@ -15,7 +15,7 @@
  *    and grants are evaluated in sequence and threads are read in sequence.
  */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const SCHEMA = /* sql */ `
 CREATE TABLE schema_meta (
@@ -37,13 +37,17 @@ CREATE TABLE offices (
 
 CREATE UNIQUE INDEX offices_by_scope ON offices(id_scope);
 
--- How an office's agents think. The API key is stored encrypted and is never
--- sent back to a browser; key_hint keeps its last characters for display.
-CREATE TABLE office_ai (
-  office_id      TEXT PRIMARY KEY REFERENCES offices(id) ON DELETE CASCADE,
-  runtime        TEXT NOT NULL CHECK (runtime IN ('scripted', 'model')),
-  provider       TEXT NOT NULL,
-  model          TEXT NOT NULL,
+-- The AI providers an office has connected. An office may have several. The
+-- API key is stored encrypted and is never sent back to a browser; key_hint
+-- keeps its last characters for display.
+CREATE TABLE ai_providers (
+  id             TEXT PRIMARY KEY,
+  office_id      TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  position       INTEGER NOT NULL,
+  name           TEXT NOT NULL,
+  kind           TEXT NOT NULL CHECK (kind IN ('anthropic', 'openai_compatible')),
+  base_url       TEXT,
+  default_model  TEXT NOT NULL,
   api_key_cipher TEXT,
   key_hint       TEXT,
   updated_at     INTEGER NOT NULL
@@ -103,8 +107,15 @@ CREATE TABLE roles (
   office_id   TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
   position    INTEGER NOT NULL,
   name        TEXT NOT NULL,
-  description TEXT NOT NULL,
-  supervises  INTEGER NOT NULL CHECK (supervises IN (0, 1))
+  description TEXT NOT NULL
+) STRICT;
+
+-- What a role may do beyond working in rooms. One row per permission held.
+CREATE TABLE role_permissions (
+  role_id    TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  permission TEXT NOT NULL CHECK (permission IN ('manage_access', 'reassign_work', 'decide_reviews', 'see_everything', 'invite_people',
+                 'manage_people', 'manage_rooms', 'manage_roles', 'manage_providers', 'manage_office')),
+  PRIMARY KEY (role_id, permission)
 ) STRICT;
 
 CREATE TABLE role_grants (
@@ -143,12 +154,65 @@ CREATE TABLE participant_capabilities (
   PRIMARY KEY (participant_id, position)
 ) STRICT;
 
--- An agent with no row here is simulated.
-CREATE TABLE agent_backings (
+-- How each agent decides what to do: by asking a model through one of the
+-- office's providers, or by following its playbook.
+CREATE TABLE agent_settings (
   participant_id TEXT PRIMARY KEY REFERENCES participants(id) ON DELETE CASCADE,
-  provider       TEXT NOT NULL,
-  model          TEXT NOT NULL
+  agent_type     TEXT NOT NULL CHECK (agent_type IN ('ai', 'playbook')),
+  provider_id    TEXT REFERENCES ai_providers(id) ON DELETE SET NULL,
+  model          TEXT
 ) STRICT;
+
+-- A playbook is an ordered list of when-then steps. The when part lives on
+-- the step. Each kind of then has its own table, present only when the step
+-- does that thing. A NULL stage means any stage. A NULL requested_by means
+-- anyone.
+CREATE TABLE playbook_steps (
+  id               TEXT PRIMARY KEY,
+  participant_id   TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  position         INTEGER NOT NULL,
+  stage            TEXT CHECK (stage IN ('intake', 'planning', 'execution', 'review')),
+  request_contains TEXT NOT NULL,
+  requested_by     TEXT REFERENCES participants(id) ON DELETE SET NULL,
+  status_note      TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE playbook_outputs (
+  step_id TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  label   TEXT NOT NULL,
+  body    TEXT NOT NULL
+) STRICT;
+
+-- A NULL to_participant_id addresses the question to whoever filed the request.
+CREATE TABLE playbook_questions (
+  step_id           TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  body              TEXT NOT NULL,
+  to_participant_id TEXT REFERENCES participants(id) ON DELETE SET NULL,
+  blocking          INTEGER NOT NULL CHECK (blocking IN (0, 1))
+) STRICT;
+
+CREATE TABLE playbook_question_options (
+  step_id  TEXT NOT NULL REFERENCES playbook_questions(step_id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  label    TEXT NOT NULL,
+  PRIMARY KEY (step_id, position)
+) STRICT;
+
+CREATE TABLE playbook_assumptions (
+  step_id    TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  assumed    TEXT NOT NULL,
+  because    TEXT NOT NULL,
+  confidence TEXT NOT NULL CHECK (confidence IN ('low', 'medium', 'high'))
+) STRICT;
+
+CREATE TABLE playbook_needs (
+  step_id TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  scope   TEXT NOT NULL CHECK (scope IN ('enter', 'read', 'act')),
+  purpose TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX playbook_by_agent ON playbook_steps(participant_id, position);
 
 -- ------------------------------------------------------------------ work
 CREATE TABLE tasks (
@@ -478,5 +542,136 @@ CREATE TABLE office_ai (
   key_hint       TEXT,
   updated_at     INTEGER NOT NULL
 ) STRICT;
+`,
+
+  // Version 4 made agents configurable. Roles trade the single supervising
+  // flag for a row per permission. An office gets a list of AI providers in
+  // place of one setting, each agent records whether it asks a model or
+  // follows a playbook, and playbooks get their own tables.
+  3: /* sql */ `
+CREATE TABLE roles_new (
+  id          TEXT PRIMARY KEY,
+  office_id   TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  position    INTEGER NOT NULL,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL
+) STRICT;
+INSERT INTO roles_new (id, office_id, position, name, description)
+SELECT id, office_id, position, name, description FROM roles;
+
+-- What a role may do beyond working in rooms. One row per permission held.
+CREATE TABLE role_permissions (
+  role_id    TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  permission TEXT NOT NULL CHECK (permission IN ('manage_access', 'reassign_work', 'decide_reviews', 'see_everything', 'invite_people',
+                 'manage_people', 'manage_rooms', 'manage_roles', 'manage_providers', 'manage_office')),
+  PRIMARY KEY (role_id, permission)
+) STRICT;
+
+INSERT INTO role_permissions (role_id, permission)
+SELECT r.id, p.permission
+  FROM roles r
+  JOIN (SELECT 'manage_access' AS permission UNION ALL SELECT 'reassign_work'
+        UNION ALL SELECT 'decide_reviews' UNION ALL SELECT 'see_everything'
+        UNION ALL SELECT 'invite_people' UNION ALL SELECT 'manage_people'
+        UNION ALL SELECT 'manage_rooms' UNION ALL SELECT 'manage_roles'
+        UNION ALL SELECT 'manage_providers' UNION ALL SELECT 'manage_office') p
+ WHERE r.supervises = 1;
+
+DROP TABLE roles;
+ALTER TABLE roles_new RENAME TO roles;
+
+-- The AI providers an office has connected. An office may have several. The
+-- API key is stored encrypted and is never sent back to a browser; key_hint
+-- keeps its last characters for display.
+CREATE TABLE ai_providers (
+  id             TEXT PRIMARY KEY,
+  office_id      TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  position       INTEGER NOT NULL,
+  name           TEXT NOT NULL,
+  kind           TEXT NOT NULL CHECK (kind IN ('anthropic', 'openai_compatible')),
+  base_url       TEXT,
+  default_model  TEXT NOT NULL,
+  api_key_cipher TEXT,
+  key_hint       TEXT,
+  updated_at     INTEGER NOT NULL
+) STRICT;
+
+INSERT INTO ai_providers
+  (id, office_id, position, name, kind, base_url, default_model, api_key_cipher, key_hint, updated_at)
+SELECT 'prov-' || office_id, office_id, 0, 'Anthropic', 'anthropic', NULL, model,
+       api_key_cipher, key_hint, updated_at
+  FROM office_ai
+ WHERE api_key_cipher IS NOT NULL;
+
+-- How each agent decides what to do: by asking a model through one of the
+-- office's providers, or by following its playbook.
+CREATE TABLE agent_settings (
+  participant_id TEXT PRIMARY KEY REFERENCES participants(id) ON DELETE CASCADE,
+  agent_type     TEXT NOT NULL CHECK (agent_type IN ('ai', 'playbook')),
+  provider_id    TEXT REFERENCES ai_providers(id) ON DELETE SET NULL,
+  model          TEXT
+) STRICT;
+
+-- A playbook is an ordered list of when-then steps. The when part lives on
+-- the step. Each kind of then has its own table, present only when the step
+-- does that thing. A NULL stage means any stage. A NULL requested_by means
+-- anyone.
+CREATE TABLE playbook_steps (
+  id               TEXT PRIMARY KEY,
+  participant_id   TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  position         INTEGER NOT NULL,
+  stage            TEXT CHECK (stage IN ('intake', 'planning', 'execution', 'review')),
+  request_contains TEXT NOT NULL,
+  requested_by     TEXT REFERENCES participants(id) ON DELETE SET NULL,
+  status_note      TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE playbook_outputs (
+  step_id TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  label   TEXT NOT NULL,
+  body    TEXT NOT NULL
+) STRICT;
+
+-- A NULL to_participant_id addresses the question to whoever filed the request.
+CREATE TABLE playbook_questions (
+  step_id           TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  body              TEXT NOT NULL,
+  to_participant_id TEXT REFERENCES participants(id) ON DELETE SET NULL,
+  blocking          INTEGER NOT NULL CHECK (blocking IN (0, 1))
+) STRICT;
+
+CREATE TABLE playbook_question_options (
+  step_id  TEXT NOT NULL REFERENCES playbook_questions(step_id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  label    TEXT NOT NULL,
+  PRIMARY KEY (step_id, position)
+) STRICT;
+
+CREATE TABLE playbook_assumptions (
+  step_id    TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  assumed    TEXT NOT NULL,
+  because    TEXT NOT NULL,
+  confidence TEXT NOT NULL CHECK (confidence IN ('low', 'medium', 'high'))
+) STRICT;
+
+CREATE TABLE playbook_needs (
+  step_id TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  scope   TEXT NOT NULL CHECK (scope IN ('enter', 'read', 'act')),
+  purpose TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX playbook_by_agent ON playbook_steps(participant_id, position);
+
+INSERT INTO agent_settings (participant_id, agent_type, provider_id, model)
+SELECT p.id,
+       CASE WHEN a.runtime = 'model' AND a.api_key_cipher IS NOT NULL THEN 'ai' ELSE 'playbook' END,
+       CASE WHEN a.runtime = 'model' AND a.api_key_cipher IS NOT NULL THEN 'prov-' || p.office_id END,
+       NULL
+  FROM participants p LEFT JOIN office_ai a ON a.office_id = p.office_id
+ WHERE p.kind = 'agent';
+
+DROP TABLE office_ai;
+DROP TABLE agent_backings;
 `,
 };
