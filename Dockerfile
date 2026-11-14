@@ -3,6 +3,8 @@
 # Stage 1: install, check and build.
 FROM node:26-alpine AS build
 WORKDIR /app
+# No usage data is sent to the framework's vendor, at build time or at run time.
+ENV NEXT_TELEMETRY_DISABLED=1
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
@@ -14,6 +16,7 @@ RUN npm run verify && npm run build
 FROM node:26-alpine
 WORKDIR /app
 ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
     PORT=8080 \
     HOSTNAME=0.0.0.0 \
     OFFICE_DB_PATH=/data/office.db
