@@ -7,6 +7,8 @@ access or information, so a supervisor can see where to step in and why.
 People sign in. What each person can see and do is decided on the server by
 the same access rules that govern the agents.
 
+**Live demo:** https://office.example.invalid
+
 ![The office at load: Fulfilment is outlined in red because a quote is waiting on access to Finance](docs/office.jpg)
 
 ## Contents
