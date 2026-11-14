@@ -90,64 +90,117 @@ export function useSigningKeyForTests(secret: string): void {
 export const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
 // ---------------------------------------------------------------------------
-// Users
+// Users and seats
 // ---------------------------------------------------------------------------
 
+/** A sign-in. It exists on its own and may hold a seat in several offices. */
 export interface User {
   id: string;
-  participantId: string;
   email: string;
+  displayName: string;
   hasPassword: boolean;
 }
 
 interface UserRow {
   id: string;
-  participant_id: string;
   email: string;
+  display_name: string;
   password_hash: string | null;
 }
 
 const toUser = (row: UserRow): User => ({
   id: row.id,
-  participantId: row.participant_id,
   email: row.email,
+  displayName: row.display_name,
   hasPassword: row.password_hash !== null,
 });
 
 export function createUser(
   db: Db,
-  input: { participantId: string; email: string; password: string | null },
+  input: { email: string; displayName: string; password: string | null },
 ): User {
   const id = `u-${randomUUID()}`;
+  const email = input.email.trim().toLowerCase();
   run(
     db,
-    "INSERT INTO users (id, participant_id, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO users (id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)",
     id,
-    input.participantId,
-    input.email.trim().toLowerCase(),
+    email,
     input.password === null ? null : hashPassword(input.password),
+    input.displayName,
     Date.now(),
   );
-  return { id, participantId: input.participantId, email: input.email, hasPassword: input.password !== null };
+  return { id, email, displayName: input.displayName, hasPassword: input.password !== null };
 }
 
-export function setCredentials(db: Db, userId: string, email: string, password: string): void {
-  run(
-    db,
-    "UPDATE users SET email = ?, password_hash = ? WHERE id = ?",
-    email.trim().toLowerCase(),
-    hashPassword(password),
-    userId,
-  );
+export function setPassword(db: Db, userId: string, password: string): void {
+  run(db, "UPDATE users SET password_hash = ? WHERE id = ?", hashPassword(password), userId);
 }
 
-export function userByParticipant(db: Db, participantId: string): User | null {
-  const row = get<UserRow>(db, "SELECT * FROM users WHERE participant_id = ?", participantId);
+export function userByEmail(db: Db, email: string): User | null {
+  const row = get<UserRow>(db, "SELECT * FROM users WHERE email = ?", email.trim().toLowerCase());
   return row ? toUser(row) : null;
 }
 
-export function listUsers(db: Db): User[] {
-  return all<UserRow>(db, "SELECT * FROM users ORDER BY created_at").map(toUser);
+export function userById(db: Db, id: string): User | null {
+  const row = get<UserRow>(db, "SELECT * FROM users WHERE id = ?", id);
+  return row ? toUser(row) : null;
+}
+
+/** The sign-in that holds this seat, if any. */
+export function userByParticipant(db: Db, participantId: string): User | null {
+  const row = get<UserRow>(
+    db,
+    "SELECT u.* FROM users u JOIN memberships m ON m.user_id = u.id WHERE m.participant_id = ?",
+    participantId,
+  );
+  return row ? toUser(row) : null;
+}
+
+/** Give a user the seat of one human participant. */
+export function addMembership(db: Db, userId: string, participantId: string): void {
+  run(db, "INSERT INTO memberships (participant_id, user_id) VALUES (?, ?)", participantId, userId);
+}
+
+export interface Seat {
+  participantId: string;
+  officeId: string;
+  officeName: string;
+  supervises: boolean;
+}
+
+/** Every office this user has a seat in, oldest first. */
+export function seatsOf(db: Db, userId: string): Seat[] {
+  return all<{ participant_id: string; office_id: string; name: string; supervises: number }>(
+    db,
+    `SELECT m.participant_id, p.office_id, o.name, r.supervises
+       FROM memberships m
+       JOIN participants p ON p.id = m.participant_id
+       JOIN offices o ON o.id = p.office_id
+       JOIN roles r ON r.id = p.role_id
+      WHERE m.user_id = ?
+      ORDER BY o.rowid`,
+    userId,
+  ).map((r) => ({
+    participantId: r.participant_id,
+    officeId: r.office_id,
+    officeName: r.name,
+    supervises: r.supervises === 1,
+  }));
+}
+
+/** Sign-ins that hold a seat in this office. */
+export function usersInOffice(db: Db, officeId: string): (User & { participantId: string })[] {
+  return all<UserRow & { participant_id: string }>(
+    db,
+    `SELECT u.*, m.participant_id
+       FROM users u
+       JOIN memberships m ON m.user_id = u.id
+       JOIN participants p ON p.id = m.participant_id
+      WHERE p.office_id = ?
+      ORDER BY u.created_at`,
+    officeId,
+  ).map((row) => ({ ...toUser(row), participantId: row.participant_id }));
 }
 
 /** Check an email and password. The same answer is given for every failure. */
@@ -173,25 +226,35 @@ function hashPasswordForTiming(): string {
 export interface Session {
   sessionId: string;
   userId: string;
-  participantId: string;
   email: string;
+  displayName: string;
+  /** False for a demo account, which has no password. */
+  hasPassword: boolean;
+  /** The seat this session is looking at, or null when the user has no office. */
+  participantId: string | null;
+  officeId: string | null;
   expiresAt: number;
 }
 
 /** Create a session row and return the signed token for the cookie. */
-export async function issueSession(db: Db, user: User): Promise<{ token: string; expiresAt: number }> {
+export async function issueSession(
+  db: Db,
+  user: User,
+  participantId: string | null,
+): Promise<{ token: string; expiresAt: number }> {
   const sessionId = randomUUID();
   const issuedAt = Date.now();
   const expiresAt = issuedAt + SESSION_HOURS * 3_600_000;
   run(
     db,
-    "INSERT INTO sessions (id, user_id, issued_at, expires_at) VALUES (?, ?, ?, ?)",
+    "INSERT INTO sessions (id, user_id, issued_at, expires_at, participant_id) VALUES (?, ?, ?, ?, ?)",
     sessionId,
     user.id,
     issuedAt,
     expiresAt,
+    participantId,
   );
-  const token = await new SignJWT({ pid: user.participantId })
+  const token = await new SignJWT({})
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setIssuer(ISSUER)
     .setAudience(SESSION_AUDIENCE)
@@ -206,6 +269,9 @@ export async function issueSession(db: Db, user: User): Promise<{ token: string;
 /**
  * Verify a session token: the signature, the expiry, and that its row still
  * exists and has not been revoked. Returns null for anything else.
+ *
+ * The seat is checked on every read. If the session's seat is gone, or was
+ * never set, it moves to the user's first remaining office.
  */
 export async function readSession(db: Db, token: string | undefined): Promise<Session | null> {
   if (!token) return null;
@@ -227,23 +293,36 @@ export async function readSession(db: Db, token: string | undefined): Promise<Se
     user_id: string;
     expires_at: number;
     revoked_at: number | null;
-    participant_id: string;
-    email: string;
-  }>(
-    db,
-    `SELECT s.id, s.user_id, s.expires_at, s.revoked_at, u.participant_id, u.email
-       FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.id = ?`,
-    sessionId,
-  );
+    participant_id: string | null;
+  }>(db, "SELECT * FROM sessions WHERE id = ?", sessionId);
   if (!row || row.revoked_at !== null || row.expires_at <= Date.now()) return null;
+  const user = userById(db, row.user_id);
+  if (!user) return null;
+
+  const seats = seatsOf(db, user.id);
+  let seat = seats.find((s) => s.participantId === row.participant_id) ?? null;
+  if (!seat && seats.length > 0) {
+    seat = seats[0];
+    run(db, "UPDATE sessions SET participant_id = ? WHERE id = ?", seat.participantId, row.id);
+  }
   return {
     sessionId: row.id,
-    userId: row.user_id,
-    participantId: row.participant_id,
-    email: row.email,
+    userId: user.id,
+    email: user.email,
+    displayName: user.displayName,
+    hasPassword: user.hasPassword,
+    participantId: seat?.participantId ?? null,
+    officeId: seat?.officeId ?? null,
     expiresAt: row.expires_at,
   };
+}
+
+/** Point a session at another of the user's seats. False when it is not theirs. */
+export function switchSeat(db: Db, session: Session, officeId: string): boolean {
+  const seat = seatsOf(db, session.userId).find((s) => s.officeId === officeId);
+  if (!seat) return false;
+  run(db, "UPDATE sessions SET participant_id = ? WHERE id = ?", seat.participantId, session.sessionId);
+  return true;
 }
 
 export function revokeSession(db: Db, sessionId: string): void {

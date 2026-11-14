@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticate, issueSession, tooManyAttempts } from "@/lib/server/auth";
+import { authenticate, issueSession, seatsOf, tooManyAttempts } from "@/lib/server/auth";
 import { fail, readJson, sameOrigin, setSessionCookie } from "@/lib/server/http";
 import { officeDatabase } from "@/lib/server/officeService";
 
@@ -19,7 +19,8 @@ export async function POST(request: Request): Promise<NextResponse> {
   const user = authenticate(db, email, password);
   if (!user) return fail(401, "That email and password do not match an account.");
 
-  const { token } = await issueSession(db, user);
+  // Start in the account's first office, if it has one.
+  const { token } = await issueSession(db, user, seatsOf(db, user.id)[0]?.participantId ?? null);
   await setSessionCookie(token);
   return NextResponse.json({ ok: true });
 }

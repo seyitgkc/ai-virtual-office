@@ -146,21 +146,29 @@ async function main(): Promise<void> {
   expect("after that, an agent can be removed", apply(cleared, { type: "REMOVE_PARTICIPANT", participantId: "p-quill" }).participants.length, seed.participants.length - 1);
 
   console.log("\n-- an office built from nothing --");
-  let blank = blankOffice({ id: "p-admin", displayName: "Alex Kim", title: "Owner" });
+  let blank = blankOffice({ suffix: "ab12", name: "Kim Mechanical", admin: { displayName: "Alex Kim", title: "Owner" } });
+  const other = blankOffice({ suffix: "cd34", name: "Second office", admin: { displayName: "Alex Kim", title: "Owner" } });
+  const me = blank.participants[0].id;
+  const mainRoom = blank.floorplan.rooms[0].id;
+  const memberRole = Object.values(blank.roles).find((r) => !r.supervises)!.id;
   expect("a blank office has one room and one person", `${blank.floorplan.rooms.length}/${blank.participants.length}`, "1/1");
   expect("and no work or rules", blank.tasks.length + blank.messages.length + blank.rules.length, 0);
-  blank = apply(blank, { type: "ADD_ROOM", name: "Accounts", purpose: "Pricing and approval", width: 8, depth: 10, attachTo: "main", side: "east" }, "p-admin");
+  const idsOf = (o: Office) => [o.id, o.floorplan.id, ...o.floorplan.rooms.map((r) => r.id), ...o.floorplan.desks.map((d) => d.id), ...o.participants.map((p) => p.id), ...Object.keys(o.roles)];
+  expect("two blank offices share no ids", idsOf(blank).some((id) => idsOf(other).includes(id)), false);
+  blank = apply(blank, { type: "ADD_ROOM", name: "Accounts", purpose: "Pricing and approval", width: 8, depth: 10, attachTo: mainRoom, side: "east" }, me);
   const accounts = blank.floorplan.rooms.at(-1)!;
-  blank = apply(blank, { type: "SET_STAGE_ROOM", stage: "review", roomId: accounts.id }, "p-admin");
-  blank = apply(blank, { type: "ADD_AGENT", displayName: "Nova", title: "Assistant", roleId: "member", roomId: "main", capabilities: ["Take requests"] }, "p-admin");
+  blank = apply(blank, { type: "SET_STAGE_ROOM", stage: "review", roomId: accounts.id }, me);
+  blank = apply(blank, { type: "ADD_AGENT", displayName: "Nova", title: "Assistant", roleId: memberRole, roomId: mainRoom, capabilities: ["Take requests"] }, me);
   const run = await reduce(
-    { office: blank, now: initialState.now, seq: 0, clockStepMinutes: 3 },
-    { type: "SUBMIT_REQUEST", title: "First request", detail: "Something to do.", requestedById: "p-admin" },
-    new ScriptedRuntime({}),
+    { office: blank, now: initialState.now, seq: 0, clockStepMinutes: 3, idScope: "ab12-" },
+    { type: "SUBMIT_REQUEST", title: "First request", detail: "Something to do.", requestedById: me },
+    new ScriptedRuntime(),
   );
   const first = run.state.office.tasks[0];
   expect("a request in the new office goes to its agent", first.ownerId, blank.participants.at(-1)!.id);
-  expect("in the room that hosts intake", first.roomId, "main");
+  expect("in the room that hosts intake", first.roomId, mainRoom);
+  expect("ids it generates carry the office's own tag", first.id, "T-ab12-1");
+  expect("an unscripted agent says plainly that no model is connected", run.state.office.messages.some((m) => m.body.includes("No model is connected")), true);
 
   console.log("\n-- untrusted input --");
   expect("unknown operations are rejected", parseAdminOp({ type: "DROP_EVERYTHING" }), null);

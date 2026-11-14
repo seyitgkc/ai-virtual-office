@@ -3,6 +3,7 @@ import { contextOf } from "@/lib/policy";
 import { ROOM_RECORDS } from "@/lib/referenceData";
 import { checkAccessToken } from "@/lib/server/accessTokens";
 import { fail } from "@/lib/server/http";
+import { get } from "@/lib/server/db";
 import { officeDatabase } from "@/lib/server/officeService";
 import { loadEngineState } from "@/lib/server/officeStore";
 
@@ -25,13 +26,19 @@ export async function GET(
   const presented = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
   if (!presented) return fail(401, "Send a permission token as a Bearer token.");
 
+  // Room ids are unique across offices, so the room names its office.
   const db = officeDatabase();
-  const state = loadEngineState(db);
-  if (!state) return fail(404, "No office has been set up.");
-  const room = state.office.floorplan.rooms.find((r) => r.id === roomId);
-  if (!room) return fail(404, "No such room.");
+  const owner = get<{ office_id: string }>(
+    db,
+    "SELECT f.office_id FROM rooms r JOIN floorplans f ON f.id = r.floorplan_id WHERE r.id = ?",
+    roomId,
+  );
+  const state = owner ? loadEngineState(db, owner.office_id) : null;
+  const room = state?.office.floorplan.rooms.find((r) => r.id === roomId);
+  if (!state || !room) return fail(404, "No such room.");
 
-  const ctx = contextOf(state.office, state.now);
+  // The demo runs on its fixed demo clock. Every other office uses real time.
+  const ctx = contextOf(state.office, state.clockStepMinutes === 0 ? Date.now() : state.now);
   const check = await checkAccessToken(db, presented, state.office, ctx, roomId, "read");
   if (!check.ok) return fail(check.status, check.reason);
 

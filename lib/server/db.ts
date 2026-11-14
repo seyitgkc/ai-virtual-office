@@ -42,14 +42,28 @@ export function openDatabase(path: string): Db {
     }
     // Bring an older database forward one version at a time. Each step and
     // its version bump commit together, so a failure leaves it untouched.
+    // Foreign keys are switched off while tables are rebuilt, because
+    // dropping a table would otherwise cascade into the rows that refer to
+    // it. The step is refused if it leaves any reference dangling.
+    if (row.version < SCHEMA_VERSION) db.exec("PRAGMA foreign_keys = OFF");
     for (let version = row.version; version < SCHEMA_VERSION; version++) {
       const step = MIGRATIONS[version];
       if (!step) throw new Error(`No migration from schema version ${version}.`);
-      transaction(db, () => {
+      db.exec("BEGIN IMMEDIATE");
+      try {
         db.exec(step);
         db.prepare("UPDATE schema_meta SET version = ?").run(version + 1);
-      });
+        const dangling = db.prepare("PRAGMA foreign_key_check").all();
+        if (dangling.length > 0) {
+          throw new Error(`Migration from version ${version} left ${dangling.length} dangling references.`);
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     }
+    db.exec("PRAGMA foreign_keys = ON");
   }
   return db;
 }

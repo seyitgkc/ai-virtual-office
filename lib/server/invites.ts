@@ -12,12 +12,17 @@ import { freeDeskSpot } from "../geometry";
 import type { Desk, Participant } from "../model";
 import { supervises } from "../policy";
 import {
+  addMembership,
+  authenticate,
   createUser,
   issueSession,
   passwordProblem,
+  seatsOf,
   sha256,
+  userByEmail,
   userByParticipant,
   type Session,
+  type User,
 } from "./auth";
 import { get, run, transaction } from "./db";
 import { OfficeError, officeDatabase, recordAudit } from "./officeService";
@@ -35,9 +40,9 @@ export interface InviteRequest {
 
 export function createInvite(session: Session, request: InviteRequest): { path: string; expiresAt: number } {
   const db = officeDatabase();
-  const state = loadEngineState(db);
+  const state = session.officeId ? loadEngineState(db, session.officeId) : null;
   const inviter = state?.office.participants.find((p) => p.id === session.participantId);
-  if (!state || !inviter) throw new OfficeError(404, "No office has been set up.");
+  if (!state || !inviter) throw new OfficeError(404, "You are not in an office.");
   if (!supervises(state.office, inviter)) {
     throw new OfficeError(403, "Only a supervising role can invite people.");
   }
@@ -103,6 +108,7 @@ export function createInvite(session: Session, request: InviteRequest): { path: 
 }
 
 export interface InviteDetails {
+  officeName: string;
   displayName: string;
   title: string;
   roleName: string;
@@ -112,6 +118,7 @@ export interface InviteDetails {
 interface InviteRow {
   id: string;
   participant_id: string;
+  office_id: string;
   expires_at: number;
   accepted_at: number | null;
 }
@@ -119,7 +126,9 @@ interface InviteRow {
 function liveInvite(token: string): InviteRow | null {
   const row = get<InviteRow>(
     officeDatabase(),
-    "SELECT id, participant_id, expires_at, accepted_at FROM invites WHERE token_hash = ?",
+    `SELECT i.id, i.participant_id, p.office_id, i.expires_at, i.accepted_at
+       FROM invites i JOIN participants p ON p.id = i.participant_id
+      WHERE i.token_hash = ?`,
     sha256(token),
   );
   return row && row.accepted_at === null && row.expires_at > Date.now() ? row : null;
@@ -128,19 +137,24 @@ function liveInvite(token: string): InviteRow | null {
 /** What to show on the invite page, or null when the link is no longer good. */
 export function readInvite(token: string): InviteDetails | null {
   const row = liveInvite(token);
-  const office = loadEngineState(officeDatabase())?.office;
+  const office = row ? loadEngineState(officeDatabase(), row.office_id)?.office : null;
   const person = office?.participants.find((p) => p.id === row?.participant_id);
   if (!row || !office || !person) return null;
   const desk = office.floorplan.desks.find((d) => d.id === person.deskId);
   return {
     displayName: person.displayName,
     title: person.title,
+    officeName: office.name,
     roleName: office.roles[person.roleId]?.name ?? person.roleId,
     roomName: office.floorplan.rooms.find((r) => r.id === desk?.roomId)?.name ?? "the office",
   };
 }
 
-/** Use an invite: create the account and sign the person in. */
+/**
+ * Use an invite. A new email creates an account with the chosen password. An
+ * email that already has an account joins the office with that account, and
+ * must give its existing password to prove it.
+ */
 export async function acceptInvite(
   token: string,
   email: string,
@@ -154,19 +168,35 @@ export async function acceptInvite(
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address) || address.length > 200) {
     throw new OfficeError(400, "Enter a valid email address.");
   }
-  const problem = passwordProblem(password);
-  if (problem) throw new OfficeError(400, problem);
-  if (get(db, "SELECT 1 AS found FROM users WHERE email = ?", address)) {
-    throw new OfficeError(409, "That email address already has an account.");
-  }
-  if (userByParticipant(db, row.participant_id)) {
-    throw new OfficeError(409, "This invite was already used.");
+  if (userByParticipant(db, row.participant_id)) throw new OfficeError(409, "This invite was already used.");
+
+  const person = get<{ display_name: string }>(
+    db,
+    "SELECT display_name FROM participants WHERE id = ?",
+    row.participant_id,
+  );
+  const existing = userByEmail(db, address);
+  let user: User | undefined;
+  if (existing) {
+    const proven = authenticate(db, address, password);
+    if (!proven) {
+      throw new OfficeError(401, "That email already has an account. Enter its password to join with it.");
+    }
+    if (seatsOf(db, proven.id).some((seat) => seat.officeId === row.office_id)) {
+      throw new OfficeError(409, "That account already has a seat in this office.");
+    }
+    user = proven;
+  } else {
+    const problem = passwordProblem(password);
+    if (problem) throw new OfficeError(400, problem);
   }
 
-  const user = transaction(db, () => {
-    const created = createUser(db, { participantId: row.participant_id, email: address, password });
+  const joined = transaction(db, () => {
+    const account =
+      user ?? createUser(db, { email: address, displayName: person?.display_name ?? address, password });
+    addMembership(db, account.id, row.participant_id);
     run(db, "UPDATE invites SET accepted_at = ? WHERE id = ?", Date.now(), row.id);
-    return created;
+    return account;
   });
-  return issueSession(db, { ...user, email: address });
+  return issueSession(db, joined, row.participant_id);
 }

@@ -15,7 +15,7 @@
  *    and grants are evaluated in sequence and threads are read in sequence.
  */
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const SCHEMA = /* sql */ `
 CREATE TABLE schema_meta (
@@ -23,12 +23,30 @@ CREATE TABLE schema_meta (
 ) STRICT;
 
 -- ---------------------------------------------------------------- office
+-- One database holds many offices. id_scope is a short tag, unique per
+-- office, that prefixes the ids an office generates for its tasks, messages
+-- and rules, so that ids never collide between offices.
 CREATE TABLE offices (
   id                 TEXT PRIMARY KEY,
   name               TEXT NOT NULL,
   clock_ms           INTEGER NOT NULL,
   clock_step_minutes INTEGER NOT NULL,
-  id_sequence        INTEGER NOT NULL
+  id_sequence        INTEGER NOT NULL,
+  id_scope           TEXT NOT NULL DEFAULT ''
+) STRICT;
+
+CREATE UNIQUE INDEX offices_by_scope ON offices(id_scope);
+
+-- How an office's agents think. The API key is stored encrypted and is never
+-- sent back to a browser; key_hint keeps its last characters for display.
+CREATE TABLE office_ai (
+  office_id      TEXT PRIMARY KEY REFERENCES offices(id) ON DELETE CASCADE,
+  runtime        TEXT NOT NULL CHECK (runtime IN ('scripted', 'model')),
+  provider       TEXT NOT NULL,
+  model          TEXT NOT NULL,
+  api_key_cipher TEXT,
+  key_hint       TEXT,
+  updated_at     INTEGER NOT NULL
 ) STRICT;
 
 CREATE TABLE floorplans (
@@ -307,23 +325,35 @@ CREATE TABLE task_assumptions (
 ) STRICT;
 
 -- -------------------------------------------------------------- accounts
--- A user is the login for one human participant. A NULL password hash means
--- no password has been set, so password sign-in is refused for that account.
+-- A user is a sign-in. It is separate from any office. A NULL password hash
+-- means no password has been set, so password sign-in is refused: that is
+-- what a demo account is.
 CREATE TABLE users (
-  id             TEXT PRIMARY KEY,
-  participant_id TEXT NOT NULL UNIQUE REFERENCES participants(id) ON DELETE CASCADE,
-  email          TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  password_hash  TEXT,
-  created_at     INTEGER NOT NULL
+  id            TEXT PRIMARY KEY,
+  email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT,
+  display_name  TEXT NOT NULL,
+  created_at    INTEGER NOT NULL
 ) STRICT;
 
+-- A user's seat in an office: the human participant they are there. A user
+-- may hold a seat in many offices. A participant belongs to at most one user.
+CREATE TABLE memberships (
+  participant_id TEXT PRIMARY KEY REFERENCES participants(id) ON DELETE CASCADE,
+  user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
+) STRICT;
+
+CREATE INDEX memberships_by_user ON memberships(user_id);
+
 -- One row per issued session token. Signing out or revoking sets revoked_at.
+-- participant_id is the seat, and so the office, the session is looking at.
 CREATE TABLE sessions (
-  id         TEXT PRIMARY KEY,
-  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  issued_at  INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  revoked_at INTEGER
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  issued_at      INTEGER NOT NULL,
+  expires_at     INTEGER NOT NULL,
+  revoked_at     INTEGER,
+  participant_id TEXT REFERENCES participants(id) ON DELETE SET NULL
 ) STRICT;
 
 CREATE TABLE invites (
@@ -402,5 +432,51 @@ SELECT o.id, m.stage, m.room_id
         UNION ALL SELECT 'execution', 'fulfilment'
         UNION ALL SELECT 'review', 'finance') m
   JOIN rooms r ON r.id = m.room_id;
+`,
+
+  // Version 3 made room for many offices. A sign-in is no longer tied to one
+  // participant: users lose that column and gain a display name, each seat
+  // becomes a row in memberships, and a session remembers which seat it is
+  // looking at. Offices gain an id scope and their own AI settings.
+  2: /* sql */ `
+CREATE TABLE users_new (
+  id            TEXT PRIMARY KEY,
+  email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT,
+  display_name  TEXT NOT NULL,
+  created_at    INTEGER NOT NULL
+) STRICT;
+
+INSERT INTO users_new (id, email, password_hash, display_name, created_at)
+SELECT u.id, u.email, u.password_hash, COALESCE(p.display_name, u.email), u.created_at
+  FROM users u LEFT JOIN participants p ON p.id = u.participant_id;
+
+CREATE TABLE memberships (
+  participant_id TEXT PRIMARY KEY REFERENCES participants(id) ON DELETE CASCADE,
+  user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
+) STRICT;
+
+INSERT INTO memberships (participant_id, user_id) SELECT participant_id, id FROM users;
+
+ALTER TABLE sessions ADD COLUMN participant_id TEXT REFERENCES participants(id) ON DELETE SET NULL;
+UPDATE sessions
+   SET participant_id = (SELECT u.participant_id FROM users u WHERE u.id = sessions.user_id);
+
+DROP TABLE users;
+ALTER TABLE users_new RENAME TO users;
+CREATE INDEX memberships_by_user ON memberships(user_id);
+
+ALTER TABLE offices ADD COLUMN id_scope TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX offices_by_scope ON offices(id_scope);
+
+CREATE TABLE office_ai (
+  office_id      TEXT PRIMARY KEY REFERENCES offices(id) ON DELETE CASCADE,
+  runtime        TEXT NOT NULL CHECK (runtime IN ('scripted', 'model')),
+  provider       TEXT NOT NULL,
+  model          TEXT NOT NULL,
+  api_key_cipher TEXT,
+  key_hint       TEXT,
+  updated_at     INTEGER NOT NULL
+) STRICT;
 `,
 };

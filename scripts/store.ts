@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   console.log("\n-- seed round trip --");
   seedDatabase(db, initialState);
   let state: EngineState = initialState;
-  const loaded = loadEngineState(db);
+  const loaded = loadEngineState(db, initialState.office.id);
   const same = canonical(loaded) === canonical(state);
   expect("seeded office reads back identical", same, true);
   if (!same) console.log(firstDifference(canonical(loaded), canonical(state)));
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
     const next = (await reduce(state, action, runtime)).state;
     transaction(db, () => saveEngineState(db, state, next));
     state = next;
-    const back = canonical(loadEngineState(db));
+    const back = canonical(loadEngineState(db, initialState.office.id));
     const ok = back === canonical(state);
     expect(label, ok, true);
     if (!ok) console.log(firstDifference(back, canonical(state)));
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
     const next: EngineState = { ...state, office: applyAdminOp(state.office, op, "p-dana", () => `s${++counter}`) };
     transaction(db, () => saveEngineState(db, state, next));
     state = next;
-    const back = canonical(loadEngineState(db));
+    const back = canonical(loadEngineState(db, initialState.office.id));
     const ok = back === canonical(state);
     expect(label, ok, true);
     if (!ok) console.log(firstDifference(back, canonical(state)));

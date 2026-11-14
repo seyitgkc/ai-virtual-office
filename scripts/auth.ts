@@ -7,12 +7,15 @@ import { initialState } from "../lib/initialState";
 import { authorize, contextOf, parseAction, stampActor, viewFor } from "../lib/policy";
 import {
   authenticate,
+  addMembership,
   createUser,
   hashPassword,
   issueSession,
   readSession,
   revokeSession,
-  setCredentials,
+  seatsOf,
+  setPassword,
+  switchSeat,
   userByParticipant,
   useSigningKeyForTests,
   verifyPassword,
@@ -38,7 +41,7 @@ async function main(): Promise<void> {
   useSigningKeyForTests("a-fixed-key-used-only-by-this-check-script");
   const db = openDatabase(":memory:");
   seedDatabase(db, initialState);
-  let state: EngineState = loadEngineState(db)!;
+  let state: EngineState = loadEngineState(db, initialState.office.id)!;
   const person = (id: string) => state.office.participants.find((p) => p.id === id)!;
   const ctx = () => contextOf(state.office, state.now);
 
@@ -52,17 +55,24 @@ async function main(): Promise<void> {
   expect("an account with no password cannot sign in", verifyPassword("", null), false);
 
   console.log("\n-- accounts and sessions --");
-  const dana = createUser(db, { participantId: "p-dana", email: "dana@office.test", password: null });
-  createUser(db, { participantId: "p-sam", email: "sam@office.test", password: null });
+  const dana = createUser(db, { email: "dana@office.test", displayName: "Dana Reyes", password: null });
+  addMembership(db, dana.id, "p-dana");
+  const sam = createUser(db, { email: "sam@office.test", displayName: "Sam Okafor", password: null });
+  addMembership(db, sam.id, "p-sam");
   expect("no password set: sign-in refused", authenticate(db, "dana@office.test", "anything") === null, true);
-  setCredentials(db, dana.id, "Dana@Office.test", phrase);
-  expect("sign-in with the right password", authenticate(db, "dana@office.test", phrase)?.participantId, "p-dana");
-  expect("email match ignores case", authenticate(db, "DANA@OFFICE.TEST", phrase)?.participantId, "p-dana");
+  setPassword(db, dana.id, phrase);
+  expect("sign-in with the right password", authenticate(db, "dana@office.test", phrase)?.email, "dana@office.test");
+  expect("email match ignores case", authenticate(db, "DANA@OFFICE.TEST", phrase)?.email, "dana@office.test");
   expect("unknown email refused", authenticate(db, "nobody@office.test", phrase), null);
 
-  const { token } = await issueSession(db, userByParticipant(db, "p-dana")!);
+  const { token } = await issueSession(db, userByParticipant(db, "p-dana")!, "p-dana");
   const session = await readSession(db, token);
-  expect("session token reads back its participant", session?.participantId, "p-dana");
+  expect("session token reads back its seat", session?.participantId, "p-dana");
+  expect("and the office that seat is in", session?.officeId, initialState.office.id);
+  expect("an account lists its seats", seatsOf(db, dana.id).length, 1);
+  expect("a session cannot switch to an office it has no seat in", switchSeat(db, session!, "o-someone-else"), false);
+  const unseated = await issueSession(db, userByParticipant(db, "p-sam")!, null);
+  expect("a session with no seat picks the account's first office", (await readSession(db, unseated.token))?.participantId, "p-sam");
   expect("tampered token refused", await readSession(db, token.slice(0, -3) + "abc"), null);
   expect("missing token refused", await readSession(db, undefined), null);
   revokeSession(db, session!.sessionId);
@@ -117,11 +127,11 @@ async function main(): Promise<void> {
   };
   transaction(db, () => syncAccessTokens(db));
   const tokenFor = (who: string, room: string) =>
-    listAccessTokens(db).find((t) => t.participantId === who && t.roomId === room && t.scope === "read");
+    listAccessTokens(db, initialState.office.id).find((t) => t.participantId === who && t.roomId === room && t.scope === "read");
   const check = async (signed: string, room: string) =>
     checkAccessToken(db, signed, state.office, ctx(), room, "read");
 
-  expect("deny rules issue no token", listAccessTokens(db).some((t) => t.ruleId === "r-02"), false);
+  expect("deny rules issue no token", listAccessTokens(db, initialState.office.id).some((t) => t.ruleId === "r-02"), false);
   const veraSigned = (await signAccessToken(db, tokenFor("p-vera", "finance")!.id))!;
   expect("a token outranked by a deny is refused", (await check(veraSigned, "finance")).ok, false);
 

@@ -1,9 +1,10 @@
 /**
- * The one place where a signed-in person's action meets the engine.
+ * The one place where a signed-in person meets an office.
  *
- * For every action: read the office from the database, stamp the action with
- * the session's participant, check the policy, run the engine, then write the
- * changes and an audit entry in a single transaction.
+ * A database holds many offices. A session looks at one of them at a time,
+ * through the seat its user holds there. For every action: read that office
+ * from the database, stamp the action with the seat, check the policy, run
+ * the engine, then write the changes and an audit entry in one transaction.
  */
 import { randomUUID } from "node:crypto";
 import { AdminError, applyAdminOp, blankOffice, type AdminOp } from "../admin";
@@ -11,27 +12,50 @@ import { reduce, ScriptedRuntime, type Action, type AgentRuntime, type EngineSta
 import { initialState } from "../initialState";
 import type { Office, Participant } from "../model";
 import { authorize, contextOf, mayRead, stampActor, supervises, viewFor } from "../policy";
-import type { FeedEntry, OfficeView } from "../view";
+import type { AiView, FeedEntry, OfficeView } from "../view";
 import { listAccessTokens, syncAccessTokens, tokenProblem } from "./accessTokens";
 import {
+  addMembership,
   createUser,
-  issueSession,
-  listUsers,
-  setCredentials,
+  seatsOf,
+  setPassword,
+  switchSeat,
+  userByEmail,
   userByParticipant,
+  usersInOffice,
   type Session,
+  type User,
 } from "./auth";
 import { all, database, get, run, transaction, type Db } from "./db";
-import { agentModel, ModelRuntime } from "./modelRuntime";
+import { DEFAULT_AGENT_MODEL, ModelRuntime, testProvider, validModelId } from "./modelRuntime";
 import {
-  clearDatabase,
+  deleteOffice,
+  freshIdScope,
   hasOffice,
   loadEngineState,
   saveEngineState,
-  seedDatabase,
   writeParticipant,
   writeWholeOffice,
 } from "./officeStore";
+import { seal, unseal } from "./secrets";
+
+/** The seeded distributor. It exists only for password-free demo sign-in. */
+export const DEMO_OFFICE_ID = initialState.office.id;
+export const isDemoOffice = (officeId: string | null): boolean => officeId === DEMO_OFFICE_ID;
+
+/** Demo sign-in lets a visitor enter the demo office as a seeded person. */
+export const demoLoginEnabled = (): boolean => process.env.DEMO_LOGIN !== "0";
+
+const MAX_OFFICES_PER_ACCOUNT = 12;
+
+export class OfficeError extends Error {
+  constructor(
+    readonly status: 400 | 401 | 403 | 404 | 409 | 502,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Start-up
@@ -39,71 +63,140 @@ import {
 
 const boot = globalThis as unknown as { __officeBooted?: boolean };
 
-/** Demo sign-in lets a visitor enter as a seeded person without a password. */
-export const demoLoginEnabled = (): boolean => process.env.DEMO_LOGIN !== "0";
-
 const slug = (name: string): string =>
   name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ".")
     .replace(/^\.|\.$/g, "");
 
-/** Every human participant gets an account. New ones start without a password. */
-export function ensureAccounts(db: Db, office: Office): void {
+/** Every person in the demo office gets a password-free demo sign-in. */
+function ensureDemoAccounts(db: Db, office: Office): void {
   for (const p of office.participants) {
     if (p.kind !== "human" || userByParticipant(db, p.id)) continue;
-    createUser(db, { participantId: p.id, email: `${slug(p.displayName)}@office.test`, password: null });
+    const wanted = `${slug(p.displayName)}@office.test`;
+    const email = userByEmail(db, wanted) ? `${slug(p.displayName)}.${randomUUID().slice(0, 6)}@office.test` : wanted;
+    const user = createUser(db, { email, displayName: p.displayName, password: null });
+    addMembership(db, user.id, p.id);
   }
 }
 
+const nameFromEmail = (email: string): string => {
+  const local = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+  return local ? local.replace(/\b\w/g, (c) => c.toUpperCase()) : "Administrator";
+};
+
+/** Create an empty office and seat this user in it as its administrator. */
+function createBlankOfficeFor(db: Db, user: User, name: string): { officeId: string; participantId: string } {
+  const office = blankOffice({
+    suffix: randomUUID().slice(0, 8),
+    name,
+    admin: { displayName: user.displayName, title: "Administrator" },
+  });
+  // A real office runs on the real clock: a step of zero tells the service to
+  // stamp each action with the current time.
+  writeWholeOffice(db, { office, now: Date.now(), seq: 0, clockStepMinutes: 0, idScope: freshIdScope(db) });
+  const participantId = office.participants[0].id;
+  addMembership(db, user.id, participantId);
+  return { officeId: office.id, participantId };
+}
+
 /**
- * Optional first administrator, taken from the environment so that no
- * credential is ever written in the repository.
+ * The administrator named in the environment. The account is separate from
+ * the demo: it never holds a seat in the demo office, and it starts with an
+ * empty office of its own.
  */
-function applyAdminFromEnvironment(db: Db, office: Office): void {
-  const email = process.env.ADMIN_EMAIL;
+function ensureAdminAccount(db: Db): void {
+  const email = process.env.ADMIN_EMAIL?.trim();
   const password = process.env.ADMIN_PASSWORD;
   if (!email || !password) return;
-  const admin = office.participants.find((p) => p.kind === "human" && supervises(office, p));
-  const user = admin ? userByParticipant(db, admin.id) : null;
-  if (user) setCredentials(db, user.id, email, password);
+  const displayName = process.env.ADMIN_NAME?.trim() || nameFromEmail(email);
+
+  let user = userByEmail(db, email);
+  if (!user) {
+    user = createUser(db, { email, displayName, password });
+  } else {
+    setPassword(db, user.id, password);
+  }
+
+  // An earlier version attached these credentials to the demo supervisor.
+  // Give that seat back to the demo and the account its own name.
+  const inDemo = seatsOf(db, user.id).filter((s) => isDemoOffice(s.officeId));
+  for (const seat of inDemo) run(db, "DELETE FROM memberships WHERE participant_id = ?", seat.participantId);
+  if (inDemo.length > 0 || process.env.ADMIN_NAME) {
+    run(db, "UPDATE users SET display_name = ? WHERE id = ?", displayName, user.id);
+    user = { ...user, displayName };
+  }
+
+  if (seatsOf(db, user.id).length === 0) createBlankOfficeFor(db, user, "My office");
 }
 
-/** A blank office starts from the same clock as the demo and its own id counter. */
-const emptyState = (admin: { id: string; displayName: string; title: string }): EngineState => ({
-  office: blankOffice(admin),
-  now: initialState.now,
-  seq: 0,
-  clockStepMinutes: initialState.clockStepMinutes,
-});
-
-/**
- * What a new database starts with: the demo office, or with OFFICE_SEED=empty
- * a blank office holding one administrator.
- */
-function firstOffice(): EngineState {
-  if (process.env.OFFICE_SEED !== "empty") return initialState;
-  return emptyState({
-    id: "p-admin",
-    displayName: process.env.ADMIN_NAME?.trim() || "Administrator",
-    title: "Administrator",
-  });
-}
-
-/** Open the database, seed it on first run, and return the connection. */
+/** Open the database and make sure the demo office and the administrator exist. */
 export function officeDatabase(): Db {
   const db = database();
   if (boot.__officeBooted) return db;
-  if (!hasOffice(db)) seedDatabase(db, firstOffice());
-  const state = loadEngineState(db)!;
   transaction(db, () => {
-    ensureAccounts(db, state.office);
-    applyAdminFromEnvironment(db, state.office);
+    if (demoLoginEnabled() && !hasOffice(db, DEMO_OFFICE_ID)) writeWholeOffice(db, initialState);
+    ensureAdminAccount(db);
+    const demo = loadEngineState(db, DEMO_OFFICE_ID);
+    if (demo) ensureDemoAccounts(db, demo.office);
     syncAccessTokens(db);
-    recordAgentBacking(db, state.office);
   });
   boot.__officeBooted = true;
   return db;
+}
+
+// ---------------------------------------------------------------------------
+// AI provider settings
+// ---------------------------------------------------------------------------
+
+interface AiRow {
+  runtime: "scripted" | "model";
+  provider: string;
+  model: string;
+  api_key_cipher: string | null;
+  key_hint: string | null;
+  updated_at: number;
+}
+
+const aiRow = (db: Db, officeId: string): AiRow | undefined =>
+  get<AiRow>(db, "SELECT * FROM office_ai WHERE office_id = ?", officeId);
+
+function aiView(db: Db, officeId: string, session: Session): AiView {
+  const row = aiRow(db, officeId);
+  const key = unseal(row?.api_key_cipher ?? null);
+  return {
+    runtime: row?.runtime === "model" && key ? "model" : "scripted",
+    provider: "anthropic",
+    model: row?.model ?? DEFAULT_AGENT_MODEL,
+    hasKey: key !== null,
+    keyHint: key !== null ? (row?.key_hint ?? null) : null,
+    // A stored key that can no longer be read was encrypted under an older
+    // signing key and has to be entered again.
+    keyUnreadable: Boolean(row?.api_key_cipher) && key === null,
+    editable: session.hasPassword && !isDemoOffice(officeId),
+  };
+}
+
+const scripted = new ScriptedRuntime();
+const runtimes = new Map<string, { stamp: number; runtime: AgentRuntime }>();
+const overrides = globalThis as unknown as { __officeRuntime?: AgentRuntime };
+
+/** For tests: answer every agent step with this runtime, in every office. */
+export function useAgentRuntime(runtime: AgentRuntime | undefined): void {
+  overrides.__officeRuntime = runtime;
+}
+
+/** The runtime an office's agents use: its connected model, or the script. */
+function runtimeFor(db: Db, officeId: string): AgentRuntime {
+  if (overrides.__officeRuntime) return overrides.__officeRuntime;
+  const row = aiRow(db, officeId);
+  if (!row || row.runtime !== "model") return scripted;
+  const cached = runtimes.get(officeId);
+  if (cached && cached.stamp === row.updated_at) return cached.runtime;
+  const apiKey = unseal(row.api_key_cipher);
+  const runtime = apiKey ? new ModelRuntime({ apiKey, model: row.model }) : scripted;
+  runtimes.set(officeId, { stamp: row.updated_at, runtime });
+  return runtime;
 }
 
 /**
@@ -111,8 +204,8 @@ export function officeDatabase(): Db {
  * interface labels an agent as live only when a model really answers for it.
  */
 function recordAgentBacking(db: Db, office: Office): void {
-  const wanted =
-    agentRuntime().kind === "model" ? { provider: "Anthropic", model: agentModel() } : null;
+  const runtime = runtimeFor(db, office.id);
+  const wanted = runtime instanceof ModelRuntime ? { provider: "Anthropic", model: runtime.model } : null;
   for (const p of office.participants) {
     if (p.kind !== "agent") continue;
     const same = wanted === null ? p.backing === null : p.backing?.model === wanted.model;
@@ -121,48 +214,33 @@ function recordAgentBacking(db: Db, office: Office): void {
 }
 
 // ---------------------------------------------------------------------------
-// Agent runtime
+// Reading an office
 // ---------------------------------------------------------------------------
 
-const runtimeHolder = globalThis as unknown as { __officeRuntime?: AgentRuntime };
-
-/**
- * Agents answer from the fixed script unless AGENT_RUNTIME=model is set, in
- * which case each step is a call to the model named by AGENT_MODEL. The
- * switch is explicit so that a stray API key never starts spending money.
- */
-export function agentRuntime(): AgentRuntime {
-  runtimeHolder.__officeRuntime ??=
-    process.env.AGENT_RUNTIME === "model" ? new ModelRuntime() : new ScriptedRuntime();
-  return runtimeHolder.__officeRuntime;
-}
-
-export function useAgentRuntime(runtime: AgentRuntime): void {
-  runtimeHolder.__officeRuntime = runtime;
-}
-
-// ---------------------------------------------------------------------------
-// Views
-// ---------------------------------------------------------------------------
-
-export class OfficeError extends Error {
-  constructor(
-    readonly status: 400 | 401 | 403 | 404 | 409,
-    message: string,
-  ) {
-    super(message);
-  }
+/** The office a session is looking at, with its clock set. */
+function loadOffice(db: Db, session: Session): EngineState {
+  if (!session.officeId) throw new OfficeError(409, "You are not in an office yet. Add one to continue.");
+  const state = loadEngineState(db, session.officeId);
+  if (!state) throw new OfficeError(404, "That office no longer exists.");
+  // The demo keeps its fixed demo clock. Every other office uses real time.
+  return state.clockStepMinutes === 0 ? { ...state, now: Date.now() } : state;
 }
 
 function viewerOf(office: Office, session: Session): Participant {
   const viewer = office.participants.find((p) => p.id === session.participantId);
-  if (!viewer) throw new OfficeError(401, "Your account is no longer part of this office.");
+  if (!viewer) throw new OfficeError(401, "Your seat in this office no longer exists.");
   return viewer;
+}
+
+function requireSupervisor(state: EngineState, session: Session, what: string): Participant {
+  const actor = viewerOf(state.office, session);
+  if (!supervises(state.office, actor)) throw new OfficeError(403, `Only a supervising role can ${what}.`);
+  return actor;
 }
 
 function feedFor(db: Db, state: EngineState, viewer: Participant): FeedEntry[] {
   const ctx = contextOf(state.office, state.now);
-  const all_ = supervises(state.office, viewer);
+  const seesAll = supervises(state.office, viewer);
   const rows = all<{
     audit_id: number;
     position: number;
@@ -182,7 +260,7 @@ function feedFor(db: Db, state: EngineState, viewer: Participant): FeedEntry[] {
   return rows
     .filter(
       (r) =>
-        all_ ||
+        seesAll ||
         r.actor_participant_id === viewer.id ||
         (r.room_id !== null && mayRead(ctx, viewer, r.room_id)),
     )
@@ -195,7 +273,7 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
   const ctx = contextOf(state.office, state.now);
   const { office, hiddenMessages } = viewFor(state.office, ctx, viewer);
   const isSupervisor = supervises(state.office, viewer);
-  const runtime = agentRuntime();
+  const ai = aiView(db, office.id, session);
 
   return {
     office,
@@ -207,16 +285,25 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
       email: session.email,
       supervises: isSupervisor,
     },
+    account: { email: session.email, displayName: session.displayName, isDemo: !session.hasPassword },
+    offices: seatsOf(db, session.userId).map((seat) => ({
+      officeId: seat.officeId,
+      name: seat.officeName,
+      supervises: seat.supervises,
+      isDemo: isDemoOffice(seat.officeId),
+      active: seat.officeId === office.id,
+    })),
+    isDemoOffice: isDemoOffice(office.id),
     feed: feedFor(db, state, viewer),
     hiddenMessages,
-    runtime: runtime.kind,
-    agentModel: runtime.kind === "model" ? agentModel() : null,
+    runtime: ai.runtime,
+    ai: isSupervisor ? ai : null,
     // Token details are for supervisors and for the holder's own tokens.
-    accessTokens: listAccessTokens(db)
+    accessTokens: listAccessTokens(db, office.id)
       .filter((t) => isSupervisor || t.participantId === viewer.id)
       .map((t) => ({ ...t, problem: tokenProblem(t, state.office, ctx) })),
     accounts: isSupervisor
-      ? listUsers(db).map((u) => ({
+      ? usersInOffice(db, office.id).map((u) => ({
           participantId: u.participantId,
           email: u.email,
           hasPassword: u.hasPassword,
@@ -227,17 +314,15 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
 
 export function getView(session: Session): OfficeView {
   const db = officeDatabase();
-  const state = loadEngineState(db);
-  if (!state) throw new OfficeError(404, "No office has been set up.");
-  return buildView(db, state, session);
+  return buildView(db, loadOffice(db, session), session);
 }
 
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
 
-// Actions are applied one at a time. A transition can wait on an agent, and a
-// second action must start from the state the first one left behind.
+// Changes are applied one at a time. A transition can wait on an agent, and a
+// second change must start from the state the first one left behind.
 let queue: Promise<unknown> = Promise.resolve();
 function inTurn<T>(work: () => Promise<T>): Promise<T> {
   const next = queue.then(work, work);
@@ -251,6 +336,8 @@ interface AuditSubject {
   ruleId: string | null;
   roomId: string | null;
 }
+
+const NO_SUBJECT: AuditSubject = { taskId: null, subjectParticipantId: null, ruleId: null, roomId: null };
 
 /** Pull out the things an action was about, for the audit columns. */
 function auditSubject(action: Action, before: Office, after: Office): AuditSubject {
@@ -338,9 +425,7 @@ export function recordAudit(
 export function applyAction(session: Session, requested: Action): Promise<OfficeView> {
   return inTurn(async () => {
     const db = officeDatabase();
-    const before = loadEngineState(db);
-    if (!before) throw new OfficeError(404, "No office has been set up.");
-
+    const before = loadOffice(db, session);
     const actor = viewerOf(before.office, session);
     const action = stampActor(requested, actor.id);
     const verdict = authorize(before.office, contextOf(before.office, before.now), actor, action);
@@ -348,7 +433,7 @@ export function applyAction(session: Session, requested: Action): Promise<Office
 
     let result;
     try {
-      result = await reduce(before, action, agentRuntime());
+      result = await reduce(before, action, runtimeFor(db, before.office.id));
     } catch (error) {
       throw new OfficeError(409, error instanceof Error ? error.message : "That action could not be applied.");
     }
@@ -415,20 +500,11 @@ function describeAdminOp(op: AdminOp, before: Office, after: Office, actor: Part
   }
 }
 
-function requireSupervisor(state: EngineState, session: Session, what: string): Participant {
-  const actor = viewerOf(state.office, session);
-  if (!supervises(state.office, actor)) {
-    throw new OfficeError(403, `Only a supervising role can ${what}.`);
-  }
-  return actor;
-}
-
 /** Apply one change to how the office is set up, on behalf of a supervisor. */
 export function applyAdminOperation(session: Session, op: AdminOp): Promise<OfficeView> {
   return inTurn(async () => {
     const db = officeDatabase();
-    const before = loadEngineState(db);
-    if (!before) throw new OfficeError(404, "No office has been set up.");
+    const before = loadOffice(db, session);
     const actor = requireSupervisor(before, session, "change how the office is set up");
 
     let office: Office;
@@ -443,7 +519,7 @@ export function applyAdminOperation(session: Session, op: AdminOp): Promise<Offi
     try {
       transaction(db, () => {
         saveEngineState(db, before, after);
-        ensureAccounts(db, after.office);
+        if (isDemoOffice(after.office.id)) ensureDemoAccounts(db, after.office);
         syncAccessTokens(db);
         recordAgentBacking(db, after.office);
         recordAudit(db, {
@@ -451,12 +527,7 @@ export function applyAdminOperation(session: Session, op: AdminOp): Promise<Offi
           officeClock: after.now,
           actorId: actor.id,
           actionType: op.type,
-          subject: {
-            taskId: null,
-            subjectParticipantId: "participantId" in op ? op.participantId : null,
-            ruleId: null,
-            roomId: null,
-          },
+          subject: { ...NO_SUBJECT, subjectParticipantId: "participantId" in op ? op.participantId : null },
           notes: [describeAdminOp(op, before.office, after.office, actor)],
         });
       });
@@ -469,65 +540,152 @@ export function applyAdminOperation(session: Session, op: AdminOp): Promise<Offi
       }
       throw error;
     }
-    return buildView(db, loadEngineState(db)!, session);
+    return buildView(db, loadOffice(db, session), session);
   });
 }
 
 /**
- * Replace the whole office with an empty one or with the demo. The person
- * doing it keeps their sign-in: their email and password move to the
- * supervising person of the new office, and they get a fresh session.
+ * Change how an office's agents think: scripted, or a model reached with the
+ * given API key. The key is stored encrypted and is never returned.
  */
-export function startOver(session: Session, kind: "empty" | "demo"): Promise<{ token: string }> {
+export function saveAiSettings(
+  session: Session,
+  input: { runtime: "scripted" | "model"; model: string; apiKey?: string; removeKey?: boolean },
+): Promise<OfficeView> {
   return inTurn(async () => {
     const db = officeDatabase();
-    const before = loadEngineState(db);
-    if (!before) throw new OfficeError(404, "No office has been set up.");
-    const actor = requireSupervisor(before, session, "start the office over");
-    const account = get<{ email: string; password_hash: string | null }>(
-      db,
-      "SELECT email, password_hash FROM users WHERE id = ?",
-      session.userId,
-    );
+    const state = loadOffice(db, session);
+    const actor = requireSupervisor(state, session, "change the AI provider");
+    const officeId = state.office.id;
+    if (isDemoOffice(officeId)) {
+      throw new OfficeError(403, "The demo office is shared, so no API key can be stored in it.");
+    }
+    if (!session.hasPassword) throw new OfficeError(403, "Sign in with a password account to connect a model.");
 
-    const next =
-      kind === "empty"
-        ? emptyState({ id: "p-admin", displayName: actor.displayName, title: actor.title })
-        : initialState;
-    const lead = next.office.participants.find(
-      (p) => p.kind === "human" && next.office.roles[p.roleId]?.supervises,
-    )!;
+    const model = input.model.trim();
+    if (!validModelId(model)) throw new OfficeError(400, "Enter a model id such as claude-opus-5-5.");
+    const existing = aiRow(db, officeId);
+    const typed = input.apiKey?.trim();
+    if (typed !== undefined && typed !== "" && (typed.length < 20 || typed.length > 300 || /\s/.test(typed))) {
+      throw new OfficeError(400, "That does not look like an API key.");
+    }
+    const cipher = input.removeKey ? null : typed ? seal(typed) : (existing?.api_key_cipher ?? null);
+    const hint = input.removeKey ? null : typed ? typed.slice(-4) : (existing?.key_hint ?? null);
+    if (input.runtime === "model" && unseal(cipher) === null) {
+      throw new OfficeError(400, "Enter an API key before switching the agents to a live model.");
+    }
 
     transaction(db, () => {
-      clearDatabase(db);
-      writeWholeOffice(db, next);
-      ensureAccounts(db, next.office);
-      if (account?.password_hash) {
-        // Free the address first in case a seeded account already uses it.
-        run(db, "UPDATE users SET email = ? WHERE email = ? AND participant_id <> ?", `moved.${randomUUID().slice(0, 8)}@office.test`, account.email, lead.id);
-        run(
-          db,
-          "UPDATE users SET email = ?, password_hash = ? WHERE participant_id = ?",
-          account.email,
-          account.password_hash,
-          lead.id,
-        );
-      }
-      syncAccessTokens(db);
-      recordAgentBacking(db, next.office);
+      run(
+        db,
+        `INSERT INTO office_ai (office_id, runtime, provider, model, api_key_cipher, key_hint, updated_at)
+         VALUES (?, ?, 'anthropic', ?, ?, ?, ?)
+         ON CONFLICT(office_id) DO UPDATE SET
+           runtime = excluded.runtime, model = excluded.model,
+           api_key_cipher = excluded.api_key_cipher, key_hint = excluded.key_hint,
+           updated_at = excluded.updated_at`,
+        officeId,
+        input.runtime,
+        model,
+        cipher,
+        hint,
+        Date.now(),
+      );
+      recordAgentBacking(db, state.office);
+      const what = input.runtime === "model" ? `a live model (${model})` : "the fixed script";
+      const keyNote = input.removeKey ? " and removed the stored API key" : typed ? " and stored a new API key" : "";
       recordAudit(db, {
-        officeId: next.office.id,
-        officeClock: next.now,
-        actorId: lead.id,
-        actionType: kind === "empty" ? "START_EMPTY" : "LOAD_DEMO",
-        subject: { taskId: null, subjectParticipantId: null, ruleId: null, roomId: null },
-        notes: [
-          kind === "empty"
-            ? `${lead.displayName} started an empty office.`
-            : `${lead.displayName} loaded the demo office.`,
-        ],
+        officeId,
+        officeClock: state.now,
+        actorId: actor.id,
+        actionType: "SET_AI_PROVIDER",
+        subject: NO_SUBJECT,
+        // The key itself is never written to the log.
+        notes: [`${actor.displayName} set the agents to ${what}${keyNote}`],
       });
     });
-    return issueSession(db, userByParticipant(db, lead.id)!);
+    return buildView(db, loadOffice(db, session), session);
+  });
+}
+
+/** Check the stored key and model against the provider. Nothing is generated. */
+export async function testAiSettings(session: Session): Promise<{ ok: true; model: string }> {
+  const db = officeDatabase();
+  const state = loadOffice(db, session);
+  requireSupervisor(state, session, "test the AI provider");
+  const row = aiRow(db, state.office.id);
+  const apiKey = unseal(row?.api_key_cipher ?? null);
+  if (!row || !apiKey) throw new OfficeError(400, "No API key is stored for this office yet.");
+  try {
+    return { ok: true, model: await testProvider(apiKey, row.model) };
+  } catch (error) {
+    throw new OfficeError(502, error instanceof Error ? error.message : "The connection test failed.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Offices
+// ---------------------------------------------------------------------------
+
+/** Create a new, empty office for the signed-in account and switch to it. */
+export function createOffice(session: Session, name: string): Promise<{ officeId: string }> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    if (!session.hasPassword) {
+      throw new OfficeError(403, "Demo access cannot add offices. Sign in with a password account.");
+    }
+    if (seatsOf(db, session.userId).length >= MAX_OFFICES_PER_ACCOUNT) {
+      throw new OfficeError(409, `An account can hold up to ${MAX_OFFICES_PER_ACCOUNT} offices.`);
+    }
+    const user: User = {
+      id: session.userId,
+      email: session.email,
+      displayName: session.displayName,
+      hasPassword: true,
+    };
+    let created: { officeId: string; participantId: string };
+    try {
+      created = transaction(db, () => {
+        const made = createBlankOfficeFor(db, user, name);
+        recordAudit(db, {
+          officeId: made.officeId,
+          officeClock: Date.now(),
+          actorId: made.participantId,
+          actionType: "CREATE_OFFICE",
+          subject: NO_SUBJECT,
+          notes: [`${user.displayName} created this office.`],
+        });
+        return made;
+      });
+    } catch (error) {
+      if (error instanceof AdminError) throw new OfficeError(400, error.message);
+      throw error;
+    }
+    switchSeat(db, session, created.officeId);
+    return { officeId: created.officeId };
+  });
+}
+
+/** Look at another of the account's offices. */
+export function switchOffice(session: Session, officeId: string): void {
+  if (!switchSeat(officeDatabase(), session, officeId)) {
+    throw new OfficeError(404, "You have no seat in that office.");
+  }
+}
+
+/**
+ * Delete an office and everything in it. Only someone who supervises it may,
+ * and the shared demo office cannot be deleted at all.
+ */
+export function removeOffice(session: Session, officeId: string): Promise<{ ok: true }> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    if (isDemoOffice(officeId)) throw new OfficeError(403, "The demo office cannot be removed.");
+    const seat = seatsOf(db, session.userId).find((s) => s.officeId === officeId);
+    if (!seat) throw new OfficeError(404, "You have no seat in that office.");
+    if (!seat.supervises) throw new OfficeError(403, "Only someone who supervises an office can remove it.");
+    transaction(db, () => deleteOffice(db, officeId));
+    runtimes.delete(officeId);
+    return { ok: true };
   });
 }

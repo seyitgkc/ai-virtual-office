@@ -574,9 +574,17 @@ function writeClock(db: Db, state: EngineState): void {
 // Seed and save
 // ---------------------------------------------------------------------------
 
-/** True once an office has been written to this database. */
-export function hasOffice(db: Db): boolean {
-  return get(db, "SELECT 1 AS found FROM offices LIMIT 1") !== undefined;
+/** True when this office exists in the database. */
+export function hasOffice(db: Db, officeId: string): boolean {
+  return get(db, "SELECT 1 AS found FROM offices WHERE id = ?", officeId) !== undefined;
+}
+
+/** A short tag no other office uses, for the ids a new office will generate. */
+export function freshIdScope(db: Db): string {
+  for (;;) {
+    const scope = `${Math.random().toString(36).slice(2, 6)}-`;
+    if (!get(db, "SELECT 1 AS found FROM offices WHERE id_scope = ?", scope)) return scope;
+  }
 }
 
 /** Write a whole office into an empty database. */
@@ -590,12 +598,14 @@ export function writeWholeOffice(db: Db, state: EngineState): void {
   {
     run(
       db,
-      "INSERT INTO offices (id, name, clock_ms, clock_step_minutes, id_sequence) VALUES (?, ?, ?, ?, ?)",
+      `INSERT INTO offices (id, name, clock_ms, clock_step_minutes, id_sequence, id_scope)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       office.id,
       office.name,
       state.now,
       state.clockStepMinutes,
       state.seq,
+      state.idScope ?? "",
     );
     writeFloorplan(db, office);
     writeStageRooms(db, office);
@@ -608,12 +618,17 @@ export function writeWholeOffice(db: Db, state: EngineState): void {
 }
 
 /**
- * Remove the office and everything that belongs to it, accounts included.
- * Call inside a transaction, together with whatever replaces it.
+ * Remove one office and everything that belongs to it: rooms, people, work,
+ * rules, tokens, seats and its audit log. Sign-ins are kept. Call inside a
+ * transaction.
  */
-export function clearDatabase(db: Db): void {
-  run(db, "DELETE FROM access_decisions");
-  run(db, "DELETE FROM offices");
+export function deleteOffice(db: Db, officeId: string): void {
+  run(
+    db,
+    "DELETE FROM access_decisions WHERE participant_id IN (SELECT id FROM participants WHERE office_id = ?)",
+    officeId,
+  );
+  run(db, "DELETE FROM offices WHERE id = ?", officeId);
 }
 
 function changed<T extends { id: string }>(before: T[], after: T[]): { written: T[]; removed: string[] } {
@@ -791,15 +806,16 @@ function groupBy<T, K>(rows: T[], key: (row: T) => K): Map<K, T[]> {
   return map;
 }
 
-/** Rebuild the engine state from the database, or null when it is empty. */
-export function loadEngineState(db: Db): EngineState | null {
+/** Rebuild one office's engine state from the database, or null when it is not there. */
+export function loadEngineState(db: Db, officeId: string): EngineState | null {
   const officeRow = get<{
     id: string;
     name: string;
     clock_ms: number;
     clock_step_minutes: number;
     id_sequence: number;
-  }>(db, "SELECT * FROM offices LIMIT 1");
+    id_scope: string;
+  }>(db, "SELECT * FROM offices WHERE id = ?", officeId);
   if (!officeRow) return null;
 
   // -- floorplan
@@ -811,12 +827,17 @@ export function loadEngineState(db: Db): EngineState | null {
   const occupantByDesk = new Map(
     all<{ id: string; desk_id: string }>(
       db,
-      "SELECT id, desk_id FROM participants WHERE desk_id IS NOT NULL",
+      "SELECT id, desk_id FROM participants WHERE desk_id IS NOT NULL AND office_id = ?",
+      officeRow.id,
     ).map((r) => [r.desk_id, r.id]),
   );
   const desks: Desk[] = all<{ id: string; room_id: string; x: number; z: number; facing: number }>(
     db,
-    "SELECT id, room_id, x, z, facing FROM desks ORDER BY position",
+    `SELECT d.id, d.room_id, d.x, d.z, d.facing
+       FROM desks d JOIN rooms r ON r.id = d.room_id
+      WHERE r.floorplan_id = ?
+      ORDER BY d.position`,
+    planRow.id,
   ).map((d) => ({
     id: d.id,
     roomId: d.room_id,
@@ -949,7 +970,13 @@ export function loadEngineState(db: Db): EngineState | null {
     granted_at: number;
     expires_at: number | null;
     expires_on_task_id: string | null;
-  }>(db, "SELECT * FROM access_rules ORDER BY position").map((r) => ({
+  }>(
+    db,
+    `SELECT r.* FROM access_rules r JOIN participants p ON p.id = r.participant_id
+      WHERE p.office_id = ?
+      ORDER BY r.position`,
+    officeRow.id,
+  ).map((r) => ({
     id: r.id,
     participantId: r.participant_id,
     room: roomOrAny(r.room_id),
@@ -1194,5 +1221,6 @@ export function loadEngineState(db: Db): EngineState | null {
     now: officeRow.clock_ms,
     seq: officeRow.id_sequence,
     clockStepMinutes: officeRow.clock_step_minutes,
+    ...(officeRow.id_scope ? { idScope: officeRow.id_scope } : {}),
   };
 }

@@ -7,8 +7,8 @@
  * limited to what this agent may read, and room records are included only for
  * rooms where the agent holds `read`.
  *
- * The API key never reaches the browser. The SDK reads it from the server's
- * environment.
+ * The API key is entered once in Settings, stored encrypted, and used only
+ * here on the server. It is never sent back to a browser.
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
@@ -22,10 +22,59 @@ import {
 import type { AccessScope, Message } from "../model";
 import { ROOM_RECORDS } from "../referenceData";
 
-export const DEFAULT_AGENT_MODEL = "claude-opus-5-5";
+export { DEFAULT_AGENT_MODEL } from "../aiModels";
 
-/** The model id agents run on. AGENT_MODEL overrides the default. */
-export const agentModel = (): string => process.env.AGENT_MODEL || DEFAULT_AGENT_MODEL;
+/** Models that accept the server-side refusal fallback. */
+const WITH_FALLBACK = new Set([
+  "claude-opus-5-5",
+  "claude-opus-5",
+  "claude-sonnet-5-5",
+  "claude-fable-5-2",
+  "claude-fable-5-1",
+]);
+
+export const validModelId = (model: string): boolean => /^claude-[a-z0-9.-]{3,60}$/.test(model);
+
+const clientFor = (apiKey: string): Anthropic =>
+  // A step should not hang the office for minutes, so the timeout is short
+  // and retries are few.
+  new Anthropic({ apiKey, timeout: 120_000, maxRetries: 1 });
+
+/** Turn a provider error into a sentence a person can act on. */
+function explain(error: unknown, who: string): Error {
+  if (error instanceof Anthropic.AuthenticationError) {
+    return new Error(`${who}: the provider rejected the API key.`);
+  }
+  if (error instanceof Anthropic.PermissionDeniedError) {
+    return new Error(`${who}: the API key is not allowed to use that model.`);
+  }
+  if (error instanceof Anthropic.NotFoundError) {
+    return new Error(`${who}: the provider does not know that model.`);
+  }
+  if (error instanceof Anthropic.RateLimitError) {
+    return new Error(`${who}: rate limited by the provider. Try again in a moment.`);
+  }
+  if (error instanceof Anthropic.APIConnectionError) {
+    return new Error(`${who}: the provider could not be reached.`);
+  }
+  if (error instanceof Anthropic.APIError) {
+    return new Error(`${who}: the provider returned an error (${error.status ?? "unknown"}).`);
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+/**
+ * Check that a key works and that the provider knows the model, without
+ * generating anything. Returns the model's display name.
+ */
+export async function testProvider(apiKey: string, model: string): Promise<string> {
+  try {
+    const info = await clientFor(apiKey).models.retrieve(model);
+    return info.display_name;
+  } catch (error) {
+    throw explain(error, "Connection test failed");
+  }
+}
 
 const StepSchema = z.object({
   statusNote: z.string(),
@@ -183,12 +232,12 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
 
 export class ModelRuntime implements AgentRuntime {
   readonly kind = "model" as const;
+  readonly model: string;
   private readonly client: Anthropic;
 
-  constructor(client?: Anthropic) {
-    // Credentials come from the server environment. A step should not hang
-    // the office for minutes, so the timeout is short and retries are few.
-    this.client = client ?? new Anthropic({ timeout: 120_000, maxRetries: 1 });
+  constructor(options: { apiKey: string; model: string }) {
+    this.model = options.model;
+    this.client = clientFor(options.apiKey);
   }
 
   async step(input: AgentStepInput): Promise<AgentStepResult> {
@@ -196,30 +245,19 @@ export class ModelRuntime implements AgentRuntime {
     let response;
     try {
       response = await this.client.beta.messages.parse({
-        model: agentModel(),
+        model: this.model,
         max_tokens: 16000,
-        // If the model declines a request, the API retries it on the
-        // recommended fallback model inside the same call.
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
+        // Where the model supports it: if it declines a request, the API
+        // retries on the recommended fallback model inside the same call.
+        ...(WITH_FALLBACK.has(this.model)
+          ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
+          : {}),
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: buildStepPrompt(input) }],
         output_config: { effort: "medium", format: zodOutputFormat(StepSchema) },
       });
     } catch (error) {
-      if (error instanceof Anthropic.AuthenticationError) {
-        throw new Error(`${who} could not start: the model API key on the server was rejected.`);
-      }
-      if (error instanceof Anthropic.RateLimitError) {
-        throw new Error(`${who} is rate limited by the model provider. Try again in a moment.`);
-      }
-      if (error instanceof Anthropic.APIConnectionError) {
-        throw new Error(`${who} could not reach the model provider.`);
-      }
-      if (error instanceof Anthropic.APIError) {
-        throw new Error(`${who} could not answer (model API error ${error.status ?? "unknown"}).`);
-      }
-      throw error;
+      throw explain(error, `${who} could not answer`);
     }
 
     if (response.stop_reason === "refusal") {

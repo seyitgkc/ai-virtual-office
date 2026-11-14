@@ -155,7 +155,14 @@ export class ScriptedRuntime implements AgentRuntime {
   readonly kind = "scripted" as const;
   constructor(private readonly script: Record<string, AgentStepResult> = DEFAULT_SCRIPT) {}
   async step(input: AgentStepInput): Promise<AgentStepResult> {
-    return this.script[`${input.participant.id}:${input.stage}`] ?? EMPTY;
+    const scripted = this.script[`${input.participant.id}:${input.stage}`];
+    if (scripted) return scripted;
+    // An agent the script does not know still leaves a trace, and says
+    // plainly that nothing thought about the work.
+    return {
+      ...EMPTY,
+      statusNote: `No model is connected, so ${input.participant.displayName} only logged the ${stageSpec(input.stage).label.toLowerCase()} step.`,
+    };
   }
 }
 
@@ -238,6 +245,11 @@ export interface EngineState {
   seq: number;
   /** Minutes the clock advances per action, so timestamps read sensibly. */
   clockStepMinutes: number;
+  /**
+   * A short tag placed in every id this office generates, so that ids from
+   * different offices in one database never collide. Empty for a lone office.
+   */
+  idScope?: string;
 }
 
 export type Action =
@@ -351,7 +363,7 @@ export async function reduce(
 ): Promise<StepResult> {
   const now = state.now + state.clockStepMinutes * 60_000;
   let seq = state.seq;
-  const nextId = (prefix: string): string => `${prefix}-${++seq}`;
+  const nextId = (prefix: string): string => `${prefix}-${state.idScope ?? ""}${++seq}`;
   const emitted: Message[] = [];
   const notes: string[] = [];
   let office = state.office;

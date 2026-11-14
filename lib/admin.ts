@@ -479,57 +479,66 @@ export function applyAdminOp(office: Office, op: AdminOp, actorId: string, newId
 
 /**
  * An office with nothing in it yet: one room, one supervising person, two
- * roles to start from, and no agents, work or rules.
+ * roles to start from, and no agents, work or rules. Every id carries the
+ * given suffix, so many such offices can live in one database.
  */
-export function blankOffice(admin: { id: string; displayName: string; title: string }): Office {
+export function blankOffice(input: {
+  suffix: string;
+  name: string;
+  admin: { displayName: string; title: string };
+}): Office {
+  const { suffix } = input;
+  const roomId = `room-${suffix}`;
+  const deskId = `desk-${suffix}`;
+  const adminId = `p-${suffix}`;
+  const adminRole = `role-${suffix}-admin`;
+  const memberRole = `role-${suffix}-member`;
   const main: Room = {
-    id: "main",
+    id: roomId,
     name: "Main room",
     purpose: "Everything happens here until more rooms are added",
     bounds: { x: 0, z: 0, w: 14, d: 10 },
-    doors: [{ id: "door-main-out", toRoomId: null, wall: "south", along: 0.5, width: 1.6 }],
-    deskIds: ["desk-admin"],
+    doors: [{ id: `door-${suffix}-out`, toRoomId: null, wall: "south", along: 0.5, width: 1.6 }],
+    deskIds: [deskId],
   };
   return {
-    id: "office",
-    name: "New office",
+    id: `o-${suffix}`,
+    name: named(input.name, "a name for the office"),
     floorplan: {
-      id: "floorplan",
+      id: `fp-${suffix}`,
       name: "Floor plan",
       description: "",
       rooms: [main],
-      desks: [
-        { id: "desk-admin", roomId: "main", position: { x: 7, z: 5 }, facing: Math.PI, occupantId: admin.id },
-      ],
+      desks: [{ id: deskId, roomId, position: { x: 7, z: 5 }, facing: Math.PI, occupantId: adminId }],
     },
-    stageRooms: { intake: "main", planning: "main", execution: "main", review: "main" },
+    stageRooms: { intake: roomId, planning: roomId, execution: roomId, review: roomId },
     participants: [
       {
-        id: admin.id,
+        id: adminId,
         kind: "human",
-        displayName: admin.displayName,
-        title: admin.title,
-        roleId: "administrator",
-        deskId: "desk-admin",
+        displayName: input.admin.displayName,
+        title: input.admin.title,
+        roleId: adminRole,
+        deskId,
         capabilities: [],
         backing: null,
         appearance: { color: "#2f6f4f" },
       },
     ],
     roles: {
-      administrator: {
-        id: "administrator",
+      [adminRole]: {
+        id: adminRole,
         name: "Administrator",
         description: "Sets up the office and supervises the work.",
         supervises: true,
         grants: [{ room: ANY_ROOM, scopes: ALL_SCOPES, effect: "allow" }],
       },
-      member: {
-        id: "member",
+      [memberRole]: {
+        id: memberRole,
         name: "Member",
         description: "Works in the main room.",
         supervises: false,
-        grants: [{ room: "main", scopes: ALL_SCOPES, effect: "allow" }],
+        grants: [{ room: roomId, scopes: ALL_SCOPES, effect: "allow" }],
       },
     },
     rules: [],

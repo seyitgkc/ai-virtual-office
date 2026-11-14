@@ -94,8 +94,28 @@ export function syncAccessTokens(db: Db): void {
   }
 }
 
-export function listAccessTokens(db: Db): AccessTokenInfo[] {
-  return all<TokenRow>(db, `${SELECT} ORDER BY t.issued_at, t.id`).map(toInfo);
+/** The tokens held by people and agents of one office. */
+export function listAccessTokens(db: Db, officeId: string): AccessTokenInfo[] {
+  return all<TokenRow>(
+    db,
+    `${SELECT} JOIN participants p ON p.id = r.participant_id
+      WHERE p.office_id = ?
+      ORDER BY t.issued_at, t.id`,
+    officeId,
+  ).map(toInfo);
+}
+
+/** The office a token belongs to, through its rule and that rule's holder. */
+export function officeOfToken(db: Db, tokenId: string): string | null {
+  const row = get<{ office_id: string }>(
+    db,
+    `SELECT p.office_id FROM access_tokens t
+       JOIN access_rules r ON r.id = t.rule_id
+       JOIN participants p ON p.id = r.participant_id
+      WHERE t.id = ?`,
+    tokenId,
+  );
+  return row?.office_id ?? null;
 }
 
 /** Why a token would be refused right now, or null when it would be accepted. */
