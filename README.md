@@ -69,15 +69,21 @@ pricing, and a finance approval before a quote goes out.
   does.
 - **An audit log.** Every action is recorded with who did it, when, and what
   it was about.
-- **Agents that can run on a live model.** Each office connects its own
-  provider in Settings. Each agent step is then a model call that is shown
-  only what that agent may read.
+- **Two kinds of agent.** An AI agent asks a language model at each step and
+  is shown only what it may read. A playbook agent follows when-then steps
+  that a person writes in Settings, with no model involved.
+- **Several AI providers per office.** Anthropic, and any service that offers
+  the OpenAI chat completions interface. Each AI agent names the provider and
+  model it uses.
+- **Granular role permissions.** Ten separate permissions, such as managing
+  access, deciding reviews or inviting people, ticked per role in a table.
 - **Many offices.** An account can add offices, switch between them and remove
   them. Each office is separate, and a new one starts empty.
-- **Invites.** A supervisor adds a person, who gets a desk and sets their own
-  password.
-- **Settings.** A supervisor can add rooms, agents and roles, edit each role's
-  access, move workflow stages between rooms and connect an AI provider.
+- **Invites.** Someone whose role may invite adds a person, who gets a desk
+  and sets their own password.
+- **Settings.** Rooms, people and agents, roles and their permissions, access
+  rules and AI providers are all set up in the interface, each behind its own
+  permission.
 - **A walkable office.** An overview from above, and a first-person mode with
   a map.
 
@@ -173,37 +179,74 @@ the set-up screen described next.
 
 ### Settings
 
-Supervisors can change how the office is set up without touching code. Every
-change is checked on the server, stored, and written to the audit log.
+How an office is set up can be changed without touching code. Every change is
+checked on the server, stored, and written to the audit log.
 
-| Tab | What you can do |
+| Tab | Needs the permission | What you can do |
+| --- | --- | --- |
+| Offices | none | See every office your account has a seat in. Open another one. Add a new office. Remove one you manage. |
+| This office | Manage the office | Rename the office. Clear all work, or remove the office. |
+| Rooms | Manage rooms | Rename a room or change its purpose. Add a room against a wall of an existing one, with a door between them. Remove an empty room. Choose which room hosts each workflow stage. |
+| People and agents | Manage people and agents | Add an AI agent or a playbook agent with a desk and a role. Choose an agent's provider and model, or write its playbook. Rename anyone, change their role, or move their desk. Remove someone who has no history. |
+| Roles and permissions | Manage roles | Add, rename or remove a role. Tick each permission per role. Tick allow or deny for each scope in each room. |
+| Access rules | Manage access | See every individual rule in a table and revoke one. Add rules for a person or agent by ticking cells and giving a reason. |
+| AI providers | Manage AI providers | Add, edit, test and remove providers. Each holds a type, a default model and an API key. |
+
+A tab appears only for someone whose role carries its permission.
+
+**Permissions.** A role carries any of ten permissions, ticked in a table of
+permissions against roles:
+
+| Permission | Lets a person |
 | --- | --- |
-| Offices | See every office your account has a seat in. Open another one. Add a new office. Remove one you supervise. |
-| This office | Rename the office. Choose which room hosts each workflow stage. Clear all work, or remove the office. |
-| Rooms | Rename a room or change its purpose. Add a room against a wall of an existing one, with a door between them. Remove an empty room. |
-| People and agents | Add an agent with a desk and a role. Rename anyone, change their role, or move their desk to another room. Remove someone who has no history. |
-| Roles | Add or remove a role. Set allow, deny or nothing for each scope in each room. Mark a role as supervising. |
-| Access rules | See every individual rule, revoke one, or add one with a reason. |
-| AI provider | Choose between the fixed script and a live model. Pick the model, store the provider's API key, and test the connection. |
+| Manage access | Grant and revoke individual access rules and permission tokens. Escalations go to people with this permission. |
+| Hand work over | Give a task to a different owner. |
+| Decide reviews | Approve or reject work at the review stage. |
+| See everything | Read every message and the whole activity log. |
+| Invite people | Add a person to the office with a role and a desk. |
+| Manage people and agents | Add, configure and remove agents. Rename people, change roles, move desks. |
+| Manage rooms | Add, rename and remove rooms. Choose where each stage happens. |
+| Manage roles | Add and remove roles and change what each role may do. |
+| Manage AI providers | Add, change and remove AI providers and their API keys. |
+| Manage the office | Rename the office, clear all work, or remove the office. |
 
-Everyone sees the Offices tab. The rest appear for people who supervise the
-office they are in.
+Nobody can hand out more than they hold. A person can tick only the
+permissions their own role carries, and can give or invite into only a role
+whose permissions are a subset of their own. Permissions are for people: a
+role held by an agent cannot carry any.
+
+**Room access.** Each role has a table with a row per room, and an Allow box
+and a Deny box for each of enter, read and act. An empty pair means not set.
+Individual rules are added from the same kind of table.
+
+**Agents.** An agent is one of two kinds, chosen when it is added and
+changeable afterwards:
+
+- An **AI agent** names one of the office's AI providers and, optionally, a
+  model other than the provider's default.
+- A **playbook agent** follows an ordered list of steps. Each step has
+  conditions under *When* (the stage the work is at, text the request
+  contains, who the request is from) and an outcome under *Then* (a line for
+  the activity log, an output, a question, an assumption, a need for access to
+  a room). The agent takes the first step whose conditions all hold. When no
+  step applies it does nothing and says so.
+
+**AI providers.** An office can hold several. A provider is either Anthropic or
+OpenAI compatible, which covers any service with the OpenAI chat completions
+interface, including a model served on your own machine. *Test* checks the key
+and the model with the provider without generating anything. A key is
+encrypted before it is stored and is never sent back to the page: afterwards
+the table shows only its last four characters. The shared demo office cannot
+hold a key.
 
 The screen refuses changes that would leave the office broken, and says why: a
 room that hosts a stage or still has people in it cannot be removed, the last
-supervising person cannot lose that power, and a role still in use cannot be
-deleted.
+person who can manage roles cannot lose that, and a role still in use cannot
+be deleted.
 
 **A new office starts empty**: one room with you in it, two starter roles, no
 agents, no work and no rules. Add rooms, assign the stages, add agents and set
 the roles from there. Demo access cannot add offices.
-
-**Connecting a model.** In *AI provider*, choose "A live language model", pick
-a model, paste the provider's API key and save. *Test connection* checks the
-key and the model with the provider without generating anything. The key is
-encrypted before it is stored and is never sent back to the page: afterwards
-the screen shows only that a key exists and its last four characters. The
-shared demo office cannot hold a key.
 
 ## Example workflows
 
@@ -249,7 +292,7 @@ and that the system will explain it. The same story runs headless under
 
 ```text
 > Advance to Execution
-   - T-1 moved to Execution (fulfilment), owner Vera
+   - T-1 moved to Execution (Fulfilment), owner Vera
    - Vera recorded an assumption: The dealer will accept a split-origin shipment
    - Vera blocked on read access to finance. Denied by individual rule r-02 (deny: Security review: fulfilment agents should not read credit data); overrides individual rule r-01 (allow: Needed landed-cost visibility for the margin review project)
    pass  blocked on permission -> blocked_permission
@@ -330,12 +373,12 @@ flowchart TB
     policy["Policy<br/>who may do what"]
     engine["Engine<br/>state transitions"]
     access["Access model<br/>resolveAccess"]
-    runtime["AgentRuntime<br/>scripted or model"]
+    runtime["AgentRuntime<br/>playbook or AI provider"]
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>41 tables in 3NF")]
-  llm["Model API<br/>optional"]
+  db[("SQLite<br/>48 tables in 3NF")]
+  llm["Anthropic or an OpenAI<br/>compatible service"]
 
   hook -->|"action"| http
   http --> service
@@ -388,6 +431,7 @@ lib/model.ts              types and the access resolver
 lib/engine.ts             state transitions and the AgentRuntime interface
 lib/policy.ts             who may dispatch which action, and what each viewer may read
 lib/admin.ts              set-up changes: rooms, roles, people, agents, a blank office
+lib/playbook.ts           how a playbook agent picks and takes a step
 lib/seed.ts               the demo office: floorplan, roles, people, rules, tasks
 lib/referenceData.ts      mock business records kept in each room
 lib/geometry.ts           walls, doors, walking collision, desk placement
@@ -400,12 +444,14 @@ lib/server/auth.ts        password hashing, users, seats, JWT sessions
 lib/server/secrets.ts     encryption for stored API keys
 lib/server/accessTokens.ts   scoped permission tokens
 lib/server/invites.ts     inviting people
-lib/server/modelRuntime.ts   the model-backed agent runtime
+lib/server/providers.ts   an office's AI providers and the runtime each AI agent gets
+lib/server/modelRuntime.ts   the AI agent runtime for Anthropic models
+lib/server/openaiRuntime.ts  the AI agent runtime for OpenAI compatible services
 app/api/                  route handlers
 app/page.tsx              the office, for a signed-in person
 app/login, app/invite     sign-in and invite pages
 components/               3D scene, panels, settings, sign-in and invite forms
-scripts/                  seven check scripts
+scripts/                  eight check scripts
 Dockerfile, compose.yaml  container build and run
 ```
 
@@ -499,7 +545,10 @@ server enforces it and the interface uses it to disable controls.
 | File a request | `act` in Reception |
 | Advance a task, confirm or contradict an assumption | `act` in the room where the task is |
 | Answer a question | being the person asked, or `act` in that room |
-| Grant or revoke access, hand work over, approve or reject | a role that supervises |
+| Grant or revoke an access rule | the Manage access permission |
+| Hand work to another owner | the Hand work over permission |
+| Approve or reject at review | the Decide reviews permission |
+| Change the office's set-up | the permission for that part: rooms, people and agents, roles, AI providers or the office itself |
 
 The server overwrites every "who did this" field with the signed-in person
 before the engine sees the action. An actor id sent by the browser is ignored.
@@ -510,7 +559,6 @@ Agent reasoning sits behind one interface:
 
 ```ts
 interface AgentRuntime {
-  readonly kind: "scripted" | "model";
   step(input: AgentStepInput): Promise<AgentStepResult>;
 }
 
@@ -523,9 +571,30 @@ interface AgentStepResult {
 }
 ```
 
-Two runtimes implement it. `ScriptedRuntime` is a lookup table keyed by
-participant and stage, and it is the default. `ModelRuntime` makes one
-structured-output call per step to a language model.
+Each agent answers for itself, by its kind:
+
+```mermaid
+flowchart LR
+  step["Work reaches<br/>an agent"] --> kind{"Kind of agent"}
+  kind -->|playbook| book["First playbook step<br/>whose conditions hold"]
+  kind -->|AI| prov{"Its provider"}
+  prov -->|Anthropic| claude["Structured call<br/>through the Anthropic SDK"]
+  prov -->|OpenAI compatible| chat["Chat completions call<br/>to the provider's address"]
+  book --> result["AgentStepResult"]
+  claude --> result
+  chat --> result
+```
+
+A playbook step is data: conditions (stage, text in the request, who asked) and
+an outcome made of the same five parts as `AgentStepResult`. `lib/playbook.ts`
+finds the first step that applies and returns its outcome. No model is called.
+
+An AI agent's step is one model call. Both provider types are given the same
+prompt and must return the same five fields. For an OpenAI compatible service
+the reply format is requested as a JSON schema first, then as plain JSON mode,
+then with no format at all, because services differ in what they accept. An AI
+agent with no working provider stops the action with a message that says which
+setting is missing.
 
 What an agent is shown is decided before the runtime is called:
 
@@ -543,10 +612,10 @@ flowchart LR
 ```
 
 An agent without `read` on Finance never receives Finance's records or
-messages, whichever runtime is in use. If it needs them, it has to say so in
+messages, whichever kind of agent it is. If it needs them, it has to say so in
 `needs`, which is what halts the task and brings a person in.
 
-The model's reply is validated against a schema and then cleaned: rooms and
+A model's reply is validated against a schema and then cleaned: rooms and
 people that do not exist are dropped, lists are capped and text is trimmed.
 
 ### Sign-in and sessions
@@ -618,13 +687,12 @@ last reason, until `r-02` is revoked.
 | `POST /api/auth/logout` | signed in | Revoke the session |
 | `GET /api/office` | signed in | The office as this viewer may see it |
 | `POST /api/office/actions` | signed in | Apply one action |
-| `POST /api/admin` | supervisor | Apply one set-up change |
-| `POST /api/admin/ai` | supervisor, password account | Set the runtime and model, store or remove the API key |
-| `POST /api/admin/ai/test` | supervisor | Check the stored key and model with the provider |
+| `POST /api/admin` | the permission for that change | Apply one set-up change |
+| `POST /api/admin/providers` | Manage AI providers, password account | Add, change, remove or test an AI provider |
 | `POST /api/offices` | signed in | Add an office, switch to another, or remove one |
-| `POST /api/invites` | supervisor | Create a person, a desk and an invite link |
+| `POST /api/invites` | Invite people | Create a person, a desk and an invite link |
 | `POST /api/invites/accept` | invite holder | Set email and password, sign in |
-| `POST /api/tokens/:id` | supervisor, or holder to reveal | Reveal or revoke a permission token |
+| `POST /api/tokens/:id` | Manage access, or holder to reveal | Reveal or revoke a permission token |
 | `GET /api/rooms/:room/thread` | permission token | Read a room's records and thread |
 
 ### Rendering
@@ -643,7 +711,7 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 41 tables. One database holds many offices. The schema is in
+SQLite, one file, 48 tables. One database holds many offices. The schema is in
 third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
@@ -678,6 +746,7 @@ erDiagram
   rooms ||--o{ stage_rooms : hosts
   offices ||--o{ stage_rooms : maps
   offices ||--o{ roles : defines
+  roles ||--o{ role_permissions : carries
   roles ||--o{ role_grants : grants
   role_grants ||--|{ role_grant_scopes : covers
   rooms o|--o{ role_grants : "applies to"
@@ -685,7 +754,6 @@ erDiagram
   roles ||--o{ participants : assigned
   desks o|--o| participants : seats
   participants ||--o{ participant_capabilities : lists
-  participants ||--o| agent_backings : "backed by"
   participants ||--o{ access_rules : subject
   access_rules ||--|{ access_rule_scopes : covers
   rooms o|--o{ access_rules : "applies to"
@@ -720,7 +788,11 @@ erDiagram
   roles {
     text id PK
     text name
-    int supervises
+    text description
+  }
+  role_permissions {
+    text role_id PK
+    text permission PK
   }
   role_grants {
     text role_id PK
@@ -734,11 +806,6 @@ erDiagram
     text display_name
     text role_id FK
     text desk_id FK
-  }
-  agent_backings {
-    text participant_id PK
-    text provider
-    text model
   }
   access_rules {
     text id PK
@@ -755,6 +822,86 @@ erDiagram
     text scope PK
   }
 ```
+
+### Agents, providers and playbooks
+
+```mermaid
+erDiagram
+  offices ||--o{ ai_providers : connects
+  participants ||--o| agent_settings : "configured by"
+  ai_providers o|--o{ agent_settings : "answers for"
+  participants ||--o{ playbook_steps : follows
+  participants o|--o{ playbook_steps : "request is from"
+  playbook_steps ||--o| playbook_outputs : posts
+  playbook_steps ||--o| playbook_questions : asks
+  playbook_questions ||--o{ playbook_question_options : offers
+  participants o|--o{ playbook_questions : "is asked"
+  playbook_steps ||--o| playbook_assumptions : records
+  playbook_steps ||--o| playbook_needs : needs
+  rooms ||--o{ playbook_needs : "access to"
+
+  ai_providers {
+    text id PK
+    text office_id FK
+    int position
+    text name
+    text kind
+    text base_url
+    text default_model
+    text api_key_cipher
+    text key_hint
+  }
+  agent_settings {
+    text participant_id PK
+    text agent_type
+    text provider_id FK
+    text model
+  }
+  playbook_steps {
+    text id PK
+    text participant_id FK
+    int position
+    text stage
+    text request_contains
+    text requested_by FK
+    text status_note
+  }
+  playbook_outputs {
+    text step_id PK
+    text label
+    text body
+  }
+  playbook_questions {
+    text step_id PK
+    text body
+    text to_participant_id FK
+    int blocking
+  }
+  playbook_question_options {
+    text step_id PK
+    int position PK
+    text label
+  }
+  playbook_assumptions {
+    text step_id PK
+    text assumed
+    text because
+    text confidence
+  }
+  playbook_needs {
+    text step_id PK
+    text room_id FK
+    text scope
+    text purpose
+  }
+```
+
+An agent's kind, provider and model live in `agent_settings`, one row per
+agent. Removing a provider sets `provider_id` to NULL and leaves the agent in
+place. A playbook step keeps its conditions on the step row, where a NULL
+stage means any stage and a NULL `requested_by` means anyone. Each part of a
+step's outcome has its own table and a row there only when the step does that
+thing, so no step carries empty columns for parts it does not use.
 
 ### Work and messages
 
@@ -854,7 +1001,6 @@ erDiagram
   participants ||--o| memberships : "is the seat of"
   users ||--o{ sessions : holds
   participants o|--o{ sessions : "currently viewing"
-  offices ||--o| office_ai : configures
   participants ||--o| invites : "invited by link"
   access_rules ||--o{ access_tokens : issues
   access_rule_scopes ||--o| access_tokens : "one per scope"
@@ -879,14 +1025,6 @@ erDiagram
     int issued_at
     int expires_at
     int revoked_at
-  }
-  office_ai {
-    text office_id PK
-    text runtime
-    text provider
-    text model
-    text api_key_cipher
-    text key_hint
   }
   invites {
     text id PK
@@ -937,7 +1075,8 @@ foreign keys, so an entry survives the task or rule it describes.
 - three.js through @react-three/fiber and @react-three/drei.
 - SQLite through Node's built-in `node:sqlite`. No native add-on to compile.
 - jose for JWT signing and verification. Node's scrypt for password hashing.
-- The Anthropic SDK and zod for the optional model-backed runtime.
+- The Anthropic SDK for Anthropic providers, plain `fetch` for OpenAI
+  compatible ones, and zod to validate a model's reply.
 - tsx to run the check scripts under Node.
 - Docker for self-hosting.
 
@@ -949,50 +1088,55 @@ foreign keys, so an entry survives the task or rule it describes.
 - The workflow engine: handoffs, halts on permission and on questions,
   retesting blocked tasks after a rule change.
 - Sign-in, sessions, sign-out, invites and password accounts.
-- Server-side enforcement: per-viewer message filtering and per-action
-  authorization.
+- Server-side enforcement: per-viewer message filtering, per-action
+  authorization, and a separate permission for each kind of set-up change.
 - Permission tokens and the room thread endpoint they open.
 - Persistence in SQLite and the audit log.
-- The settings screen: rooms, people and agents, roles, access rules and the
-  AI provider.
+- The settings screen: rooms, people and agents, roles and permissions, access
+  rules and AI providers.
+- Playbook agents: the step editor, storage, and the matching of steps to
+  work.
+- AI agents on an OpenAI compatible provider, end to end. The check scripts
+  and a run in the browser use a stand-in service on the same machine that
+  speaks the chat completions interface.
+- Several AI providers per office, each with an encrypted, write-only API key
+  and a connection test.
 - Many offices per account, each isolated, with adding, switching and
   removing.
-- AI provider settings: an encrypted, write-only API key per office and a
-  connection test against the provider.
 - The 3D office, walking, the map.
-- The model-backed runtime's code path: prompt assembly from what the agent may
-  read, the structured call, and validation of the reply.
 
 **Simulated**
 
-- By default, all agent reasoning. Agents answer from a fixed script and
-  respond to any request as a dealer order for multi-zone heads. The interface
-  says so on the title card and on each agent.
+- The demo office's agents are playbook agents. Their playbooks were written
+  for a dealer order of multi-zone heads and answer any request that way. The
+  demo says so on its title card and on its request form.
 - All business data: dealers, branches, stock, pricing tiers, people. The
   records in `lib/referenceData.ts` are invented.
 
-With a model connected the reasoning is live and the business data is still
-invented. The stored data says which is which: an agent has a row in
-`agent_backings` only while a model answers for it, and every output message
-carries a `simulated` flag.
+The stored data says which is which. Every agent is labelled as an AI agent or
+a playbook agent, and every output message records whether it came from a
+playbook.
 
 **Not verified in this repository**
 
-- A live agent step. The connection test has been run against the real
-  provider and correctly reported a rejected key, so the network path and the
-  SDK call work. The prompt assembly and the handling of a model's reply are
-  covered by checks that never touch the network. No agent step has been run
-  with a working key, because none was available while this was written.
+- A live agent step against a commercial model. The Anthropic connection test
+  has been run against the real provider and correctly reported a rejected
+  key, so the network path and the SDK call work. Prompt assembly, the
+  OpenAI compatible call and the handling of a model's reply are covered by
+  checks that stay on one machine. No step has been run with a paid key,
+  because none was available while this was written.
 
 **Proposed**
 
 - Connectors to real systems such as the storefront, inventory and accounting,
   in place of the invented room records.
+- Tools for AI agents, so a step can look something up instead of only
+  reading what the room holds.
+- More playbook conditions, such as the answer to an earlier question.
 - A drag-and-drop floorplan editor. Rooms are added today through a form.
 - Workflows with a different number of stages.
 - Live updates pushed to the browser. Today each browser re-reads the office
   every five seconds.
-- Several offices in one deployment.
 
 ## Security
 
@@ -1007,10 +1151,18 @@ carries a `simulated` flag.
   invite token, and only the id of a permission token, are kept.
 - Input is parsed into known actions field by field. Unknown fields never
   reach the engine.
-- A model provider's API key is entered in Settings, encrypted with
-  AES-256-GCM under a key derived from the server's signing key, and never
-  sent back to a browser. It is not written to the audit log. If the signing
-  key changes, stored keys become unreadable and must be entered again.
+- A provider's API key is entered in Settings, encrypted with AES-256-GCM
+  under a key derived from the server's signing key, and never sent back to a
+  browser. It is not written to the audit log. If the signing key changes,
+  stored keys become unreadable and must be entered again.
+- An OpenAI compatible provider's address is fetched by the server. Only http
+  and https addresses are accepted, addresses carrying a user name or password
+  are refused, and so are link-local addresses, where cloud machines keep
+  their metadata service. An address on the server's own network is allowed on
+  purpose, for a model served locally, so give Manage AI providers only to
+  people you would trust with that.
+- Each kind of set-up change needs its own permission, and nobody can grant a
+  permission, or give or invite into a role, beyond what they hold.
 - Offices are isolated on the server. Every request acts on the office of the
   session's seat, and ids from another office are treated as not existing.
 - Demo access cannot add offices, cannot remove the demo office and cannot
@@ -1025,8 +1177,10 @@ carries a `simulated` flag.
 
 ## Limitations
 
-- One office per deployment. The workflow always has the same five stages,
-  though each office chooses which room hosts each one.
+- The workflow always has the same five stages, though each office chooses
+  which room hosts each one.
+- A playbook's conditions are the stage, text in the request and who asked.
+  An AI agent has no tools: it reads what its rooms hold and replies.
 - A model-backed step takes several seconds, and the interface waits for it.
 - Agents take a step when work arrives. An agent that was blocked does not
   redo its step after access is granted. The task moves on at the next
@@ -1040,8 +1194,8 @@ carries a `simulated` flag.
 - A person or agent who appears in tasks or messages cannot be removed until
   the work is cleared.
 - The layout targets desktop screens. Panels overlap on a phone.
-- The time shown in the office is a fixed demo clock that steps forward three
-  minutes per action.
+- The demo office shows a fixed demo clock that steps forward three minutes
+  per action. Other offices use real time.
 
 ## Run it
 
@@ -1052,7 +1206,7 @@ Requires Node 24 or later, for the built-in SQLite module.
 ```bash
 npm install
 npm run dev       # http://localhost:3000
-npm run verify    # type check, then all seven check scripts
+npm run verify    # type check, then all eight check scripts
 npm run build     # production server in .next/standalone
 ```
 
@@ -1105,18 +1259,20 @@ fresh filesystem.
 
 ## Verification
 
-Every script runs under Node with no network. Six use an in-memory database
-and one a temporary database file.
+Every script runs under Node and nothing leaves the machine. Six use an
+in-memory database and one a temporary database file. The eighth needs no
+database and starts a stand-in model service on a local port.
 
 | What | Command | Result |
 | --- | --- | --- |
 | Access precedence, expiry, read gating, walking through doors, desk placement | `npm run check` | 34 of 34 pass |
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
-| Database round trip after every action and every set-up change, foreign keys, integrity | `npm run store` | 34 of 34 pass |
+| Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
 | What an agent is shown, and cleaning of a model's reply | `npm run agents` | 20 of 20 pass |
-| Set-up changes, their refusals, and an office built from nothing | `npm run admin` | 48 of 48 pass |
-| Several offices in one database: the administrator's empty office, isolation, AI key handling, removal | `npm run offices` | 53 of 53 pass |
+| Which playbook step applies, and an AI agent's call to an OpenAI compatible service | `npm run providers` | 33 of 33 pass |
+| Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
+| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 81 of 81 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
