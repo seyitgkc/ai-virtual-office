@@ -11,9 +11,14 @@ export async function currentSession(): Promise<Session | null> {
 
 export async function setSessionCookie(token: string): Promise<void> {
   const store = await cookies();
-  // Marked Secure whenever the visitor arrived over HTTPS, which behind a
-  // reverse proxy is reported in a forwarded header.
-  const viaHttps = (await headers()).get("x-forwarded-proto")?.split(",")[0]?.trim() === "https";
+  // Marked Secure whenever the visitor is on HTTPS. A reverse proxy normally
+  // reports that in a forwarded header. Some proxy chains replace that header
+  // with "http", so the Origin the browser sends with the sign-in request is
+  // accepted as evidence too.
+  const request = await headers();
+  const viaHttps =
+    request.get("x-forwarded-proto")?.split(",")[0]?.trim() === "https" ||
+    request.get("origin")?.startsWith("https://") === true;
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
