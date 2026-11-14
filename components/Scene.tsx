@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, ContactShadows } from "@react-three/drei";
 import { Fog, PerspectiveCamera, Vector3 } from "three";
 import type { Office } from "../lib/model";
-import { planExtent } from "../lib/geometry";
+import { planExtent, seatPosition, type WalkPose } from "../lib/geometry";
 import { RoomMesh } from "./RoomMesh";
 import { DeskMesh } from "./Desk";
 import { Figure } from "./Figure";
+import { WalkControls } from "./WalkControls";
 
 const FOV = 34;
+/** The plan has no ceiling, so on foot the space above the walls is open sky. */
+const WALK_SKY = "#a9b3bd";
 /** Screen width taken by the left column and the inspector, margins included. */
 const PANEL_WIDTH = 634;
 /** Direction from the orbit target to the camera's resting position. */
@@ -30,7 +33,7 @@ function Framing({
   target: Vector3;
   nearEdge: Vector3;
   planWidth: number;
-  touched: React.MutableRefObject<boolean>;
+  touched: MutableRefObject<boolean>;
 }) {
   const { camera, scene, size } = useThree();
 
@@ -56,6 +59,9 @@ function Framing({
 
 export function Scene({
   office,
+  mode,
+  walkPose,
+  onWalkRoomChange,
   selectedId,
   onSelectParticipant,
   onSelectRoom,
@@ -63,6 +69,10 @@ export function Scene({
   participantAlert,
 }: {
   office: Office;
+  /** Overview orbits the whole plan. Walk puts the camera at eye level. */
+  mode: "overview" | "walk";
+  walkPose: MutableRefObject<WalkPose>;
+  onWalkRoomChange: (roomId: string | null) => void;
   selectedId: string | null;
   onSelectParticipant: (id: string) => void;
   onSelectRoom: (id: string) => void;
@@ -79,6 +89,9 @@ export function Scene({
   const target = useRef(new Vector3(cx + 0.5, 0, cz + 1.2)).current;
   const nearEdge = useRef(new Vector3(cx, 0, ext.maxZ)).current;
   const cameraTouched = useRef(false);
+  const walking = mode === "walk";
+  // Coming back from a walk always returns to the fitted overview.
+  if (walking) cameraTouched.current = false;
 
   return (
     <Canvas
@@ -87,14 +100,22 @@ export function Scene({
       gl={{ antialias: true }}
       style={{ position: "absolute", inset: 0 }}
     >
-      <color attach="background" args={["#16181d"]} />
-      <fog attach="fog" args={["#16181d", 48, 96]} />
-      <Framing
-        target={target}
-        nearEdge={nearEdge}
-        planWidth={ext.maxX - ext.minX + 1}
-        touched={cameraTouched}
-      />
+      <color attach="background" args={[walking ? WALK_SKY : "#16181d"]} />
+      <fog attach="fog" args={[walking ? WALK_SKY : "#16181d", 48, 96]} />
+      {walking ? (
+        <WalkControls
+          floorplan={office.floorplan}
+          pose={walkPose}
+          onRoomChange={onWalkRoomChange}
+        />
+      ) : (
+        <Framing
+          target={target}
+          nearEdge={nearEdge}
+          planWidth={ext.maxX - ext.minX + 1}
+          touched={cameraTouched}
+        />
+      )}
 
       <ambientLight intensity={0.92} />
       <hemisphereLight args={["#fff4e4", "#3a3f4a", 0.55]} />
@@ -123,6 +144,7 @@ export function Scene({
           key={room.id}
           room={room}
           highlight={roomHighlight(room.id)}
+          walking={walking}
           onSelect={() => onSelectRoom(room.id)}
         />
       ))}
@@ -136,14 +158,13 @@ export function Scene({
         if (!desk) return null;
         // The seat sits behind the desk origin in the desk's own frame, so
         // rotating a desk moves its occupant with it.
-        const seat = 0.32;
-        const sx = desk.position.x + seat * Math.sin(desk.facing);
-        const sz = desk.position.z + seat * Math.cos(desk.facing);
+        const seat = seatPosition(desk);
         return (
           <Figure
             key={p.id}
             participant={p}
-            position={[sx, sz]}
+            position={[seat.x, seat.z]}
+            walking={walking}
             facing={desk.facing + Math.PI}
             selected={selectedId === p.id}
             alert={participantAlert(p.id)}
@@ -160,17 +181,19 @@ export function Scene({
         far={5}
       />
 
-      <OrbitControls
-        target={target}
-        onStart={() => {
-          cameraTouched.current = true;
-        }}
-        maxPolarAngle={Math.PI / 2.15}
-        minDistance={10}
-        maxDistance={120}
-        enableDamping
-        dampingFactor={0.08}
-      />
+      {!walking && (
+        <OrbitControls
+          target={target}
+          onStart={() => {
+            cameraTouched.current = true;
+          }}
+          maxPolarAngle={Math.PI / 2.15}
+          minDistance={10}
+          maxDistance={120}
+          enableDamping
+          dampingFactor={0.08}
+        />
+      )}
     </Canvas>
   );
 }

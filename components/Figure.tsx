@@ -5,6 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
 import type { Mesh } from "three";
 import type { Participant } from "../lib/model";
+import { CLICK_SLOP } from "./RoomMesh";
 
 /**
  * A person or an agent at a desk. The two read differently on purpose: people
@@ -17,6 +18,7 @@ export function Figure({
   facing,
   selected,
   alert,
+  walking,
   onSelect,
 }: {
   participant: Participant;
@@ -24,6 +26,8 @@ export function Figure({
   facing: number;
   selected: boolean;
   alert: "none" | "question" | "permission";
+  /** On foot, walls hide the name tags of people in other rooms. */
+  walking: boolean;
   onSelect: () => void;
 }) {
   const ring = useRef<Mesh>(null);
@@ -49,7 +53,7 @@ export function Figure({
       <group
         onClick={(e) => {
           e.stopPropagation();
-          onSelect();
+          if (e.delta <= CLICK_SLOP) onSelect();
         }}
         onPointerOver={(e) => {
           e.stopPropagation();
@@ -121,11 +125,17 @@ export function Figure({
         </mesh>
       )}
 
-      <Html position={[0, 1.95, 0]} center distanceFactor={14} zIndexRange={[20, 0]}>
+      <Html
+        position={[0, 1.95, 0]}
+        center
+        zIndexRange={[20, 0]}
+        occlude={walking ? "raycast" : undefined}
+      >
         <div className="name-tag">
-          <span className="dot" style={{ background: colour }} />
+          <span className="kind-badge" data-kind={participant.kind}>
+            {isAgent ? "AI" : "Human"}
+          </span>
           {participant.displayName}
-          <span className="kind">{isAgent ? "agent" : "person"}</span>
         </div>
       </Html>
     </group>

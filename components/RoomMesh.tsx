@@ -4,6 +4,7 @@ import { Html } from "@react-three/drei";
 import type { Room } from "../lib/model";
 import {
   WALL_HEIGHT,
+  WALL_THICK,
   doorMarkers,
   roomCentre,
   wallSegments,
@@ -18,16 +19,25 @@ export const ROOM_TINT: Record<string, string> = {
   operations: "#d2cbdf",
 };
 
+/** Walls rise to room height when the viewer is standing inside them. */
+const WALK_WALL_HEIGHT = 2.5;
+const DOOR_HEIGHT = 2.05;
+/** A press that travelled further than this was a drag, so it selects nothing. */
+export const CLICK_SLOP = 5;
+
 export function RoomMesh({
   room,
   highlight,
+  walking,
   onSelect,
 }: {
   room: Room;
   /** Set when a task is halted in here. */
   highlight: "none" | "question" | "permission";
+  walking: boolean;
   onSelect: () => void;
 }) {
+  const wallHeight = walking ? WALK_WALL_HEIGHT : WALL_HEIGHT;
   const segments = wallSegments(room);
   const doors = doorMarkers(room);
   const { cx, cz } = roomCentre(room);
@@ -49,7 +59,7 @@ export function RoomMesh({
         receiveShadow
         onClick={(e) => {
           e.stopPropagation();
-          onSelect();
+          if (e.delta <= CLICK_SLOP) onSelect();
         }}
       >
         <planeGeometry args={[room.bounds.w - 0.2, room.bounds.d - 0.2]} />
@@ -81,38 +91,56 @@ export function RoomMesh({
       {segments.map((s) => (
         <mesh
           key={s.id}
-          position={[s.cx, WALL_HEIGHT / 2, s.cz]}
+          position={[s.cx, wallHeight / 2, s.cz]}
           castShadow
           receiveShadow
         >
-          <boxGeometry args={[s.lx, WALL_HEIGHT, s.lz]} />
+          <boxGeometry args={[s.lx, wallHeight, s.lz]} />
           <meshStandardMaterial color="#f1ede5" roughness={0.9} />
         </mesh>
       ))}
 
-      {/* a lintel over each opening, so doorways read as doorways */}
-      {doors.map((d) => (
-        <mesh key={d.id} position={[d.cx, WALL_HEIGHT - 0.18, d.cz]}>
-          <boxGeometry args={[0.46, 0.36, 0.46]} />
-          <meshStandardMaterial
-            color={d.exterior ? "#b9b2a4" : "#e4dfd5"}
-            roughness={0.9}
-          />
-        </mesh>
-      ))}
+      {/* From above, a block marks each opening. On foot, the wall closes over it. */}
+      {doors.map((d) =>
+        walking ? (
+          <mesh key={d.id} position={[d.cx, (DOOR_HEIGHT + wallHeight) / 2, d.cz]}>
+            <boxGeometry
+              args={[
+                d.alongX ? d.width : WALL_THICK,
+                wallHeight - DOOR_HEIGHT,
+                d.alongX ? WALL_THICK : d.width,
+              ]}
+            />
+            <meshStandardMaterial
+              color={d.exterior ? "#b9b2a4" : "#e4dfd5"}
+              roughness={0.9}
+            />
+          </mesh>
+        ) : (
+          <mesh key={d.id} position={[d.cx, wallHeight - 0.18, d.cz]}>
+            <boxGeometry args={[0.46, 0.36, 0.46]} />
+            <meshStandardMaterial
+              color={d.exterior ? "#b9b2a4" : "#e4dfd5"}
+              roughness={0.9}
+            />
+          </mesh>
+        ),
+      )}
 
       {/* Annotation sits in a corner, clear of the desks. */}
-      <Html
-        position={[cx, 0.06, room.bounds.z + 0.95]}
-        center
-        distanceFactor={26}
-        zIndexRange={[10, 0]}
-      >
-        <div className="room-label">
-          <div className="name">{room.name}</div>
-          <div className="purpose">{room.purpose}</div>
-        </div>
-      </Html>
+      {!walking && (
+        <Html
+          position={[cx, 0.06, room.bounds.z + 0.95]}
+          center
+          distanceFactor={26}
+          zIndexRange={[10, 0]}
+        >
+          <div className="room-label">
+            <div className="name">{room.name}</div>
+            <div className="purpose">{room.purpose}</div>
+          </div>
+        </Html>
+      )}
     </group>
   );
 }

@@ -1,6 +1,7 @@
 /** Exercises the access model against the seed office. Run: npx tsx check.ts */
 import { resolveAccess, hasConflict, canRead, type IndividualRule } from "../lib/model";
 import { office, contextFor, byId } from "../lib/seed";
+import { entryPose, obstacles, planExtent, roomAt, stepWalker } from "../lib/geometry";
 
 const ctx = contextFor(office);
 let failures = 0;
@@ -66,6 +67,43 @@ const escalation = office.messages.find((m) => m.id === "m-1012")!;
 expect("Dana reads the escalation sent to her", canRead(escalation, byId("p-dana"), ctx), true);
 expect("Quill reads their own escalation", canRead(escalation, byId("p-quill"), ctx), true);
 expect("Atlas reads someone else's DM", canRead(escalation, byId("p-atlas"), ctx), false);
+
+console.log("\n-- walking the plan --");
+{
+  const { rooms } = office.floorplan;
+  const all = obstacles(office.floorplan);
+  const ext = planExtent(rooms);
+  const bounds = { minX: ext.minX - 3, maxX: ext.maxX + 3, minZ: ext.minZ - 3, maxZ: ext.maxZ + 3 };
+  const walk = (from: { x: number; z: number }, dx: number, dz: number, steps: number) => {
+    let at = from;
+    for (let i = 0; i < steps; i++) at = stepWalker(at, dx, dz, all, 0.3, bounds);
+    return at;
+  };
+
+  const start = entryPose(rooms);
+  expect("visitor starts outside", roomAt(rooms, start.x, start.z), null);
+  const inside = walk(start, 0, 0.05, 70);
+  expect("front door leads into Reception", roomAt(rooms, inside.x, inside.z)?.id, "reception");
+
+  // Straight at the solid wall between Reception and Planning, away from its door.
+  const atWall = walk({ x: 8, z: 1.5 }, 0.05, 0, 100);
+  expect("a wall stops the walker", roomAt(rooms, atWall.x, atWall.z)?.id, "reception");
+
+  // Every interior door pair lines up well enough to walk through.
+  const crossings: Array<[string, { x: number; z: number }, number, number, string]> = [
+    ["Reception to Planning", { x: 8.5, z: 4 }, 0.05, 0, "planning"],
+    ["Planning to Finance", { x: 18.5, z: 4 }, 0.05, 0, "finance"],
+    ["Reception to Fulfilment", { x: 5, z: 6.5 }, 0, 0.05, "fulfilment"],
+    ["Planning to Fulfilment", { x: 12.5, z: 6.5 }, 0, 0.05, "fulfilment"],
+    ["Planning to Operations", { x: 17.5, z: 6.5 }, 0, 0.05, "operations"],
+    ["Finance to Operations", { x: 25, z: 6.5 }, 0, 0.05, "operations"],
+    ["Fulfilment to Operations", { x: 13.5, z: 12 }, 0.05, 0, "operations"],
+  ];
+  for (const [label, from, dx, dz, wanted] of crossings) {
+    const end = walk(from, dx, dz, 60);
+    expect(label, roomAt(rooms, end.x, end.z)?.id, wanted);
+  }
+}
 
 console.log(`\n${failures === 0 ? "all checks passed" : failures + " FAILED"}\n`);
 process.exit(failures === 0 ? 0 : 1);

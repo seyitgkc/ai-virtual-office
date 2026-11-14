@@ -92,8 +92,8 @@ const rooms: Room[] = [
     purpose: "Stock across branches, transfers and quoting",
     bounds: { x: 0, z: 8, w: 15, d: 8 },
     doors: [
-      { id: "d-ful-rec", toRoomId: "reception", wall: "south", along: 0.33, width: 1.4 },
-      { id: "d-ful-pla", toRoomId: "planning", wall: "south", along: 0.8, width: 1.4 },
+      { id: "d-ful-rec", toRoomId: "reception", wall: "south", along: 1 / 3, width: 1.4 },
+      { id: "d-ful-pla", toRoomId: "planning", wall: "south", along: 5 / 6, width: 1.4 },
       { id: "d-ful-ops", toRoomId: "operations", wall: "east", along: 0.5, width: 1.4 },
     ],
     deskIds: ["desk-ful-1", "desk-ful-2"],
@@ -105,8 +105,8 @@ const rooms: Room[] = [
     bounds: { x: 15, z: 8, w: 15, d: 8 },
     doors: [
       { id: "d-ops-ful", toRoomId: "fulfilment", wall: "west", along: 0.5, width: 1.4 },
-      { id: "d-ops-pla", toRoomId: "planning", wall: "south", along: 0.2, width: 1.4 },
-      { id: "d-ops-fin", toRoomId: "finance", wall: "south", along: 0.7, width: 1.4 },
+      { id: "d-ops-pla", toRoomId: "planning", wall: "south", along: 1 / 6, width: 1.4 },
+      { id: "d-ops-fin", toRoomId: "finance", wall: "south", along: 2 / 3, width: 1.4 },
     ],
     deskIds: ["desk-ops-1"],
   },

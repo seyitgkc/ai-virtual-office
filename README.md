@@ -71,8 +71,13 @@ access.
 **Moving around.** Drag to orbit, scroll to zoom, right-drag to pan. Walls are
 drawn low so every room stays visible from any angle.
 
-**Reading the office.** People are rounded figures. Agents are faceted and carry
-a slowly turning ring. A pulsing marker above a figure means that figure owns a
+**Walking.** *Walk the office* puts you at the front door at eye level. Move
+with W A S D or the arrow keys, hold Shift to move faster, drag to look around
+and click someone to inspect them. A map in the corner shows where you are.
+Escape returns to the overview.
+
+**Reading the office.** Every name tag says Human or AI. People are rounded
+figures. Agents are faceted and carry a slowly turning ring. A pulsing marker above a figure means that figure owns a
 halted task.
 
 **Work in the office** (left). Every task with its status. Click one to open it.
@@ -183,7 +188,7 @@ lib/geometry.ts     floorplan rectangles to wall segments
 lib/useOffice.ts    React binding over the reducer
 components/         3D scene (Scene, RoomMesh, Desk, Figure) and the panels
 app/                Next.js page that composes scene and panels
-scripts/check.ts    20 checks on access precedence
+scripts/check.ts    30 checks on access precedence and walking the plan
 scripts/scenario.ts 22 checks on a full workflow
 Dockerfile          two-stage image: build and check, then nginx
 docker/nginx.conf   static file server config
@@ -388,7 +393,7 @@ on localhost only, so put a reverse proxy with TLS in front of it on a server.
 
 | What | Command | Result |
 | --- | --- | --- |
-| Access precedence, expiry, read gating | `npm run check` | 20 of 20 pass |
+| Access precedence, expiry, read gating, walking through doors | `npm run check` | 30 of 30 pass |
 | Full lifecycle, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | static export, one page |

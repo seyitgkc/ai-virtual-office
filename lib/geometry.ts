@@ -7,7 +7,7 @@
  *
  * Convention: south = low z, north = high z, west = low x, east = high x.
  */
-import type { Door, Room, Wall } from "./model";
+import type { Desk, Door, Floorplan, Room, Wall } from "./model";
 
 /**
  * Deliberately low. Full-height walls occlude the rooms behind them from any
@@ -34,6 +34,10 @@ export interface DoorMarker {
   cz: number;
   /** True when it leads outside rather than to another room. */
   exterior: boolean;
+  /** Width of the opening along its wall. */
+  width: number;
+  /** True when the wall runs along x (a north or south wall). */
+  alongX: boolean;
 }
 
 interface Gap {
@@ -124,7 +128,14 @@ export function wallSegments(room: Room): WallSegment[] {
 export function doorMarkers(room: Room): DoorMarker[] {
   return room.doors.map((door) => {
     const { cx, cz } = doorCentre(room, door);
-    return { id: door.id, cx, cz, exterior: door.toRoomId === null };
+    return {
+      id: door.id,
+      cx,
+      cz,
+      exterior: door.toRoomId === null,
+      width: door.width,
+      alongX: isHorizontal(door.wall),
+    };
   });
 }
 
@@ -153,3 +164,127 @@ export function planExtent(rooms: Room[]): {
     { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity },
   );
 }
+
+// ---------------------------------------------------------------------------
+// Walking the plan
+// ---------------------------------------------------------------------------
+
+/** Footprint of something a walker cannot pass through. */
+export interface Obstacle {
+  cx: number;
+  cz: number;
+  lx: number;
+  lz: number;
+}
+
+/** Where a walker stands and which way they face. Yaw 0 looks toward low z. */
+export interface WalkPose {
+  x: number;
+  z: number;
+  yaw: number;
+}
+
+/** Distance from desk origin to the occupant's seat, in the desk's own frame. */
+export const SEAT_OFFSET = 0.32;
+
+export function seatPosition(desk: Desk): { x: number; z: number } {
+  return {
+    x: desk.position.x + SEAT_OFFSET * Math.sin(desk.facing),
+    z: desk.position.z + SEAT_OFFSET * Math.cos(desk.facing),
+  };
+}
+
+/** Every wall segment, desk and seated occupant in the plan. */
+export function obstacles(floorplan: Floorplan): Obstacle[] {
+  const out: Obstacle[] = [];
+  for (const room of floorplan.rooms) {
+    for (const s of wallSegments(room)) {
+      out.push({ cx: s.cx, cz: s.cz, lx: s.lx, lz: s.lz });
+    }
+  }
+  for (const desk of floorplan.desks) {
+    const sin = Math.sin(desk.facing);
+    const cos = Math.cos(desk.facing);
+    // The desk top is 1.5 by 0.74 and sits 0.46 in front of the desk origin.
+    out.push({
+      cx: desk.position.x - 0.46 * sin,
+      cz: desk.position.z - 0.46 * cos,
+      lx: Math.abs(1.5 * cos) + Math.abs(0.74 * sin),
+      lz: Math.abs(1.5 * sin) + Math.abs(0.74 * cos),
+    });
+    if (desk.occupantId) {
+      const seat = seatPosition(desk);
+      out.push({ cx: seat.x, cz: seat.z, lx: 0.5, lz: 0.5 });
+    }
+  }
+  return out;
+}
+
+const blocked = (x: number, z: number, radius: number, all: Obstacle[]): boolean =>
+  all.some(
+    (o) =>
+      Math.abs(x - o.cx) < o.lx / 2 + radius && Math.abs(z - o.cz) < o.lz / 2 + radius,
+  );
+
+/**
+ * Move a walker by (dx, dz), one axis at a time, so that hitting a wall at an
+ * angle slides along it instead of stopping dead.
+ */
+export function stepWalker(
+  from: { x: number; z: number },
+  dx: number,
+  dz: number,
+  all: Obstacle[],
+  radius: number,
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number },
+): { x: number; z: number } {
+  let { x, z } = from;
+  const nx = Math.min(Math.max(x + dx, bounds.minX), bounds.maxX);
+  if (!blocked(nx, z, radius, all)) x = nx;
+  const nz = Math.min(Math.max(z + dz, bounds.minZ), bounds.maxZ);
+  if (!blocked(x, nz, radius, all)) z = nz;
+  return { x, z };
+}
+
+/** The room containing a point, or null when the point is outside the plan. */
+export function roomAt(rooms: Room[], x: number, z: number): Room | null {
+  return (
+    rooms.find(
+      (r) =>
+        x >= r.bounds.x &&
+        x < r.bounds.x + r.bounds.w &&
+        z >= r.bounds.z &&
+        z < r.bounds.z + r.bounds.d,
+    ) ?? null
+  );
+}
+
+/**
+ * Where a visitor starts: just outside the first exterior door, facing in.
+ * Falls back to the middle of the first room when the plan has no way in.
+ */
+export function entryPose(rooms: Room[]): WalkPose {
+  for (const room of rooms) {
+    const door = room.doors.find((d) => d.toRoomId === null);
+    if (!door) continue;
+    const { cx, cz } = doorCentre(room, door);
+    const out = 2.2;
+    switch (door.wall) {
+      case "south":
+        return { x: cx, z: cz - out, yaw: Math.PI };
+      case "north":
+        return { x: cx, z: cz + out, yaw: 0 };
+      case "east":
+        return { x: cx + out, z: cz, yaw: Math.PI / 2 };
+      case "west":
+        return { x: cx - out, z: cz, yaw: -Math.PI / 2 };
+    }
+  }
+  const first = rooms[0];
+  return first ? { ...centreOf(first), yaw: 0 } : { x: 0, z: 0, yaw: 0 };
+}
+
+const centreOf = (room: Room): { x: number; z: number } => ({
+  x: room.bounds.x + room.bounds.w / 2,
+  z: room.bounds.z + room.bounds.d / 2,
+});

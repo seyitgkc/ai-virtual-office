@@ -38,7 +38,45 @@ const time = (ms: number): string =>
 
 // ---------------------------------------------------------------------------
 
-export function TitleCard() {
+/** Says whether a participant is a person or an AI agent. */
+export function KindBadge({ kind }: { kind: Participant["kind"] }) {
+  return (
+    <span className="kind-badge" data-kind={kind}>
+      {kind === "agent" ? "AI" : "Human"}
+    </span>
+  );
+}
+
+export function TitleCard({
+  mode,
+  onToggleMode,
+}: {
+  mode: "overview" | "walk";
+  onToggleMode: () => void;
+}) {
+  if (mode === "walk") {
+    return (
+      <div className="panel" id="title">
+        <h1>Walking the office</h1>
+        <div className="keys">
+          <span>
+            <kbd>W</kbd>
+            <kbd>A</kbd>
+            <kbd>S</kbd>
+            <kbd>D</kbd> move
+          </span>
+          <span>
+            <kbd>Shift</kbd> faster
+          </span>
+          <span>Drag to look around</span>
+          <span>Click someone to inspect</span>
+        </div>
+        <button className="btn mode" onClick={onToggleMode}>
+          Back to overview
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="panel" id="title">
       <h1>Virtual Office</h1>
@@ -46,7 +84,18 @@ export function TitleCard() {
         Agents and people hold seats, roles and permissions. Work moves between
         rooms, and stops where someone lacks access or information.
       </p>
+      <div className="legend">
+        <span>
+          <KindBadge kind="human" /> rounded figure
+        </span>
+        <span>
+          <KindBadge kind="agent" /> faceted, with a ring
+        </span>
+      </div>
       <div className="sim">Every agent here is simulated. Their replies come from a fixed script.</div>
+      <button className="btn primary mode" onClick={onToggleMode}>
+        Walk the office
+      </button>
     </div>
   );
 }
@@ -285,6 +334,8 @@ function TaskInspector({
       )
     : [];
 
+  const owner = office.participants.find((p) => p.id === task.ownerId) ?? null;
+
   const s = STATUS[task.status];
   const canAdvance =
     task.closedAt === null &&
@@ -317,7 +368,10 @@ function TaskInspector({
             </div>
             <div className="kv">
               <span>Owner</span>
-              <span>{task.ownerId ? name(task.ownerId) : "Unassigned"}</span>
+              <span>
+                {owner && <KindBadge kind={owner.kind} />}{" "}
+                {task.ownerId ? name(task.ownerId) : "Unassigned"}
+              </span>
             </div>
             <div className="kv">
               <span>Requested by</span>
@@ -605,7 +659,7 @@ function ParticipantInspector({
   return (
     <div className="panel" id="inspector">
       <div className="panel-head">
-        <span>{participant.kind}</span>
+        <span>{participant.kind === "agent" ? "AI agent" : "Human"}</span>
         <button className="btn" style={{ padding: "2px 7px", margin: 0 }} onClick={onClear}>
           close
         </button>
@@ -622,6 +676,7 @@ function ParticipantInspector({
               }}
             />
             <span style={{ fontSize: 14 }}>{participant.displayName}</span>
+            <KindBadge kind={participant.kind} />
           </div>
           <div style={{ fontSize: 11, opacity: 0.6 }}>{participant.title}</div>
           <div style={{ marginTop: 9 }}>

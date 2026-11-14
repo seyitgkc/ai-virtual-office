@@ -4,6 +4,8 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useOffice } from "../lib/useOffice";
 import { Feed, Inspector, TaskList, TitleCard } from "../components/Panels";
+import { Minimap } from "../components/Minimap";
+import { entryPose } from "../lib/geometry";
 import type { AccessContext } from "../lib/model";
 
 const Scene = dynamic(() => import("../components/Scene").then((m) => m.Scene), {
@@ -28,6 +30,19 @@ export default function Page() {
   const { office, now, feed, roomHighlight, participantAlert, dispatch } = useOffice();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>("T-1001");
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+
+  const [mode, setMode] = useState<"overview" | "walk">("overview");
+  const [walkRoomId, setWalkRoomId] = useState<string | null>(null);
+  const walkPose = useRef(entryPose(office.floorplan.rooms));
+
+  useEffect(() => {
+    if (mode !== "walk") return;
+    const leave = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMode("overview");
+    };
+    window.addEventListener("keydown", leave);
+    return () => window.removeEventListener("keydown", leave);
+  }, [mode]);
 
   const ctx: AccessContext = useMemo(
     () => ({
@@ -62,6 +77,9 @@ export default function Page() {
     <main style={{ position: "fixed", inset: 0 }}>
       <Scene
         office={office}
+        mode={mode}
+        walkPose={walkPose}
+        onWalkRoomChange={setWalkRoomId}
         selectedId={selectedPersonId}
         onSelectParticipant={(id) => {
           setSelectedPersonId(id);
@@ -72,24 +90,39 @@ export default function Page() {
         participantAlert={participantAlert}
       />
 
-      <TitleCard />
-      <TaskList
-        tasks={office.tasks}
-        selectedId={selectedTaskId}
-        onSelect={(id) => {
-          setSelectedTaskId(id);
-          setSelectedPersonId(null);
-        }}
-        onSubmit={(title, detail) =>
-          dispatch({
-            type: "SUBMIT_REQUEST",
-            title,
-            detail,
-            requestedById: supervisor.id,
-          })
-        }
-      />
-      <Feed feed={feed} />
+      <div id="left">
+        <TitleCard
+          mode={mode}
+          onToggleMode={() => setMode((m) => (m === "walk" ? "overview" : "walk"))}
+        />
+        <TaskList
+          tasks={office.tasks}
+          selectedId={selectedTaskId}
+          onSelect={(id) => {
+            setSelectedTaskId(id);
+            setSelectedPersonId(null);
+          }}
+          onSubmit={(title, detail) =>
+            dispatch({
+              type: "SUBMIT_REQUEST",
+              title,
+              detail,
+              requestedById: supervisor.id,
+            })
+          }
+        />
+        {mode === "walk" ? (
+          <Minimap
+            office={office}
+            pose={walkPose}
+            currentRoomId={walkRoomId}
+            roomHighlight={roomHighlight}
+            participantAlert={participantAlert}
+          />
+        ) : (
+          <Feed feed={feed} />
+        )}
+      </div>
       <Inspector
         office={office}
         ctx={ctx}
