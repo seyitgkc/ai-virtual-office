@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { SCHEMA, SCHEMA_VERSION } from "./schema";
+import { MIGRATIONS, SCHEMA, SCHEMA_VERSION } from "./schema";
 
 export type Db = DatabaseSync;
 export type Row = Record<string, unknown>;
@@ -34,11 +34,21 @@ export function openDatabase(path: string): Db {
     });
   } else {
     const row = db.prepare("SELECT version FROM schema_meta").get() as { version: number };
-    if (row.version !== SCHEMA_VERSION) {
+    if (row.version > SCHEMA_VERSION) {
       throw new Error(
-        `Database schema is version ${row.version}, this build expects ${SCHEMA_VERSION}. ` +
-          `Move ${path} aside to start from a fresh office.`,
+        `Database schema is version ${row.version}, newer than this build (${SCHEMA_VERSION}). ` +
+          `Deploy a newer build, or move ${path} aside to start from a fresh office.`,
       );
+    }
+    // Bring an older database forward one version at a time. Each step and
+    // its version bump commit together, so a failure leaves it untouched.
+    for (let version = row.version; version < SCHEMA_VERSION; version++) {
+      const step = MIGRATIONS[version];
+      if (!step) throw new Error(`No migration from schema version ${version}.`);
+      transaction(db, () => {
+        db.exec(step);
+        db.prepare("UPDATE schema_meta SET version = ?").run(version + 1);
+      });
     }
   }
   return db;

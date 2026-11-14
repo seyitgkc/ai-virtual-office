@@ -3,7 +3,7 @@
  * Run: npx tsx scenario.ts
  */
 import { resolveAccess, type Office } from "../lib/model";
-import { floorplan, participants, roles, rules, contextFor, byId } from "../lib/seed";
+import { floorplan, participants, roles, rules, stageRooms, contextFor, byId } from "../lib/seed";
 import {
   reduce,
   ScriptedRuntime,
@@ -26,6 +26,7 @@ const blank: Office = {
   id: "office-walkthrough",
   name: "Distributor Operations",
   floorplan,
+  stageRooms,
   participants,
   roles,
   rules,

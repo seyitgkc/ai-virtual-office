@@ -20,6 +20,7 @@ import {
   type Role,
   type Room,
   type RoomSelector,
+  type StageRooms,
   type Task,
   type TaskEvent,
 } from "../model";
@@ -170,6 +171,13 @@ export function writeDesk(db: Db, desk: Desk): void {
     desk.position.z,
     desk.facing,
   );
+}
+
+function writeStageRooms(db: Db, office: Office): void {
+  run(db, "DELETE FROM stage_rooms WHERE office_id = ?", office.id);
+  for (const [stage, roomId] of Object.entries(office.stageRooms)) {
+    run(db, "INSERT INTO stage_rooms (office_id, stage, room_id) VALUES (?, ?, ?)", office.id, stage, roomId);
+  }
 }
 
 function writeRoles(db: Db, office: Office): void {
@@ -585,6 +593,7 @@ export function seedDatabase(db: Db, state: EngineState): void {
       state.seq,
     );
     writeFloorplan(db, office);
+    writeStageRooms(db, office);
     writeRoles(db, office);
     for (const p of office.participants) writeParticipant(db, office.id, p);
     for (const task of office.tasks) writeTask(db, office.id, task);
@@ -722,6 +731,14 @@ export function loadEngineState(db: Db): EngineState | null {
     })),
     deskIds: desks.filter((d) => d.roomId === r.id).map((d) => d.id),
   }));
+
+  const stageRooms = Object.fromEntries(
+    all<{ stage: string; room_id: string }>(
+      db,
+      "SELECT stage, room_id FROM stage_rooms WHERE office_id = ?",
+      officeRow.id,
+    ).map((r) => [r.stage, r.room_id]),
+  ) as StageRooms;
 
   // -- roles
   const grantScopes = groupBy(
@@ -1041,6 +1058,7 @@ export function loadEngineState(db: Db): EngineState | null {
         rooms,
         desks,
       },
+      stageRooms,
       participants,
       roles,
       rules,

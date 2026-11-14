@@ -18,7 +18,7 @@ import {
   type Participant,
   type TaskId,
 } from "./model";
-import { stageSpec, type Action } from "./engine";
+import { roomForStage, type Action } from "./engine";
 
 export type Verdict = { allowed: true } | { allowed: false; reason: string };
 
@@ -56,7 +56,7 @@ export function authorize(
 
   switch (action.type) {
     case "SUBMIT_REQUEST":
-      return mayActIn(office, ctx, actor, stageSpec("intake").roomId!);
+      return mayActIn(office, ctx, actor, roomForStage(office, "intake")!);
 
     case "ADVANCE": {
       const task = office.tasks.find((t) => t.id === action.taskId);

@@ -25,6 +25,7 @@ import {
   type Participant,
   type Role,
   type RoleId,
+  type StageRooms,
   type Room,
   type Task,
   type TaskId,
@@ -669,10 +670,18 @@ export const messages: Message[] = [
 // Assembled office
 // ---------------------------------------------------------------------------
 
+export const stageRooms: StageRooms = {
+  intake: "reception",
+  planning: "planning",
+  execution: "fulfilment",
+  review: "finance",
+};
+
 export const office: Office = {
   id: "office-distributor-demo",
   name: "Distributor Operations",
   floorplan,
+  stageRooms,
   participants,
   roles,
   rules,

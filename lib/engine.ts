@@ -44,20 +44,23 @@ import {
 
 export interface StageSpec {
   stage: WorkflowStage;
-  /** Null for the terminal stage: completing does not move the task. */
-  roomId: RoomId | null;
   label: string;
   /** Review is closed by a human decision, not by advancing. */
   humanGate: boolean;
 }
 
+/** The stages in order. Which room hosts each one is set per office. */
 export const PIPELINE: StageSpec[] = [
-  { stage: "intake", roomId: "reception", label: "Intake", humanGate: false },
-  { stage: "planning", roomId: "planning", label: "Planning", humanGate: false },
-  { stage: "execution", roomId: "fulfilment", label: "Execution", humanGate: false },
-  { stage: "review", roomId: "finance", label: "Review", humanGate: true },
-  { stage: "done", roomId: null, label: "Complete", humanGate: false },
+  { stage: "intake", label: "Intake", humanGate: false },
+  { stage: "planning", label: "Planning", humanGate: false },
+  { stage: "execution", label: "Execution", humanGate: false },
+  { stage: "review", label: "Review", humanGate: true },
+  { stage: "done", label: "Complete", humanGate: false },
 ];
+
+/** The room that hosts a stage, or null for the final stage. */
+export const roomForStage = (office: Office, stage: WorkflowStage): RoomId | null =>
+  stage === "done" ? null : office.stageRooms[stage];
 
 export const stageSpec = (stage: WorkflowStage): StageSpec => {
   const found = PIPELINE.find((s) => s.stage === stage);
@@ -362,8 +365,7 @@ export async function reduce(
   switch (action.type) {
     // -- a human files new work ------------------------------------------
     case "SUBMIT_REQUEST": {
-      const spec = stageSpec("intake");
-      const room = spec.roomId!;
+      const room = roomForStage(office, "intake")!;
       const ctx = contextOf({ ...state, office, now });
       const candidates = eligibleOwners(office, room, ctx).filter(
         (p) => p.kind === "agent",
@@ -434,7 +436,7 @@ export async function reduce(
         return done();
       }
       const targetSpec = stageSpec(target);
-      const targetRoom = targetSpec.roomId ?? task.roomId;
+      const targetRoom = roomForStage(office, target) ?? task.roomId;
       const ctx = contextOf({ ...state, office, now });
 
       // Moving between stages is an ordinary handoff: the work goes to whoever
@@ -650,7 +652,7 @@ export async function reduce(
       const task = findTask(office, action.taskId);
       const to = findParticipant(office, action.toParticipantId);
       const target = nextStage(task.stage);
-      const room = target ? stageSpec(target).roomId ?? task.roomId : task.roomId;
+      const room = target ? (roomForStage(office, target) ?? task.roomId) : task.roomId;
       const ctx = contextOf({ ...state, office, now });
       const decision = canOwnWorkIn(to, room, ctx);
 

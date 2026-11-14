@@ -15,7 +15,7 @@ import {
   type Task,
   type TaskStatus,
 } from "../lib/model";
-import { eligibleOwners, nextStage, stageSpec, type Action } from "../lib/engine";
+import { eligibleOwners, nextStage, roomForStage, stageSpec, type Action } from "../lib/engine";
 import { authorize, supervises } from "../lib/policy";
 import type { FeedEntry, OfficeView, TokenView } from "../lib/view";
 
@@ -395,7 +395,7 @@ function TaskInspector({
   const mayAdvance = authorize(office, ctx, viewer, { type: "ADVANCE", taskId: task.id });
 
   const target = nextStage(task.stage);
-  const targetRoom = target ? (stageSpec(target).roomId ?? task.roomId) : null;
+  const targetRoom = target ? (roomForStage(office, target) ?? task.roomId) : null;
   const alternatives = targetRoom
     ? eligibleOwners(office, targetRoom, ctx).filter(
         (p) => p.kind === "agent" && p.id !== task.ownerId,

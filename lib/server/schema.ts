@@ -15,7 +15,7 @@
  *    and grants are evaluated in sequence and threads are read in sequence.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA = /* sql */ `
 CREATE TABLE schema_meta (
@@ -69,6 +69,14 @@ CREATE TABLE desks (
   x        REAL NOT NULL,
   z        REAL NOT NULL,
   facing   REAL NOT NULL
+) STRICT;
+
+-- Which room hosts each working stage of the pipeline.
+CREATE TABLE stage_rooms (
+  office_id TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  stage     TEXT NOT NULL CHECK (stage IN ('intake', 'planning', 'execution', 'review')),
+  room_id   TEXT NOT NULL REFERENCES rooms(id),
+  PRIMARY KEY (office_id, stage)
 ) STRICT;
 
 -- ----------------------------------------------------------------- roles
@@ -369,3 +377,30 @@ CREATE INDEX sessions_by_user       ON sessions(user_id);
 CREATE INDEX audit_by_office        ON audit_log(office_id, id);
 CREATE INDEX tokens_by_rule         ON access_tokens(rule_id);
 `;
+
+/**
+ * Steps that bring an older database up to date. Entry N turns a version N
+ * database into version N + 1. A new database is created at the current
+ * version directly and runs none of these.
+ */
+export const MIGRATIONS: Record<number, string> = {
+  // Version 2 moved the stage-to-room mapping out of the code. Offices created
+  // before that all used the seeded rooms, so they keep the same mapping.
+  1: /* sql */ `
+CREATE TABLE stage_rooms (
+  office_id TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  stage     TEXT NOT NULL CHECK (stage IN ('intake', 'planning', 'execution', 'review')),
+  room_id   TEXT NOT NULL REFERENCES rooms(id),
+  PRIMARY KEY (office_id, stage)
+) STRICT;
+
+INSERT INTO stage_rooms (office_id, stage, room_id)
+SELECT o.id, m.stage, m.room_id
+  FROM offices o
+  JOIN (SELECT 'intake' AS stage, 'reception' AS room_id
+        UNION ALL SELECT 'planning', 'planning'
+        UNION ALL SELECT 'execution', 'fulfilment'
+        UNION ALL SELECT 'review', 'finance') m
+  JOIN rooms r ON r.id = m.room_id;
+`,
+};

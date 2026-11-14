@@ -486,10 +486,14 @@ export interface Task {
 // Office
 // ---------------------------------------------------------------------------
 
+/** Which room hosts each working stage. The final stage has no room. */
+export type StageRooms = Record<Exclude<WorkflowStage, "done">, RoomId>;
+
 export interface Office {
   id: string;
   name: string;
   floorplan: Floorplan;
+  stageRooms: StageRooms;
   participants: Participant[];
   roles: Record<RoleId, Role>;
   rules: IndividualRule[];
