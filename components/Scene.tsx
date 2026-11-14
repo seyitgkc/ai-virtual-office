@@ -105,7 +105,7 @@ export function Scene({
       id: `room:${room.id}`,
       position: [roomCentre(room).cx, 0.06, room.bounds.z + 0.95],
       hidden: walking,
-      fullSizeAt: 34,
+      fullSizeAt: 46,
       node: (
         <div className="room-label">
           <div className="name">{room.name}</div>

@@ -356,3 +356,4 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 .dialog-actions .btn { margin: 0; padding: 7px 12px; }
 .login-card a.btn { display: inline-block; text-decoration: none; margin: 0; }
 #title .who-actions { flex-wrap: wrap; }
+#title .who-actions .btn { font-size: 10.5px; padding: 5px 6px; white-space: nowrap; }
