@@ -158,7 +158,7 @@ async function main(): Promise<void> {
   expect("the key can be removed", `${view.providers[0].hasKey}/${view.providers[0].usable}`, "false/false");
   expect("which leaves its agents without a working model", echo().backing, null);
   expect("testing a provider with no key is refused", await refusal(async () => service.testProviderSettings(await owner.read(), claude.id)), 400);
-  expect("testing one that cannot be reached reports a provider problem", await refusal(async () => service.testProviderSettings(await owner.read(), local.id)), 502);
+  expect("testing one that cannot be reached reports a provider problem", await refusal(async () => service.testProviderSettings(await owner.read(), local.id)), 424);
   view = await service.removeProviderSettings(await owner.read(), claude.id);
   expect("a provider can be removed", view.providers.length, 2);
   expect("its agents are left with none", echo().providerId, null);

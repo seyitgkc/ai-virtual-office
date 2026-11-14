@@ -298,7 +298,7 @@ and that the system will explain it. The same story runs headless under
    pass  blocked on permission -> blocked_permission
 
 > Dana grants Vera read on Finance
-   - r-14: allow read on finance for Vera (expires with T-1)
+   - r-14: allow read on Finance for Vera (expires with T-1)
    - T-1 still blocked after r-14. Denied by individual rule r-02 (...); overrides individual rule r-01 (...), individual rule r-14 (allow: Dealer tier lookup for this order)
    pass  still blocked, because deny outranks allow -> blocked_permission
 

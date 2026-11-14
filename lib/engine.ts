@@ -20,6 +20,7 @@
  */
 
 import {
+  ANY_ROOM,
   canOwnWorkIn,
   canRead,
   resolveAccess,
@@ -541,7 +542,9 @@ export async function reduce(
 
       const who = findParticipant(office, action.participantId);
       notes.push(
-        `${rule.id}: ${action.effect} ${action.scopes.join("/")} on ${action.room} for ${who.displayName}` +
+        `${rule.id}: ${action.effect} ${action.scopes.join("/")} on ${
+          action.room === ANY_ROOM ? "every room" : roomName(office, action.room)
+        } for ${who.displayName}` +
           (action.expiresOnTaskId ? ` (expires with ${action.expiresOnTaskId})` : ""),
       );
 

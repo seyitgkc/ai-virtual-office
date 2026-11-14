@@ -59,7 +59,7 @@ const MAX_OFFICES_PER_ACCOUNT = 12;
 
 export class OfficeError extends Error {
   constructor(
-    readonly status: 400 | 401 | 403 | 404 | 409 | 502,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 424,
     message: string,
   ) {
     super(message);
@@ -626,7 +626,9 @@ export async function testProviderSettings(session: Session, providerId: string)
     return { ok: true, model: await testStoredProvider(db, session.officeId ?? "", providerId) };
   } catch (error) {
     if (error instanceof ProviderError) throw new OfficeError(400, error.message);
-    throw new OfficeError(502, error instanceof Error ? error.message : "The connection test failed.");
+    // A provider's failure is reported as 424. A proxy in front of the server
+    // replaces the body of a 5xx reply with its own page, which hides the reason.
+    throw new OfficeError(424, error instanceof Error ? error.message : "The connection test failed.");
   }
 }
 

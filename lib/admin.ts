@@ -209,7 +209,7 @@ function cleanPlaybook(office: Office, steps: PlaybookStep[], newId: () => strin
     };
     const t = cleaned.then;
     if (!t.statusNote && !t.output && !t.question && !t.assumption && !t.need) {
-      refuse(`${label} does nothing yet. Give it at least a status note.`);
+      refuse(`${label} does nothing yet. Fill in at least one part under Then.`);
     }
     return cleaned;
   });
