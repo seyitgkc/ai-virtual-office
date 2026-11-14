@@ -1,0 +1,12 @@
+services:
+  office:
+    build: .
+    image: ai-virtual-office:latest
+    # Bound to localhost so a reverse proxy on the host fronts it. Set
+    # OFFICE_PORT to use a different host port.
+    ports:
+      - "127.0.0.1:${OFFICE_PORT:-8080}:8080"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp

@@ -185,6 +185,9 @@ components/         3D scene (Scene, RoomMesh, Desk, Figure) and the panels
 app/                Next.js page that composes scene and panels
 scripts/check.ts    20 checks on access precedence
 scripts/scenario.ts 22 checks on a full workflow
+Dockerfile          two-stage image: build and check, then nginx
+docker/nginx.conf   static file server config
+compose.yaml        one service, published on localhost:8080
 ```
 
 `model.ts`, `seed.ts` and `engine.ts` import neither React nor three.js. The
@@ -295,6 +298,7 @@ it and a width. `wallSegments()` cuts each wall into boxes around its doors.
 - React 18 and TypeScript in strict mode.
 - three.js through @react-three/fiber and @react-three/drei.
 - tsx to run the two check scripts under Node.
+- Docker with nginx for self-hosting.
 
 There is no backend, database or external service.
 
@@ -354,6 +358,31 @@ npm run dev       # http://localhost:3000
 npm run verify    # type check, then both check scripts
 npm run build     # static site in ./out
 ```
+
+## Deploy
+
+The build output in `./out` is a folder of static files, so any web server can
+host it.
+
+**Vercel.** Import the repository. No settings are needed.
+
+**Docker.** The image builds the site, runs the checks, and serves the result
+with nginx as a non-root user on port 8080.
+
+```bash
+docker compose up -d --build    # http://localhost:8080
+```
+
+Set `OFFICE_PORT` to publish on a different host port. The container listens
+on localhost only, so put a reverse proxy with TLS in front of it on a server.
+
+**Plesk.** Two options:
+
+- Without Docker: run `npm run build` and upload the contents of `out/` to the
+  domain's `httpdocs` folder.
+- With the Docker extension: start the container on the server with the
+  compose command above, then add a Docker proxy rule on the domain that
+  forwards `/` to the container's published port.
 
 ## Verification
 
