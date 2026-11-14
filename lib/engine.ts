@@ -454,7 +454,7 @@ export async function reduce(
 
       if (!carrier) {
         const supervisor =
-          office.participants.find((p) => p.kind === "human" && p.roleId === "supervisor") ??
+          office.participants.find((p) => p.kind === "human" && office.roles[p.roleId]?.supervises) ??
           office.participants.find((p) => p.kind === "human");
         const escalation: Message = {
           id: nextId("m"),
@@ -542,7 +542,12 @@ export async function reduce(
         kind: "answer",
         taskId: question.taskId,
         fromId: action.answeredById,
-        audience: { to: "participant", id: question.fromId as ParticipantId },
+        // A question raised by the system has no person to reply to, so its
+        // answer goes to the room the question was asked in.
+        audience:
+          question.fromId === "system"
+            ? { to: "room", id: question.roomId }
+            : { to: "participant", id: question.fromId },
         roomId: question.roomId,
         at: now,
         inReplyTo: question.id,
@@ -942,7 +947,7 @@ async function runAgent(
     if (verdict.effect === "allow") continue;
 
     const supervisor =
-      office.participants.find((p) => p.kind === "human" && p.roleId === "supervisor") ??
+      office.participants.find((p) => p.kind === "human" && office.roles[p.roleId]?.supervises) ??
       office.participants.find((p) => p.kind === "human");
     const alternatives = office.participants.filter(
       (p) =>

@@ -135,6 +135,11 @@ export interface Role {
   id: RoleId;
   name: string;
   description: string;
+  /**
+   * May change access rules, reassign work and decide reviews. Escalations
+   * are addressed to a human holding a role like this.
+   */
+  supervises: boolean;
   grants: AccessGrant[];
 }
 

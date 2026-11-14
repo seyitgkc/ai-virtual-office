@@ -138,12 +138,14 @@ export const floorplan: Floorplan = {
 export const roles: Record<RoleId, Role> = {
   supervisor: {
     id: "supervisor",
+    supervises: true,
     name: "Operations Manager",
     description: "Full access. Resolves escalations, grants scoped exceptions.",
     grants: [{ room: ANY_ROOM, scopes: ALL_SCOPES, effect: "allow" }],
   },
   intake: {
     id: "intake",
+    supervises: false,
     name: "Intake",
     description: "Receives dealer requests, triages, hands off to Planning.",
     grants: [
@@ -153,6 +155,7 @@ export const roles: Record<RoleId, Role> = {
   },
   planner: {
     id: "planner",
+    supervises: false,
     name: "Planner",
     description: "Breaks requests into work and routes them.",
     grants: [
@@ -163,6 +166,7 @@ export const roles: Record<RoleId, Role> = {
   },
   fulfilment: {
     id: "fulfilment",
+    supervises: false,
     name: "Fulfilment",
     description:
       "Stock, transfers and quoting. Explicitly denied Finance because pricing authority sits elsewhere.",
@@ -174,6 +178,7 @@ export const roles: Record<RoleId, Role> = {
   },
   finance: {
     id: "finance",
+    supervises: false,
     name: "Finance",
     description: "Dealer tier pricing, credit checks, approval.",
     grants: [
