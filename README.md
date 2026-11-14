@@ -1096,9 +1096,15 @@ foreign keys, so an entry survives the task or rule it describes.
   rules and AI providers.
 - Playbook agents: the step editor, storage, and the matching of steps to
   work.
-- AI agents on an OpenAI compatible provider, end to end. The check scripts
-  and a run in the browser use a stand-in service on the same machine that
-  speaks the chat completions interface.
+- AI agents on an OpenAI compatible provider, end to end. On the deployed
+  site, two AI agents on a DeepSeek model took a quote request through every
+  stage: each reply came back in 7 to 13 seconds in the expected shape, one
+  agent asked for a room it could not read and the task halted until access
+  was granted for that task, and the other halted at review because it could
+  not read the room the answers were given in. The check scripts cover the
+  same path against a stand-in service on the same machine.
+- Answering a question by picking one of the agent's choices or by typing an
+  answer.
 - Several AI providers per office, each with an encrypted, write-only API key
   and a connection test.
 - Many offices per account, each isolated, with adding, switching and
@@ -1119,12 +1125,12 @@ playbook.
 
 **Not verified in this repository**
 
-- A live agent step against a commercial model. The Anthropic connection test
+- A live agent step on an Anthropic provider. The Anthropic connection test
   has been run against the real provider and correctly reported a rejected
-  key, so the network path and the SDK call work. Prompt assembly, the
-  OpenAI compatible call and the handling of a model's reply are covered by
-  checks that stay on one machine. No step has been run with a paid key,
-  because none was available while this was written.
+  key, so the network path and the SDK call work, and the prompt and the
+  handling of a reply are shared with the OpenAI compatible path that has
+  been run live. No step has been run with a working Anthropic key, because
+  none was available while this was written.
 
 **Proposed**
 
@@ -1269,7 +1275,7 @@ database and starts a stand-in model service on a local port.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, and cleaning of a model's reply | `npm run agents` | 20 of 20 pass |
+| What an agent is shown, cleaning of a model's reply, and halts at review that end in a decision | `npm run agents` | 33 of 33 pass |
 | Which playbook step applies, and an AI agent's call to an OpenAI compatible service | `npm run providers` | 33 of 33 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 81 of 81 pass |
