@@ -21,6 +21,7 @@
 
 import {
   canOwnWorkIn,
+  canRead,
   resolveAccess,
   type AccessContext,
   type AccessScope,
@@ -73,12 +74,25 @@ export const nextStage = (stage: WorkflowStage): WorkflowStage | null => {
 // Agent runtime
 // ---------------------------------------------------------------------------
 
+/** What an agent knows about the office around it when it takes a step. */
+export interface AgentSurroundings {
+  /** Every room, and whether this agent may read what is said and kept there. */
+  rooms: { id: RoomId; name: string; purpose: string; readable: boolean }[];
+  /** People the agent can address a question to. */
+  people: { id: ParticipantId; displayName: string; title: string }[];
+}
+
 export interface AgentStepInput {
   task: Task;
   stage: WorkflowStage;
   participant: Participant;
-  /** Everything already said about this task, oldest first. */
+  /**
+   * What has been said about this task, oldest first, limited to the
+   * messages this agent is allowed to read. An agent never receives a
+   * message from a room it cannot read.
+   */
   priorMessages: Message[];
+  surroundings: AgentSurroundings;
 }
 
 export interface DraftQuestion {
@@ -861,11 +875,34 @@ async function runAgent(
     return { office, emitted: [], notes: [] };
   }
 
+  const ctx: AccessContext = {
+    roles: office.roles,
+    rules: office.rules,
+    now,
+    closedTaskIds: new Set(office.tasks.filter((t) => t.closedAt !== null).map((t) => t.id)),
+  };
   const prior = office.messages
-    .filter((m) => m.taskId === task.id)
+    .filter((m) => m.taskId === task.id && canRead(m, participant, ctx))
     .sort((a, b) => a.at - b.at);
+  const surroundings: AgentSurroundings = {
+    rooms: office.floorplan.rooms.map((room) => ({
+      id: room.id,
+      name: room.name,
+      purpose: room.purpose,
+      readable: resolveAccess(participant, room.id, "read", ctx).effect === "allow",
+    })),
+    people: office.participants
+      .filter((p) => p.kind === "human")
+      .map((p) => ({ id: p.id, displayName: p.displayName, title: p.title })),
+  };
 
-  const result = await runtime.step({ task, stage, participant, priorMessages: prior });
+  const result = await runtime.step({
+    task,
+    stage,
+    participant,
+    priorMessages: prior,
+    surroundings,
+  });
   const emitted: Message[] = [];
   const notes: string[] = [];
   let updated: Task = task;
@@ -932,14 +969,6 @@ async function runAgent(
   // Does this step need to reach into a room the agent may not touch?
   // Checked after the status and assumptions, because that is the order it
   // happens in: the agent works, records what it guessed, then hits the wall.
-  const ctx: AccessContext = {
-    roles: office.roles,
-    rules: office.rules,
-    now,
-    closedTaskIds: new Set(
-      office.tasks.filter((t) => t.closedAt !== null).map((t) => t.id),
-    ),
-  };
   let wallHit = false;
 
   for (const need of result.needs ?? []) {

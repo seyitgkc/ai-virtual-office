@@ -13,7 +13,14 @@ import type { FeedEntry, OfficeView } from "../view";
 import { listAccessTokens, syncAccessTokens, tokenProblem } from "./accessTokens";
 import { createUser, listUsers, setCredentials, userByParticipant, type Session } from "./auth";
 import { all, database, run, transaction, type Db } from "./db";
-import { hasOffice, loadEngineState, saveEngineState, seedDatabase } from "./officeStore";
+import { agentModel, ModelRuntime } from "./modelRuntime";
+import {
+  hasOffice,
+  loadEngineState,
+  saveEngineState,
+  seedDatabase,
+  writeParticipant,
+} from "./officeStore";
 
 // ---------------------------------------------------------------------------
 // Start-up
@@ -61,9 +68,24 @@ export function officeDatabase(): Db {
     ensureAccounts(db, state.office);
     applyAdminFromEnvironment(db, state.office);
     syncAccessTokens(db);
+    recordAgentBacking(db, state.office);
   });
   boot.__officeBooted = true;
   return db;
+}
+
+/**
+ * Keep each agent's stored backing in step with the runtime in use, so the
+ * interface labels an agent as live only when a model really answers for it.
+ */
+function recordAgentBacking(db: Db, office: Office): void {
+  const wanted =
+    agentRuntime().kind === "model" ? { provider: "Anthropic", model: agentModel() } : null;
+  for (const p of office.participants) {
+    if (p.kind !== "agent") continue;
+    const same = wanted === null ? p.backing === null : p.backing?.model === wanted.model;
+    if (!same) writeParticipant(db, office.id, { ...p, backing: wanted });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -72,8 +94,14 @@ export function officeDatabase(): Db {
 
 const runtimeHolder = globalThis as unknown as { __officeRuntime?: AgentRuntime };
 
+/**
+ * Agents answer from the fixed script unless AGENT_RUNTIME=model is set, in
+ * which case each step is a call to the model named by AGENT_MODEL. The
+ * switch is explicit so that a stray API key never starts spending money.
+ */
 export function agentRuntime(): AgentRuntime {
-  runtimeHolder.__officeRuntime ??= new ScriptedRuntime();
+  runtimeHolder.__officeRuntime ??=
+    process.env.AGENT_RUNTIME === "model" ? new ModelRuntime() : new ScriptedRuntime();
   return runtimeHolder.__officeRuntime;
 }
 

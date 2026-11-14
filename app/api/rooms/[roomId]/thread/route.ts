@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { contextOf } from "@/lib/policy";
+import { ROOM_RECORDS } from "@/lib/referenceData";
 import { checkAccessToken } from "@/lib/server/accessTokens";
 import { fail } from "@/lib/server/http";
 import { officeDatabase } from "@/lib/server/officeService";
@@ -43,6 +44,7 @@ export async function GET(
     room: { id: room.id, name: room.name },
     holder: check.token.participantId,
     limitedToTask: check.token.taskId,
+    records: ROOM_RECORDS[room.id] ?? [],
     messages,
   });
 }
