@@ -8,10 +8,11 @@
     "start": "next start",
     "check": "tsx scripts/check.ts",
     "scenario": "tsx scripts/scenario.ts",
-    "verify": "tsc --noEmit && tsx scripts/check.ts && tsx scripts/scenario.ts && tsx scripts/store.ts && tsx scripts/auth.ts && tsx scripts/agents.ts",
+    "verify": "tsc --noEmit && tsx scripts/check.ts && tsx scripts/scenario.ts && tsx scripts/store.ts && tsx scripts/auth.ts && tsx scripts/agents.ts && tsx scripts/admin.ts",
     "store": "tsx scripts/store.ts",
     "auth": "tsx scripts/auth.ts",
-    "agents": "tsx scripts/agents.ts"
+    "agents": "tsx scripts/agents.ts",
+    "admin": "tsx scripts/admin.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.8.0",
