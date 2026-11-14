@@ -4,6 +4,7 @@
  * equals what the engine produced. Run: npx tsx scripts/store.ts
  */
 import { ALL_SCOPES, type AccessScope } from "../lib/model";
+import { applyAdminOp, type AdminOp } from "../lib/admin";
 import { reduce, ScriptedRuntime, type Action, type EngineState } from "../lib/engine";
 import { initialState } from "../lib/initialState";
 import { all, openDatabase, transaction } from "../lib/server/db";
@@ -108,6 +109,37 @@ async function main(): Promise<void> {
   await apply("advance to review", { type: "ADVANCE", taskId: task().id });
   await apply("approve", { type: "DECIDE", taskId: task().id, byId: "p-dana", verdict: "approved" });
   expect("task completed", task().status, "completed");
+
+  console.log("\n-- set-up changes persist and read back identical --");
+  let counter = 0;
+  const admin = (label: string, op: AdminOp): void => {
+    const next: EngineState = { ...state, office: applyAdminOp(state.office, op, "p-dana", () => `s${++counter}`) };
+    transaction(db, () => saveEngineState(db, state, next));
+    state = next;
+    const back = canonical(loadEngineState(db));
+    const ok = back === canonical(state);
+    expect(label, ok, true);
+    if (!ok) console.log(firstDifference(back, canonical(state)));
+  };
+  admin("rename the office", { type: "RENAME_OFFICE", name: "Northline Distribution" });
+  admin("add a room", { type: "ADD_ROOM", name: "Warehouse", purpose: "Goods in and out", width: 8, depth: 8, attachTo: "finance", side: "east" });
+  const warehouse = () => state.office.floorplan.rooms.find((r) => r.name === "Warehouse")!.id;
+  admin("rename a room", { type: "UPDATE_ROOM", roomId: warehouse(), name: "Warehouse", purpose: "Stock held on site" });
+  admin("move a stage to it", { type: "SET_STAGE_ROOM", stage: "execution", roomId: warehouse() });
+  admin("add a role", { type: "ADD_ROLE", name: "Warehouse staff", description: "Works the stock", supervises: false });
+  const staffRole = () => Object.values(state.office.roles).find((r) => r.name === "Warehouse staff")!.id;
+  admin("give the role access", { type: "SET_ROLE_GRANT", roleId: staffRole(), room: warehouse(), scope: "act", effect: "allow" });
+  admin("and a deny elsewhere", { type: "SET_ROLE_GRANT", roleId: staffRole(), room: "finance", scope: "read", effect: "deny" });
+  admin("clear one cell", { type: "SET_ROLE_GRANT", roleId: "intake", room: "planning", scope: "read", effect: "none" });
+  admin("add an agent", { type: "ADD_AGENT", displayName: "Scout", title: "Stock Agent", roleId: staffRole(), roomId: warehouse(), capabilities: ["Count stock", "Flag shortages"] });
+  const scout = () => state.office.participants.find((p) => p.displayName === "Scout")!.id;
+  admin("move the agent to another room", { type: "UPDATE_PARTICIPANT", participantId: scout(), roomId: "planning", title: "Planning Aide" });
+  admin("move the stage back", { type: "SET_STAGE_ROOM", stage: "execution", roomId: "fulfilment" });
+  admin("remove the agent", { type: "REMOVE_PARTICIPANT", participantId: scout() });
+  admin("remove the role", { type: "REMOVE_ROLE", roleId: staffRole() });
+  admin("clear all work", { type: "CLEAR_WORK" });
+  admin("remove the room", { type: "REMOVE_ROOM", roomId: warehouse() });
+  expect("tokens of cleared grants are gone", all(db, "SELECT 1 FROM access_tokens t JOIN access_rules r ON r.id = t.rule_id WHERE r.expires_on_task_id IS NOT NULL").length, 0);
 
   console.log("\n-- integrity --");
   expect("no foreign key violations", all(db, "PRAGMA foreign_key_check").length, 0);

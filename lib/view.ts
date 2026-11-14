@@ -39,6 +39,8 @@ export interface OfficeView {
   hiddenMessages: Record<TaskId, number>;
   /** Whether agents answer from the fixed script or from a live model. */
   runtime: "scripted" | "model";
+  /** The model agents run on, when the runtime is a model. */
+  agentModel: string | null;
   accessTokens: TokenView[];
   /** Sign-in accounts. Empty unless the viewer supervises. */
   accounts: { participantId: string; email: string; hasPassword: boolean }[];

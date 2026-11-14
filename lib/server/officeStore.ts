@@ -581,8 +581,13 @@ export function hasOffice(db: Db): boolean {
 
 /** Write a whole office into an empty database. */
 export function seedDatabase(db: Db, state: EngineState): void {
+  transaction(db, () => writeWholeOffice(db, state));
+}
+
+/** The same, for a caller that is already inside a transaction. */
+export function writeWholeOffice(db: Db, state: EngineState): void {
   const { office } = state;
-  transaction(db, () => {
+  {
     run(
       db,
       "INSERT INTO offices (id, name, clock_ms, clock_step_minutes, id_sequence) VALUES (?, ?, ?, ?, ?)",
@@ -599,15 +604,16 @@ export function seedDatabase(db: Db, state: EngineState): void {
     for (const task of office.tasks) writeTask(db, office.id, task);
     for (const message of office.messages) writeMessage(db, office.id, message);
     for (const rule of office.rules) writeRule(db, rule);
-  });
+  }
 }
 
-/** Remove the office and everything that belongs to it. Accounts go with it. */
+/**
+ * Remove the office and everything that belongs to it, accounts included.
+ * Call inside a transaction, together with whatever replaces it.
+ */
 export function clearDatabase(db: Db): void {
-  transaction(db, () => {
-    run(db, "DELETE FROM access_decisions");
-    run(db, "DELETE FROM offices");
-  });
+  run(db, "DELETE FROM access_decisions");
+  run(db, "DELETE FROM offices");
 }
 
 function changed<T extends { id: string }>(before: T[], after: T[]): { written: T[]; removed: string[] } {
@@ -618,12 +624,128 @@ function changed<T extends { id: string }>(before: T[], after: T[]): { written: 
   return { written, removed };
 }
 
+/** Bring the stored rooms, doors and desks in line with a changed floorplan. */
+function syncFloorplan(db: Db, before: Office, after: Office): void {
+  const plan = after.floorplan;
+  run(db, "UPDATE floorplans SET name = ?, description = ? WHERE id = ?", plan.name, plan.description, plan.id);
+
+  // Room order is unique per floorplan, so park the old order out of the way
+  // before writing the new one.
+  run(db, "UPDATE rooms SET position = -1 - position WHERE floorplan_id = ?", plan.id);
+  plan.rooms.forEach((room, position) => {
+    run(
+      db,
+      `INSERT INTO rooms (id, floorplan_id, position, name, purpose, x, z, width, depth)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         position = excluded.position, name = excluded.name, purpose = excluded.purpose,
+         x = excluded.x, z = excluded.z, width = excluded.width, depth = excluded.depth`,
+      room.id,
+      plan.id,
+      position,
+      room.name,
+      room.purpose,
+      room.bounds.x,
+      room.bounds.z,
+      room.bounds.w,
+      room.bounds.d,
+    );
+  });
+
+  run(db, "DELETE FROM doors WHERE room_id IN (SELECT id FROM rooms WHERE floorplan_id = ?)", plan.id);
+  for (const room of plan.rooms) {
+    room.doors.forEach((door, position) => {
+      run(
+        db,
+        `INSERT INTO doors (id, room_id, position, to_room_id, wall, along, width)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        door.id,
+        room.id,
+        position,
+        door.toRoomId,
+        door.wall,
+        door.along,
+        door.width,
+      );
+    });
+  }
+
+  const desks = changed(before.floorplan.desks, plan.desks);
+  for (const desk of desks.written) {
+    if (get(db, "SELECT 1 AS found FROM desks WHERE id = ?", desk.id)) {
+      run(
+        db,
+        "UPDATE desks SET room_id = ?, x = ?, z = ?, facing = ? WHERE id = ?",
+        desk.roomId,
+        desk.position.x,
+        desk.position.z,
+        desk.facing,
+        desk.id,
+      );
+    } else {
+      writeDesk(db, desk);
+    }
+  }
+  for (const id of desks.removed) run(db, "DELETE FROM desks WHERE id = ?", id);
+
+  const kept = new Set(plan.rooms.map((r) => r.id));
+  for (const room of before.floorplan.rooms) {
+    if (!kept.has(room.id)) run(db, "DELETE FROM rooms WHERE id = ?", room.id);
+  }
+}
+
+/** Bring the stored roles and their grants in line. Removed roles go last. */
+function syncRoles(db: Db, after: Office): void {
+  Object.values(after.roles).forEach((role, position) => {
+    run(
+      db,
+      `INSERT INTO roles (id, office_id, position, name, description, supervises)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         position = excluded.position, name = excluded.name,
+         description = excluded.description, supervises = excluded.supervises`,
+      role.id,
+      after.id,
+      position,
+      role.name,
+      role.description,
+      flag(role.supervises),
+    );
+    run(db, "DELETE FROM role_grants WHERE role_id = ?", role.id);
+    role.grants.forEach((grant, grantPosition) => {
+      run(
+        db,
+        "INSERT INTO role_grants (role_id, position, room_id, effect) VALUES (?, ?, ?, ?)",
+        role.id,
+        grantPosition,
+        roomOrNull(grant.room),
+        grant.effect,
+      );
+      for (const scope of new Set(grant.scopes)) {
+        run(
+          db,
+          "INSERT INTO role_grant_scopes (role_id, position, scope) VALUES (?, ?, ?)",
+          role.id,
+          grantPosition,
+          scope,
+        );
+      }
+    });
+  });
+}
+
 /**
  * Persist the difference between two engine states. Call inside a
  * transaction when other writes (the audit entry) must land with it.
  */
 export function saveEngineState(db: Db, before: EngineState, after: EngineState): void {
   const officeId = after.office.id;
+
+  // Set-up changes first: roles, rooms and stages rarely change, and people
+  // and work may refer to what was just added.
+  if (before.office.roles !== after.office.roles) syncRoles(db, after.office);
+  if (before.office.floorplan !== after.office.floorplan) syncFloorplan(db, before.office, after.office);
+  if (before.office.stageRooms !== after.office.stageRooms) writeStageRooms(db, after.office);
 
   const participants = changed(before.office.participants, after.office.participants);
   for (const p of participants.written) writeParticipant(db, officeId, p);
@@ -648,6 +770,10 @@ export function saveEngineState(db: Db, before: EngineState, after: EngineState)
   for (const id of rules.removed) run(db, "DELETE FROM access_rules WHERE id = ?", id);
 
   writeClock(db, after);
+
+  for (const roleId of Object.keys(before.office.roles)) {
+    if (!(roleId in after.office.roles)) run(db, "DELETE FROM roles WHERE id = ?", roleId);
+  }
 }
 
 // ---------------------------------------------------------------------------

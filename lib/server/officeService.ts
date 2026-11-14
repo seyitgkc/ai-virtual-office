@@ -5,21 +5,32 @@
  * the session's participant, check the policy, run the engine, then write the
  * changes and an audit entry in a single transaction.
  */
+import { randomUUID } from "node:crypto";
+import { AdminError, applyAdminOp, blankOffice, type AdminOp } from "../admin";
 import { reduce, ScriptedRuntime, type Action, type AgentRuntime, type EngineState } from "../engine";
 import { initialState } from "../initialState";
 import type { Office, Participant } from "../model";
 import { authorize, contextOf, mayRead, stampActor, supervises, viewFor } from "../policy";
 import type { FeedEntry, OfficeView } from "../view";
 import { listAccessTokens, syncAccessTokens, tokenProblem } from "./accessTokens";
-import { createUser, listUsers, setCredentials, userByParticipant, type Session } from "./auth";
-import { all, database, run, transaction, type Db } from "./db";
+import {
+  createUser,
+  issueSession,
+  listUsers,
+  setCredentials,
+  userByParticipant,
+  type Session,
+} from "./auth";
+import { all, database, get, run, transaction, type Db } from "./db";
 import { agentModel, ModelRuntime } from "./modelRuntime";
 import {
+  clearDatabase,
   hasOffice,
   loadEngineState,
   saveEngineState,
   seedDatabase,
   writeParticipant,
+  writeWholeOffice,
 } from "./officeStore";
 
 // ---------------------------------------------------------------------------
@@ -58,11 +69,32 @@ function applyAdminFromEnvironment(db: Db, office: Office): void {
   if (user) setCredentials(db, user.id, email, password);
 }
 
+/** A blank office starts from the same clock as the demo and its own id counter. */
+const emptyState = (admin: { id: string; displayName: string; title: string }): EngineState => ({
+  office: blankOffice(admin),
+  now: initialState.now,
+  seq: 0,
+  clockStepMinutes: initialState.clockStepMinutes,
+});
+
+/**
+ * What a new database starts with: the demo office, or with OFFICE_SEED=empty
+ * a blank office holding one administrator.
+ */
+function firstOffice(): EngineState {
+  if (process.env.OFFICE_SEED !== "empty") return initialState;
+  return emptyState({
+    id: "p-admin",
+    displayName: process.env.ADMIN_NAME?.trim() || "Administrator",
+    title: "Administrator",
+  });
+}
+
 /** Open the database, seed it on first run, and return the connection. */
 export function officeDatabase(): Db {
   const db = database();
   if (boot.__officeBooted) return db;
-  if (!hasOffice(db)) seedDatabase(db, initialState);
+  if (!hasOffice(db)) seedDatabase(db, firstOffice());
   const state = loadEngineState(db)!;
   transaction(db, () => {
     ensureAccounts(db, state.office);
@@ -178,6 +210,7 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
     feed: feedFor(db, state, viewer),
     hiddenMessages,
     runtime: runtime.kind,
+    agentModel: runtime.kind === "model" ? agentModel() : null,
     // Token details are for supervisors and for the holder's own tokens.
     accessTokens: listAccessTokens(db)
       .filter((t) => isSupervisor || t.participantId === viewer.id)
@@ -336,41 +369,165 @@ export function applyAction(session: Session, requested: Action): Promise<Office
   });
 }
 
-/**
- * Put the demo work back: the seeded tasks, messages and rules, and the demo
- * clock. People, desks and accounts are kept.
- */
-export function restoreDemo(session: Session): Promise<OfficeView> {
+// ---------------------------------------------------------------------------
+// Set-up changes
+// ---------------------------------------------------------------------------
+
+const quoted = (office: Office, id: string): string =>
+  office.floorplan.rooms.find((r) => r.id === id)?.name ??
+  office.participants.find((p) => p.id === id)?.displayName ??
+  office.roles[id]?.name ??
+  id;
+
+/** One plain sentence for the audit log and the activity feed. */
+function describeAdminOp(op: AdminOp, before: Office, after: Office, actor: Participant): string {
+  const who = actor.displayName;
+  switch (op.type) {
+    case "RENAME_OFFICE":
+      return `${who} renamed the office to ${after.name}`;
+    case "CLEAR_WORK":
+      return `${who} cleared all work: ${before.tasks.length} tasks and ${before.messages.length} messages`;
+    case "ADD_AGENT":
+      return `${who} added the agent ${op.displayName.trim()} with a desk in ${quoted(after, op.roomId)}`;
+    case "UPDATE_PARTICIPANT":
+      return `${who} updated ${quoted(after, op.participantId)}`;
+    case "REMOVE_PARTICIPANT":
+      return `${who} removed ${quoted(before, op.participantId)} from the office`;
+    case "ADD_ROLE":
+      return `${who} added the role ${op.name.trim()}`;
+    case "UPDATE_ROLE":
+      return `${who} updated the role ${quoted(after, op.roleId)}`;
+    case "REMOVE_ROLE":
+      return `${who} removed the role ${quoted(before, op.roleId)}`;
+    case "SET_ROLE_GRANT": {
+      const room = op.room === "*" ? "every room" : quoted(after, op.room);
+      const change = op.effect === "none" ? `cleared ${op.scope}` : `set ${op.scope} to ${op.effect}`;
+      return `${who} ${change} on ${room} for the role ${quoted(after, op.roleId)}`;
+    }
+    case "ADD_ROOM":
+      return `${who} added the room ${op.name.trim()} next to ${quoted(before, op.attachTo)}`;
+    case "UPDATE_ROOM":
+      return `${who} updated the room ${quoted(after, op.roomId)}`;
+    case "REMOVE_ROOM":
+      return `${who} removed the room ${quoted(before, op.roomId)}`;
+    case "SET_STAGE_ROOM":
+      return `${who} moved the ${op.stage} stage to ${quoted(after, op.roomId)}`;
+  }
+}
+
+function requireSupervisor(state: EngineState, session: Session, what: string): Participant {
+  const actor = viewerOf(state.office, session);
+  if (!supervises(state.office, actor)) {
+    throw new OfficeError(403, `Only a supervising role can ${what}.`);
+  }
+  return actor;
+}
+
+/** Apply one change to how the office is set up, on behalf of a supervisor. */
+export function applyAdminOperation(session: Session, op: AdminOp): Promise<OfficeView> {
   return inTurn(async () => {
     const db = officeDatabase();
     const before = loadEngineState(db);
     if (!before) throw new OfficeError(404, "No office has been set up.");
-    const actor = viewerOf(before.office, session);
-    if (!supervises(before.office, actor)) {
-      throw new OfficeError(403, "Only a supervising role can restore the demo.");
-    }
+    const actor = requireSupervisor(before, session, "change how the office is set up");
 
-    const after: EngineState = {
-      ...initialState,
-      office: {
-        ...before.office,
-        rules: initialState.office.rules.map((r) => ({ ...r })),
-        tasks: initialState.office.tasks.map((t) => ({ ...t })),
-        messages: initialState.office.messages.map((m) => ({ ...m })),
-      },
-    };
+    let office: Office;
+    try {
+      office = applyAdminOp(before.office, op, actor.id, () => randomUUID().slice(0, 8));
+    } catch (error) {
+      if (error instanceof AdminError) throw new OfficeError(409, error.message);
+      throw error;
+    }
+    const after: EngineState = { ...before, office };
+
+    try {
+      transaction(db, () => {
+        saveEngineState(db, before, after);
+        ensureAccounts(db, after.office);
+        syncAccessTokens(db);
+        recordAgentBacking(db, after.office);
+        recordAudit(db, {
+          officeId: after.office.id,
+          officeClock: after.now,
+          actorId: actor.id,
+          actionType: op.type,
+          subject: {
+            taskId: null,
+            subjectParticipantId: "participantId" in op ? op.participantId : null,
+            ruleId: null,
+            roomId: null,
+          },
+          notes: [describeAdminOp(op, before.office, after.office, actor)],
+        });
+      });
+    } catch (error) {
+      // The database keeps records the in-memory office does not see, such as
+      // audit entries. A constraint failure means one of them still refers to
+      // what was being removed.
+      if (error instanceof Error && /constraint/i.test(error.message)) {
+        throw new OfficeError(409, "That cannot be removed: the office's audit log still refers to it.");
+      }
+      throw error;
+    }
+    return buildView(db, loadEngineState(db)!, session);
+  });
+}
+
+/**
+ * Replace the whole office with an empty one or with the demo. The person
+ * doing it keeps their sign-in: their email and password move to the
+ * supervising person of the new office, and they get a fresh session.
+ */
+export function startOver(session: Session, kind: "empty" | "demo"): Promise<{ token: string }> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    const before = loadEngineState(db);
+    if (!before) throw new OfficeError(404, "No office has been set up.");
+    const actor = requireSupervisor(before, session, "start the office over");
+    const account = get<{ email: string; password_hash: string | null }>(
+      db,
+      "SELECT email, password_hash FROM users WHERE id = ?",
+      session.userId,
+    );
+
+    const next =
+      kind === "empty"
+        ? emptyState({ id: "p-admin", displayName: actor.displayName, title: actor.title })
+        : initialState;
+    const lead = next.office.participants.find(
+      (p) => p.kind === "human" && next.office.roles[p.roleId]?.supervises,
+    )!;
+
     transaction(db, () => {
-      saveEngineState(db, before, after);
+      clearDatabase(db);
+      writeWholeOffice(db, next);
+      ensureAccounts(db, next.office);
+      if (account?.password_hash) {
+        // Free the address first in case a seeded account already uses it.
+        run(db, "UPDATE users SET email = ? WHERE email = ? AND participant_id <> ?", `moved.${randomUUID().slice(0, 8)}@office.test`, account.email, lead.id);
+        run(
+          db,
+          "UPDATE users SET email = ?, password_hash = ? WHERE participant_id = ?",
+          account.email,
+          account.password_hash,
+          lead.id,
+        );
+      }
       syncAccessTokens(db);
+      recordAgentBacking(db, next.office);
       recordAudit(db, {
-        officeId: before.office.id,
-        officeClock: after.now,
-        actorId: actor.id,
-        actionType: "RESTORE_DEMO",
+        officeId: next.office.id,
+        officeClock: next.now,
+        actorId: lead.id,
+        actionType: kind === "empty" ? "START_EMPTY" : "LOAD_DEMO",
         subject: { taskId: null, subjectParticipantId: null, ruleId: null, roomId: null },
-        notes: [`Demo work restored by ${actor.displayName}.`],
+        notes: [
+          kind === "empty"
+            ? `${lead.displayName} started an empty office.`
+            : `${lead.displayName} loaded the demo office.`,
+        ],
       });
     });
-    return buildView(db, after, session);
+    return issueSession(db, userByParticipant(db, lead.id)!);
   });
 }
