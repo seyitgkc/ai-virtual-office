@@ -2,11 +2,32 @@ services:
   office:
     build: .
     image: ai-virtual-office:latest
-    # Bound to localhost so a reverse proxy on the host fronts it. Set
-    # OFFICE_PORT to use a different host port.
+    # Bound to localhost so a reverse proxy on the host fronts it with TLS.
+    # Set OFFICE_PORT to use a different host port.
     ports:
       - "127.0.0.1:${OFFICE_PORT:-8080}:8080"
+    environment:
+      # Signs session and permission tokens. When unset, a random key is
+      # generated once and kept on the data volume.
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      # Optional first administrator. When unset, the office starts with demo
+      # sign-in only.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Set to 0 to turn off password-free demo sign-in.
+      DEMO_LOGIN: ${DEMO_LOGIN:-1}
+      # Set AGENT_RUNTIME=model and provide a key to have a live model answer
+      # for the agents. Left unset, agents follow the fixed script.
+      AGENT_RUNTIME: ${AGENT_RUNTIME:-}
+      AGENT_MODEL: ${AGENT_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - office-data:/data
     restart: unless-stopped
     read_only: true
     tmpfs:
       - /tmp
+      - /app/.next/cache
+
+volumes:
+  office-data:

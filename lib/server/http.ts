@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { readSession, SESSION_COOKIE, SESSION_HOURS, type Session } from "./auth";
 import { OfficeError, officeDatabase } from "./officeService";
@@ -11,10 +11,13 @@ export async function currentSession(): Promise<Session | null> {
 
 export async function setSessionCookie(token: string): Promise<void> {
   const store = await cookies();
+  // Marked Secure whenever the visitor arrived over HTTPS, which behind a
+  // reverse proxy is reported in a forwarded header.
+  const viaHttps = (await headers()).get("x-forwarded-proto")?.split(",")[0]?.trim() === "https";
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production" && process.env.COOKIE_SECURE !== "0",
+    secure: viaHttps || process.env.COOKIE_SECURE === "1",
     path: "/",
     maxAge: SESSION_HOURS * 3600,
   });
