@@ -6,6 +6,7 @@ import { OrbitControls, ContactShadows } from "@react-three/drei";
 import { Fog, PerspectiveCamera, Vector3 } from "three";
 import type { Office } from "../lib/model";
 import { planExtent, roomCentre, seatPosition, type WalkPose } from "../lib/geometry";
+import { KindBadge } from "./Panels";
 import { RoomMesh } from "./RoomMesh";
 import { DeskMesh } from "./Desk";
 import { Figure } from "./Figure";
@@ -60,6 +61,7 @@ function Framing({
 
 export function Scene({
   office,
+  viewerId,
   mode,
   walkPose,
   walkRoomId,
@@ -71,6 +73,8 @@ export function Scene({
   participantAlert,
 }: {
   office: Office;
+  /** The signed-in person, whose own name tag says so. */
+  viewerId: string;
   /** Overview orbits the whole plan. Walk puts the camera at eye level. */
   mode: "overview" | "walk";
   walkPose: RefObject<WalkPose>;
@@ -125,17 +129,16 @@ export function Scene({
           hidden: walking && desk.roomId !== walkRoomId,
           node: (
             <div className="name-tag">
-              <span className="kind-badge" data-kind={p.kind}>
-                {p.kind === "agent" ? "AI" : "Human"}
-              </span>
+              <KindBadge kind={p.kind} agentType={p.agentType} />
               {p.displayName}
+              {p.id === viewerId && <span className="you">(You)</span>}
             </div>
           ),
         },
       ];
     });
     return [...roomLabels, ...nameTags];
-  }, [rooms, desks, office.participants, walking, walkRoomId]);
+  }, [rooms, desks, office.participants, walking, walkRoomId, viewerId]);
 
   return (
     <>

@@ -8,6 +8,7 @@ import {
   wallSegments,
   type WalkPose,
 } from "../lib/geometry";
+import { kindName } from "./Panels";
 import { ROOM_TINT } from "./RoomMesh";
 
 const MARGIN = 2.8;
@@ -137,7 +138,7 @@ export function Minimap({
               ) : (
                 <circle r={0.5} fill={p.appearance.color} stroke="#16181d" strokeWidth={0.1} />
               )}
-              <title>{`${p.displayName} (${p.kind === "agent" ? "AI agent" : "human"})`}</title>
+              <title>{`${p.displayName} (${kindName(p).toLowerCase()})`}</title>
             </g>
           );
         })}

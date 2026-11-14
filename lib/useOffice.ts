@@ -3,11 +3,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AdminOp } from "./admin";
 import type { Action } from "./engine";
-import type { OfficeView } from "./view";
+import type { OfficeView, ProviderKind } from "./view";
 
 export type { FeedEntry } from "./view";
 
 type Halt = "none" | "question" | "permission";
+
+/** A change to one of the office's AI providers. */
+export type ProviderOp =
+  | {
+      operation: "save";
+      id?: string;
+      name: string;
+      kind: ProviderKind;
+      baseUrl: string;
+      defaultModel: string;
+      apiKey?: string;
+      removeKey?: boolean;
+    }
+  | { operation: "remove" | "test"; id: string };
+
+export type OfficeOp = { operation: "create"; name: string } | { operation: "switch" | "remove"; officeId: string };
 
 /** How often the office is re-read, so that other people's actions show up. */
 const REFRESH_MS = 5000;
@@ -77,19 +93,19 @@ export function useOffice(initial: OfficeView) {
   // Adding, switching or removing an office changes what the whole page
   // shows, so the page is reloaded once the server has done it.
   const officeOp = useCallback(
-    (body: { operation: "create"; name: string } | { operation: "switch" | "remove"; officeId: string }) =>
+    (body: OfficeOp) =>
       send("/api/offices", body, () => window.location.assign("/")),
     [send],
   );
-  const saveAi = useCallback(
-    (body: { runtime: "scripted" | "model"; model: string; apiKey?: string; removeKey?: boolean }) =>
-      send("/api/admin/ai", body),
-    [send],
-  );
-  const testAi = useCallback(
-    () =>
-      send("/api/admin/ai/test", {}, (data) =>
-        setNotice(`Connected. The provider recognises ${(data as { model?: string }).model ?? "the model"}.`, "info"),
+  const providerOp = useCallback(
+    (body: ProviderOp) =>
+      send(
+        "/api/admin/providers",
+        body,
+        body.operation === "test"
+          ? (data) =>
+              setNotice(`Connected. The provider recognises ${(data as { model?: string }).model ?? "the model"}.`, "info")
+          : undefined,
       ),
     [send, setNotice],
   );
@@ -171,8 +187,7 @@ export function useOffice(initial: OfficeView) {
     dispatch,
     adminOp,
     officeOp,
-    saveAi,
-    testAi,
+    providerOp,
     tokenOperation,
     signOut,
   };

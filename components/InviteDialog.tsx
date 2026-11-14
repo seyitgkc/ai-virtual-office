@@ -1,18 +1,28 @@
 "use client";
 
 import { useState } from "react";
-import type { Office } from "../lib/model";
+import type { Office, Permission, Role } from "../lib/model";
 
 /**
- * Lets a supervisor add a person to the office. The result is a single-use
+ * Adds a person to the office. The result is a single-use
  * link that the invited person opens to choose their own email and password.
  */
-export function InviteDialog({ office, onClose }: { office: Office; onClose: () => void }) {
+export function InviteDialog({
+  office,
+  ownPermissions,
+  onClose,
+}: {
+  office: Office;
+  /** The inviter's own permissions. Nobody can hand out more than they hold. */
+  ownPermissions: Permission[];
+  onClose: () => void;
+}) {
   const roles = Object.values(office.roles);
+  const withinReach = (role: Role): boolean => role.permissions.every((p) => ownPermissions.includes(p));
   const rooms = office.floorplan.rooms;
   const [displayName, setDisplayName] = useState("");
   const [title, setTitle] = useState("");
-  const [roleId, setRoleId] = useState(roles.find((r) => !r.supervises)?.id ?? roles[0]?.id ?? "");
+  const [roleId, setRoleId] = useState(roles.find((r) => r.permissions.length === 0)?.id ?? roles[0]?.id ?? "");
   const [roomId, setRoomId] = useState(rooms[0]?.id ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -106,9 +116,11 @@ export function InviteDialog({ office, onClose }: { office: Office; onClose: () 
             <label htmlFor="invite-role">Role</label>
             <select id="invite-role" value={roleId} onChange={(e) => setRoleId(e.target.value)}>
               {roles.map((role) => (
-                <option key={role.id} value={role.id}>
+                <option key={role.id} value={role.id} disabled={!withinReach(role)}>
                   {role.name}
-                  {role.supervises ? " (supervises)" : ""}
+                  {role.permissions.length > 0
+                    ? ` (${role.permissions.length} permission${role.permissions.length === 1 ? "" : "s"})`
+                    : ""}
                 </option>
               ))}
             </select>

@@ -7,7 +7,7 @@ interface DemoAccount {
   displayName: string;
   title: string;
   role: string;
-  supervises: boolean;
+  managesAccess: boolean;
 }
 
 async function post(url: string, body: unknown): Promise<string | null> {
@@ -100,7 +100,7 @@ export function LoginForm({ demoAccounts }: { demoAccounts: DemoAccount[] }) {
               >
                 <strong>{a.displayName}</strong>
                 <span>
-                  {a.title} · {a.supervises ? "can change access and approve" : `${a.role} role`}
+                  {a.title} · {a.managesAccess ? "can change access and approve" : `${a.role} role`}
                 </span>
               </button>
             ))}

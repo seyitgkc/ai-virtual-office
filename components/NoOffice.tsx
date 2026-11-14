@@ -33,7 +33,7 @@ export function NoOffice({ displayName, canCreate }: { displayName: string; canC
           You are not in an office yet.{" "}
           {canCreate
             ? "Add one to get started. It begins empty, with one room and you in it."
-            : "Ask someone who supervises an office to invite you."}
+            : "Ask someone in an office to invite you."}
         </p>
         {canCreate && (
           <form

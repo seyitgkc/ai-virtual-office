@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/LoginForm";
-import { supervises } from "@/lib/policy";
+import { may } from "@/lib/model";
 import { usersInOffice } from "@/lib/server/auth";
 import { currentSession } from "@/lib/server/http";
 import { DEMO_OFFICE_ID, demoLoginEnabled, officeDatabase } from "@/lib/server/officeService";
@@ -26,7 +26,7 @@ export default async function LoginPage() {
                   displayName: p.displayName,
                   title: p.title,
                   role: demo.roles[p.roleId]?.name ?? p.roleId,
-                  supervises: supervises(demo, p),
+                  managesAccess: may(demo, p, "manage_access"),
                 },
               ]
             : [];

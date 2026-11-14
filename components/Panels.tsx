@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   ALL_SCOPES,
   hasConflict,
+  may,
   resolveAccess,
   type AccessContext,
   type AssumptionMessage,
@@ -16,7 +17,7 @@ import {
   type TaskStatus,
 } from "../lib/model";
 import { eligibleOwners, nextStage, roomForStage, stageSpec, type Action } from "../lib/engine";
-import { authorize, supervises } from "../lib/policy";
+import { authorize } from "../lib/policy";
 import type { FeedEntry, OfficeView, TokenView } from "../lib/view";
 
 const STATUS: Record<TaskStatus, { label: string; accent: string }> = {
@@ -39,14 +40,19 @@ const time = (ms: number): string =>
 
 // ---------------------------------------------------------------------------
 
-/** Says whether a participant is a person or an AI agent. */
-export function KindBadge({ kind }: { kind: Participant["kind"] }) {
+/** Says whether a participant is a person, an AI agent or a playbook agent. */
+export function KindBadge({ kind, agentType }: Pick<Participant, "kind" | "agentType">) {
+  const playbook = kind === "agent" && agentType !== "ai";
   return (
-    <span className="kind-badge" data-kind={kind}>
-      {kind === "agent" ? "AI" : "Human"}
+    <span className="kind-badge" data-kind={kind} data-playbook={playbook}>
+      {kind === "human" ? "Human" : playbook ? "Playbook" : "AI"}
     </span>
   );
 }
+
+/** What kind of participant this is, in words. */
+export const kindName = (p: Pick<Participant, "kind" | "agentType">): string =>
+  p.kind === "human" ? "Human" : p.agentType === "ai" ? "AI agent" : "Playbook agent";
 
 export function TitleCard({
   mode,
@@ -55,7 +61,7 @@ export function TitleCard({
   officeName,
   offices,
   onSwitchOffice,
-  runtime,
+  isDemoOffice,
   onSignOut,
   onSettings,
   onInvite,
@@ -66,7 +72,7 @@ export function TitleCard({
   officeName: string;
   offices: OfficeView["offices"];
   onSwitchOffice: (officeId: string) => void;
-  runtime: OfficeView["runtime"];
+  isDemoOffice: boolean;
   onSignOut: () => void;
   onSettings: () => void;
   onInvite: () => void;
@@ -117,17 +123,16 @@ export function TitleCard({
       </p>
       <div className="legend">
         <span>
-          <KindBadge kind="human" /> rounded figure
+          <KindBadge kind="human" agentType={null} /> rounded figure
         </span>
         <span>
-          <KindBadge kind="agent" /> faceted, with a ring
+          <KindBadge kind="agent" agentType="ai" /> <KindBadge kind="agent" agentType="playbook" /> faceted,
+          with a ring
         </span>
       </div>
-      <div className="sim">
-        {runtime === "model"
-          ? "Agents answer through a live language model."
-          : "No model is connected. Agents here follow a fixed script."}
-      </div>
+      {isDemoOffice && (
+        <div className="sim">The agents in this demo follow written playbooks. No model is connected.</div>
+      )}
       <button className="btn primary mode" onClick={onToggleMode}>
         Walk the office
       </button>
@@ -137,7 +142,7 @@ export function TitleCard({
           <span>{viewer.title}</span>
         </div>
         <div className="who-actions">
-          {viewer.supervises && (
+          {viewer.permissions.includes("invite_people") && (
             <button className="btn" onClick={onInvite}>
               Invite
             </button>
@@ -161,14 +166,19 @@ const SAMPLE_REQUEST = {
 };
 
 function RequestForm({
+  sample,
+  intakeRoomName,
   onSubmit,
   onCancel,
 }: {
+  /** Start from the demo's sample order. Only the demo office does. */
+  sample: boolean;
+  intakeRoomName: string;
   onSubmit: (title: string, detail: string) => void;
   onCancel: () => void;
 }) {
-  const [title, setTitle] = useState(SAMPLE_REQUEST.title);
-  const [detail, setDetail] = useState(SAMPLE_REQUEST.detail);
+  const [title, setTitle] = useState(sample ? SAMPLE_REQUEST.title : "");
+  const [detail, setDetail] = useState(sample ? SAMPLE_REQUEST.detail : "");
   const ready = title.trim().length > 0 && detail.trim().length > 0;
 
   return (
@@ -184,22 +194,25 @@ function RequestForm({
         id="request-title"
         value={title}
         maxLength={90}
+        placeholder={sample ? undefined : "A short name for the request"}
         onChange={(e) => setTitle(e.target.value)}
       />
-      <label htmlFor="request-detail">What the dealer asked for</label>
+      <label htmlFor="request-detail">{sample ? "What the dealer asked for" : "Details"}</label>
       <textarea
         id="request-detail"
         value={detail}
         rows={4}
         maxLength={400}
+        placeholder={sample ? undefined : "What is needed, and anything the office should know"}
         onChange={(e) => setDetail(e.target.value)}
       />
-      <div className="hint">
-        Agents are scripted, so they handle every request as a dealer order for
-        multi-zone heads.
-      </div>
+      {sample && (
+        <div className="hint">
+          The agents in this demo follow playbooks written for a dealer order like this one.
+        </div>
+      )}
       <button type="submit" className="btn primary" disabled={!ready}>
-        Send to Reception
+        Send to {intakeRoomName}
       </button>
       <button type="button" className="btn" onClick={onCancel}>
         Cancel
@@ -214,7 +227,12 @@ export function TaskList({
   onSelect,
   onSubmit,
   submitBlocked,
+  isDemoOffice,
+  intakeRoomName,
 }: {
+  isDemoOffice: boolean;
+  /** The room new requests arrive in. */
+  intakeRoomName: string;
   tasks: Task[];
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -233,6 +251,8 @@ export function TaskList({
       <div className="panel-body">
         {composing ? (
           <RequestForm
+            sample={isDemoOffice}
+            intakeRoomName={intakeRoomName}
             onSubmit={(title, detail) => {
               onSubmit(title, detail);
               setComposing(false);
@@ -409,7 +429,9 @@ function TaskInspector({
   // Actions are sent as the signed-in person. The server stamps the real
   // actor, so these ids only keep the action well formed.
   const supervisor = viewer;
-  const maySupervise = supervises(office, viewer);
+  const mayManageAccess = may(office, viewer, "manage_access");
+  const mayReassign = may(office, viewer, "reassign_work");
+  const mayDecide = may(office, viewer, "decide_reviews");
   const mayAdvance = authorize(office, ctx, viewer, { type: "ADVANCE", taskId: task.id });
 
   const target = nextStage(task.stage);
@@ -431,7 +453,7 @@ function TaskInspector({
       }).allowed
     : false;
   const needsSupervisor =
-    !maySupervise && (task.status === "blocked_permission" || task.status === "in_review");
+    (task.status === "blocked_permission" && !mayManageAccess) || (task.status === "in_review" && !mayDecide);
 
   const s = STATUS[task.status];
   const canAdvance =
@@ -462,12 +484,12 @@ function TaskInspector({
             </div>
             <div className="kv">
               <span>Room</span>
-              <span>{task.roomId}</span>
+              <span>{office.floorplan.rooms.find((r) => r.id === task.roomId)?.name ?? task.roomId}</span>
             </div>
             <div className="kv">
               <span>Owner</span>
               <span>
-                {owner && <KindBadge kind={owner.kind} />}{" "}
+                {owner && <KindBadge kind={owner.kind} agentType={owner.agentType} />}{" "}
                 {task.ownerId ? name(task.ownerId) : "Unassigned"}
               </span>
             </div>
@@ -509,13 +531,14 @@ function TaskInspector({
           )}
 
           {task.status === "blocked_permission" && escalation?.deniedDecision && (
-            <fieldset className="moves" disabled={!maySupervise}>
+            <fieldset className="moves" disabled={!mayManageAccess && !mayReassign}>
               <div className="note esc">
                 <div className="meta">{name(escalation.fromId as string)} is blocked</div>
                 {escalation.body}
               </div>
               <button
                 className="btn primary"
+                disabled={!mayManageAccess}
                 onClick={() =>
                   dispatch({
                     type: "GRANT_ACCESS",
@@ -530,7 +553,9 @@ function TaskInspector({
                 }
               >
                 Grant {escalation.deniedDecision.scope} on{" "}
-                {escalation.deniedDecision.room}, for this task only
+                {office.floorplan.rooms.find((r) => r.id === escalation.deniedDecision!.room)?.name ??
+                  escalation.deniedDecision.room}
+                , for this task only
               </button>
               {escalation.deniedDecision.overrode
                 .filter((o) => o.kind === "individual" && o.effect === "deny")
@@ -538,6 +563,7 @@ function TaskInspector({
                   <button
                     key={o.kind === "individual" ? o.ruleId : "x"}
                     className="btn warn"
+                    disabled={!mayManageAccess}
                     onClick={() =>
                       dispatch({
                         type: "REVOKE_RULE",
@@ -553,6 +579,7 @@ function TaskInspector({
                 escalation.deniedDecision.decidedBy.effect === "deny" && (
                   <button
                     className="btn warn"
+                    disabled={!mayManageAccess}
                     onClick={() =>
                       dispatch({
                         type: "REVOKE_RULE",
@@ -571,6 +598,7 @@ function TaskInspector({
                 <button
                   key={p.id}
                   className="btn"
+                  disabled={!mayReassign}
                   onClick={() =>
                     dispatch({
                       type: "REASSIGN",
@@ -587,7 +615,7 @@ function TaskInspector({
           )}
 
           {task.status === "in_review" && (
-            <fieldset className="moves" disabled={!maySupervise}>
+            <fieldset className="moves" disabled={!mayDecide}>
               <button
                 className="btn primary"
                 onClick={() =>
@@ -738,7 +766,7 @@ function ThreadLine({
         {time(message.at)} · {message.fromId === "system" ? "system" : name(message.fromId)} ·{" "}
         {message.kind}
         {message.kind === "output" && message.simulated && (
-          <span style={{ color: "#e0a23f" }}>simulated</span>
+          <span style={{ color: "#e0a23f" }}>from a playbook</span>
         )}
       </div>
       {message.body}
@@ -767,7 +795,7 @@ function ParticipantInspector({
   onTokenOperation: (tokenId: string, operation: "reveal" | "revoke") => void;
   onClear: () => void;
 }) {
-  const viewerSupervises = supervises(office, viewer);
+  const viewerSupervises = may(office, viewer, "manage_access");
   const roomName = (id: string | null): string =>
     id === null ? "Every room" : (office.floorplan.rooms.find((r) => r.id === id)?.name ?? id);
   const role = office.roles[participant.roleId];
@@ -782,7 +810,7 @@ function ParticipantInspector({
   return (
     <div className="panel" id="inspector">
       <div className="panel-head">
-        <span>{participant.kind === "agent" ? "AI agent" : "Human"}</span>
+        <span>{kindName(participant)}</span>
         <button className="btn" style={{ padding: "2px 7px", margin: 0 }} onClick={onClear}>
           close
         </button>
@@ -798,8 +826,11 @@ function ParticipantInspector({
                 background: participant.appearance.color,
               }}
             />
-            <span style={{ fontSize: 14 }}>{participant.displayName}</span>
-            <KindBadge kind={participant.kind} />
+            <span style={{ fontSize: 14 }}>
+              {participant.displayName}
+              {participant.id === viewer.id ? " (You)" : ""}
+            </span>
+            <KindBadge kind={participant.kind} agentType={participant.agentType} />
           </div>
           <div style={{ fontSize: 11, opacity: 0.6 }}>{participant.title}</div>
           <div style={{ marginTop: 9 }}>
@@ -807,14 +838,24 @@ function ParticipantInspector({
               <span>Role</span>
               <span>{role ? role.name : participant.roleId}</span>
             </div>
-            <div className="kv">
-              <span>Backing</span>
-              <span style={{ color: participant.backing ? undefined : "#e0a23f" }}>
-                {participant.backing
-                  ? `${participant.backing.provider} ${participant.backing.model}`
-                  : "simulated"}
-              </span>
-            </div>
+            {participant.kind === "agent" && participant.agentType === "ai" && (
+              <div className="kv">
+                <span>Model</span>
+                <span style={{ color: participant.backing ? undefined : "#e0a23f" }}>
+                  {participant.backing
+                    ? `${participant.backing.provider} ${participant.backing.model}`
+                    : "no working AI provider"}
+                </span>
+              </div>
+            )}
+            {participant.kind === "agent" && participant.agentType !== "ai" && (
+              <div className="kv">
+                <span>Works from</span>
+                <span>
+                  a playbook of {participant.playbook.length} step{participant.playbook.length === 1 ? "" : "s"}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 

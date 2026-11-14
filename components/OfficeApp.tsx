@@ -32,8 +32,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     dispatch,
     adminOp,
     officeOp,
-    saveAi,
-    testAi,
+    providerOp,
     tokenOperation,
     signOut,
   } = useOffice(initial);
@@ -86,6 +85,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     <main className="office" data-pending={pending}>
       <Scene
         office={office}
+        viewerId={viewer.id}
         mode={mode}
         walkPose={walkPose}
         walkRoomId={walkRoomId}
@@ -108,7 +108,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           officeName={office.name}
           offices={view.offices}
           onSwitchOffice={(officeId) => officeOp({ operation: "switch", officeId })}
-          runtime={view.runtime}
+          isDemoOffice={view.isDemoOffice}
           onSignOut={signOut}
           onSettings={() => setSettingsOpen(true)}
           onInvite={() => setInviting(true)}
@@ -121,6 +121,10 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
             setSelectedPersonId(null);
           }}
           submitBlocked={mayFile.allowed ? null : mayFile.reason}
+          isDemoOffice={view.isDemoOffice}
+          intakeRoomName={
+            office.floorplan.rooms.find((r) => r.id === office.stageRooms.intake)?.name ?? "the office"
+          }
           onSubmit={(title, detail) =>
             dispatch({ type: "SUBMIT_REQUEST", title, detail, requestedById: viewer.id })
           }
@@ -164,7 +168,9 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         </div>
       )}
       {pending && <div className="working">Working...</div>}
-      {inviting && <InviteDialog office={office} onClose={() => setInviting(false)} />}
+      {inviting && (
+        <InviteDialog office={office} ownPermissions={view.viewer.permissions} onClose={() => setInviting(false)} />
+      )}
       {settingsOpen && (
         <Settings
           view={view}
@@ -172,8 +178,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           adminOp={adminOp}
           dispatch={dispatch}
           officeOp={officeOp}
-          saveAi={saveAi}
-          testAi={testAi}
+          providerOp={providerOp}
           onClose={() => setSettingsOpen(false)}
         />
       )}
