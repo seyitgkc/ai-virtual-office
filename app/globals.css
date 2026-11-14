@@ -544,3 +544,12 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 @media (max-width: 720px) {
   .settings .choice, .settings .step-fields.three { grid-template-columns: 1fr; }
 }
+
+/* ---- a typed answer to a question ---- */
+.answer-box { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 4px; }
+.answer-box textarea {
+  font: inherit; font-size: 11.5px; color: #e8e6e1; resize: vertical;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px; padding: 6px 8px; width: 100%;
+}
+.answer-box .btn { align-self: flex-start; margin: 0; }

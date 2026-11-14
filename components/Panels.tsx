@@ -159,6 +159,33 @@ export function TitleCard({
   );
 }
 
+/** A typed answer to a question, for when none of the offered choices fits. */
+function AnswerBox({ onSend }: { onSend: (body: string) => void }) {
+  const [text, setText] = useState("");
+  const ready = text.trim().length > 0;
+  return (
+    <form
+      className="answer-box"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready) onSend(text.trim());
+      }}
+    >
+      <textarea
+        aria-label="Your own answer"
+        placeholder="Or write your own answer"
+        rows={2}
+        maxLength={600}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <button type="submit" className="btn" disabled={!ready}>
+        Send answer
+      </button>
+    </form>
+  );
+}
+
 const SAMPLE_REQUEST = {
   title: "Dealer order 4502: 4x multi-zone heads",
   detail:
@@ -455,16 +482,23 @@ function TaskInspector({
         body: "-",
       }).allowed
     : false;
-  const needsSupervisor =
-    (task.status === "blocked_permission" && !mayManageAccess) || (task.status === "in_review" && !mayDecide);
 
   const s = STATUS[task.status];
+  // Review is closed by a person's decision. Any open, unblocked task at
+  // that stage is waiting for one.
+  const awaitingDecision =
+    task.closedAt === null &&
+    task.stage !== "done" &&
+    stageSpec(task.stage).humanGate === true &&
+    (task.status === "in_review" || task.status === "in_progress");
   const canAdvance =
     mayAdvance.allowed &&
     task.closedAt === null &&
     task.status !== "blocked_question" &&
     task.status !== "blocked_permission" &&
-    task.status !== "in_review";
+    !awaitingDecision;
+  const needsSupervisor =
+    (task.status === "blocked_permission" && !mayManageAccess) || (awaitingDecision && !mayDecide);
 
   return (
     <div className="panel" id="inspector">
@@ -530,6 +564,17 @@ function TaskInspector({
                   {opt}
                 </button>
               ))}
+              <AnswerBox
+                key={openQuestion.id}
+                onSend={(body) =>
+                  dispatch({
+                    type: "ANSWER_QUESTION",
+                    questionId: openQuestion.id,
+                    answeredById: supervisor.id,
+                    body,
+                  })
+                }
+              />
             </fieldset>
           )}
 
@@ -617,7 +662,7 @@ function TaskInspector({
             </fieldset>
           )}
 
-          {task.status === "in_review" && (
+          {awaitingDecision && (
             <fieldset className="moves" disabled={!mayDecide}>
               <button
                 className="btn primary"
