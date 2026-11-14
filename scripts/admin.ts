@@ -2,11 +2,12 @@
  * Checks the admin operations: rooms, roles, people and agents, and an office
  * built from nothing. Run: npx tsx scripts/admin.ts
  */
-import { AdminError, applyAdminOp, blankOffice, parseAdminOp, type AdminOp } from "../lib/admin";
-import { reduce, ScriptedRuntime } from "../lib/engine";
+import { AdminError, applyAdminOp, blankOffice, parseAdminOp, permissionFor, type AdminOp } from "../lib/admin";
+import { reduce } from "../lib/engine";
+import { PlaybookRuntime } from "../lib/playbook";
 import { obstacles, planExtent, roomAt, stepWalker } from "../lib/geometry";
 import { initialState } from "../lib/initialState";
-import { resolveAccess, type Office } from "../lib/model";
+import { PERMISSIONS, resolveAccess, type Office, type PlaybookStep } from "../lib/model";
 import { contextOf } from "../lib/policy";
 
 let failures = 0;
@@ -104,16 +105,54 @@ async function main(): Promise<void> {
   );
   roles = apply(roles, { type: "SET_ROLE_GRANT", roleId: "intake", room: "finance", scope: "read", effect: "none" });
   expect("clearing the cell leaves no grant for it", roles.roles.intake.grants.some((g) => g.room === "finance"), false);
-  const withRole = apply(seed, { type: "ADD_ROLE", name: "Auditor", description: "Reads everything", supervises: false });
+  const withRole = apply(seed, { type: "ADD_ROLE", name: "Auditor", description: "Reads everything" });
   const auditor = Object.values(withRole.roles).find((r) => r.name === "Auditor")!;
   expect("a role is added with no access", auditor.grants.length, 0);
+  expect("and no permissions", auditor.permissions.length, 0);
   expect("an unused role can be removed", Object.keys(apply(withRole, { type: "REMOVE_ROLE", roleId: auditor.id }).roles).length, 5);
   expect("a role in use cannot be removed", refusal(seed, { type: "REMOVE_ROLE", roleId: "intake" })?.includes("Iris"), true);
+
+  console.log("\n-- permissions --");
+  expect("the seeded supervisor role holds every permission", seed.roles.supervisor.permissions.length, PERMISSIONS.length);
+  expect("the seeded agent roles hold none", seed.roles.intake.permissions.length, 0);
+  let perms = apply(withRole, { type: "SET_ROLE_PERMISSION", roleId: auditor.id, permission: "see_everything", allowed: true });
+  expect("one permission can be given to a role", perms.roles[auditor.id].permissions.join(), "see_everything");
+  perms = apply(perms, { type: "SET_ROLE_PERMISSION", roleId: auditor.id, permission: "decide_reviews", allowed: true });
+  perms = apply(perms, { type: "SET_ROLE_PERMISSION", roleId: auditor.id, permission: "see_everything", allowed: false });
+  expect("and taken away again, one at a time", perms.roles[auditor.id].permissions.join(), "decide_reviews");
   expect(
-    "the last supervising person cannot lose that power",
-    refusal(seed, { type: "UPDATE_ROLE", roleId: "supervisor", supervises: false }) !== null,
+    "a role held by agents cannot carry a permission",
+    refusal(seed, { type: "SET_ROLE_PERMISSION", roleId: "intake", permission: "manage_access", allowed: true })?.includes("Agents hold this role"),
     true,
   );
+  expect(
+    "the last person who can manage roles cannot lose that",
+    refusal(seed, { type: "SET_ROLE_PERMISSION", roleId: "supervisor", permission: "manage_roles", allowed: false }) !== null,
+    true,
+  );
+  // Sam is moved to a role that may manage roles and people, and nothing else.
+  let limited = apply(perms, { type: "SET_ROLE_PERMISSION", roleId: auditor.id, permission: "manage_roles", allowed: true });
+  limited = apply(limited, { type: "SET_ROLE_PERMISSION", roleId: auditor.id, permission: "manage_people", allowed: true });
+  limited = apply(limited, { type: "UPDATE_PARTICIPANT", participantId: "p-sam", roleId: auditor.id });
+  expect(
+    "nobody can grant a permission they do not hold",
+    refusal(limited, { type: "SET_ROLE_PERMISSION", roleId: auditor.id, permission: "manage_office", allowed: true }, "p-sam"),
+    "You can only grant a permission you hold yourself.",
+  );
+  expect(
+    "nor move someone into a role that holds more than they do",
+    refusal(limited, { type: "UPDATE_PARTICIPANT", participantId: "p-sam", roleId: "supervisor" }, "p-sam")?.includes("has more"),
+    true,
+  );
+  expect(
+    "but they can take away a permission they hold",
+    apply(limited, { type: "SET_ROLE_PERMISSION", roleId: auditor.id, permission: "decide_reviews", allowed: false }, "p-sam").roles[auditor.id].permissions.includes("decide_reviews"),
+    false,
+  );
+  expect("each kind of change names the permission it needs: rooms", permissionFor({ type: "REMOVE_ROOM", roomId: "x" }), "manage_rooms");
+  expect("roles", permissionFor({ type: "ADD_ROLE", name: "x", description: "" }), "manage_roles");
+  expect("people and agents", permissionFor({ type: "SET_PLAYBOOK", participantId: "x", steps: [] }), "manage_people");
+  expect("the office itself", permissionFor({ type: "CLEAR_WORK" }), "manage_office");
 
   console.log("\n-- people and agents --");
   let people = apply(seed, {
@@ -123,21 +162,68 @@ async function main(): Promise<void> {
     roleId: "fulfilment",
     roomId: "fulfilment",
     capabilities: ["Process returns", "  ", "Issue credit notes"],
+    agentType: "playbook",
   });
   const scout = people.participants.at(-1)!;
   const scoutDesk = people.floorplan.desks.find((d) => d.id === scout.deskId)!;
   expect("an agent is added", scout.kind, "agent");
+  expect("as a playbook agent with no steps yet", `${scout.agentType}/${scout.playbook.length}`, "playbook/0");
   expect("with a desk in the chosen room", scoutDesk.roomId, "fulfilment");
   expect("the room lists the new desk", people.floorplan.rooms.find((r) => r.id === "fulfilment")!.deskIds.includes(scoutDesk.id), true);
   expect("blank capabilities are dropped", scout.capabilities.length, 2);
-  expect("an agent cannot be given a supervising role", refusal(seed, { type: "ADD_AGENT", displayName: "Boss", title: "Chief", roleId: "supervisor", roomId: "operations", capabilities: [] }) !== null, true);
+  expect("an agent cannot be given a supervising role", refusal(seed, { type: "ADD_AGENT", displayName: "Boss", title: "Chief", roleId: "supervisor", roomId: "operations", capabilities: [], agentType: "ai" }) !== null, true);
   people = apply(people, { type: "UPDATE_PARTICIPANT", participantId: scout.id, roomId: "planning", roleId: "planner" });
   expect("moving an agent moves its desk", people.floorplan.desks.find((d) => d.id === scout.deskId)!.roomId, "planning");
   expect("and changes its role", people.participants.at(-1)!.roleId, "planner");
+
+  console.log("\n-- agent types and playbooks --");
+  const step = (over: Partial<PlaybookStep["then"]>, when: Partial<PlaybookStep["when"]> = {}): PlaybookStep => ({
+    id: "",
+    when: { stage: "any", requestContains: "", requestedBy: "anyone", ...when },
+    then: { statusNote: "", output: null, question: null, assumption: null, need: null, ...over },
+  });
+  let booked = apply(people, {
+    type: "SET_PLAYBOOK",
+    participantId: scout.id,
+    steps: [
+      step({ statusNote: " Returns logged ", output: { label: "", body: "Credit note raised." } }, { stage: "execution", requestContains: "return" }),
+      step({ question: { body: "Which branch?", to: "requester", blocking: true, options: ["Laval", " ", "Ottawa"] } }),
+    ],
+  });
+  const book = booked.participants.find((p) => p.id === scout.id)!.playbook;
+  expect("a playbook is stored in order", book.length, 2);
+  expect("each step gets an id", book.every((s) => s.id.startsWith("pb-")) && book[0].id !== book[1].id, true);
+  expect("text is trimmed", book[0].then.statusNote, "Returns logged");
+  expect("an output without a heading gets one", book[0].then.output?.label, "Output");
+  expect("blank answer options are dropped", book[1].then.question?.options.join(), "Laval,Ottawa");
+  expect("a step that does nothing is refused", refusal(people, { type: "SET_PLAYBOOK", participantId: scout.id, steps: [step({})] })?.includes("does nothing yet"), true);
+  expect("a step may not need a room that does not exist", refusal(people, { type: "SET_PLAYBOOK", participantId: scout.id, steps: [step({ need: { room: "vault", scope: "read", purpose: "x" } })] })?.includes("does not exist"), true);
+  expect("nor ask someone who is not in the office", refusal(people, { type: "SET_PLAYBOOK", participantId: scout.id, steps: [step({ question: { body: "Hello?", to: "p-nobody", blocking: false, options: [] } })] }) !== null, true);
+  expect("a person has no playbook", refusal(people, { type: "SET_PLAYBOOK", participantId: "p-dana", steps: [] }), "Only an agent has a playbook.");
+  booked = apply(booked, { type: "UPDATE_PARTICIPANT", participantId: scout.id, agentType: "ai", providerId: null, model: "some-model" });
+  const asAi = booked.participants.find((p) => p.id === scout.id)!;
+  expect("an agent can be switched to an AI agent", `${asAi.agentType}/${asAi.model}`, "ai/some-model");
+  expect("its playbook is kept for later", asAi.playbook.length, 2);
+  expect(
+    "an AI agent can only name a provider the office has",
+    (() => {
+      try {
+        applyAdminOp(booked, { type: "UPDATE_PARTICIPANT", participantId: scout.id, providerId: "prov-missing" }, "p-dana", newId, new Set(["prov-real"]));
+        return null;
+      } catch (error) {
+        return error instanceof AdminError ? error.message : "other";
+      }
+    })(),
+    "That AI provider does not exist in this office.",
+  );
+  booked = apply(booked, { type: "UPDATE_PARTICIPANT", participantId: scout.id, agentType: "playbook" });
+  expect("switching back clears the model", booked.participants.find((p) => p.id === scout.id)!.model, null);
+  expect("a person cannot be given an agent type", refusal(seed, { type: "UPDATE_PARTICIPANT", participantId: "p-sam", agentType: "ai" }), "Only an agent has these settings.");
+
   expect("an agent with no history can be removed", apply(people, { type: "REMOVE_PARTICIPANT", participantId: scout.id }).participants.length, seed.participants.length);
   expect("an agent with history cannot", refusal(seed, { type: "REMOVE_PARTICIPANT", participantId: "p-quill" })?.includes("Clear the work"), true);
   expect("nobody can remove themselves", refusal(seed, { type: "REMOVE_PARTICIPANT", participantId: "p-dana" }), "You cannot remove yourself.");
-  expect("the last supervisor cannot be demoted", refusal(seed, { type: "UPDATE_PARTICIPANT", participantId: "p-dana", roleId: "intake" }) !== null, true);
+  expect("the last person who manages roles cannot be demoted", refusal(seed, { type: "UPDATE_PARTICIPANT", participantId: "p-dana", roleId: "intake" }) !== null, true);
 
   console.log("\n-- clearing work --");
   const cleared = apply(seed, { type: "CLEAR_WORK" });
@@ -150,7 +236,8 @@ async function main(): Promise<void> {
   const other = blankOffice({ suffix: "cd34", name: "Second office", admin: { displayName: "Alex Kim", title: "Owner" } });
   const me = blank.participants[0].id;
   const mainRoom = blank.floorplan.rooms[0].id;
-  const memberRole = Object.values(blank.roles).find((r) => !r.supervises)!.id;
+  const memberRole = Object.values(blank.roles).find((r) => r.permissions.length === 0)!.id;
+  expect("its first person holds every permission", blank.roles[blank.participants[0].roleId].permissions.length, PERMISSIONS.length);
   expect("a blank office has one room and one person", `${blank.floorplan.rooms.length}/${blank.participants.length}`, "1/1");
   expect("and no work or rules", blank.tasks.length + blank.messages.length + blank.rules.length, 0);
   const idsOf = (o: Office) => [o.id, o.floorplan.id, ...o.floorplan.rooms.map((r) => r.id), ...o.floorplan.desks.map((d) => d.id), ...o.participants.map((p) => p.id), ...Object.keys(o.roles)];
@@ -158,17 +245,17 @@ async function main(): Promise<void> {
   blank = apply(blank, { type: "ADD_ROOM", name: "Accounts", purpose: "Pricing and approval", width: 8, depth: 10, attachTo: mainRoom, side: "east" }, me);
   const accounts = blank.floorplan.rooms.at(-1)!;
   blank = apply(blank, { type: "SET_STAGE_ROOM", stage: "review", roomId: accounts.id }, me);
-  blank = apply(blank, { type: "ADD_AGENT", displayName: "Nova", title: "Assistant", roleId: memberRole, roomId: mainRoom, capabilities: ["Take requests"] }, me);
+  blank = apply(blank, { type: "ADD_AGENT", displayName: "Nova", title: "Assistant", roleId: memberRole, roomId: mainRoom, capabilities: ["Take requests"], agentType: "playbook" }, me);
   const run = await reduce(
     { office: blank, now: initialState.now, seq: 0, clockStepMinutes: 3, idScope: "ab12-" },
     { type: "SUBMIT_REQUEST", title: "First request", detail: "Something to do.", requestedById: me },
-    new ScriptedRuntime(),
+    new PlaybookRuntime(),
   );
   const first = run.state.office.tasks[0];
   expect("a request in the new office goes to its agent", first.ownerId, blank.participants.at(-1)!.id);
   expect("in the room that hosts intake", first.roomId, mainRoom);
   expect("ids it generates carry the office's own tag", first.id, "T-ab12-1");
-  expect("an unscripted agent says plainly that no model is connected", run.state.office.messages.some((m) => m.body.includes("No model is connected")), true);
+  expect("an agent with an empty playbook says plainly that it did nothing", run.state.office.messages.some((m) => m.body.includes("has no playbook step for this")), true);
 
   console.log("\n-- untrusted input --");
   expect("unknown operations are rejected", parseAdminOp({ type: "DROP_EVERYTHING" }), null);

@@ -20,7 +20,6 @@ function expect(label: string, actual: unknown, wanted: unknown): void {
 
 /** Records every input it is given and answers with a fixed result. */
 class Recorder implements AgentRuntime {
-  readonly kind = "model" as const;
   readonly inputs: AgentStepInput[] = [];
   constructor(private readonly answer: (input: AgentStepInput) => AgentStepResult) {}
   async step(input: AgentStepInput): Promise<AgentStepResult> {

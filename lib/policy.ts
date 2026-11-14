@@ -4,12 +4,14 @@
  * the signed-in person cannot do).
  *
  * The rules come from the access model itself. Changing access, reassigning
- * work and deciding reviews need a role that supervises. Everything else
+ * work and deciding reviews each need their own permission on the role, as do
+ * the set-up changes. Everything else
  * needs the `act` scope on the room where the work is.
  */
 import {
   canOwnWorkIn,
   canRead,
+  may,
   resolveAccess,
   type AccessContext,
   type AccessScope,
@@ -34,8 +36,9 @@ export function contextOf(office: Office, now: number): AccessContext {
   };
 }
 
-export const supervises = (office: Office, p: Participant): boolean =>
-  office.roles[p.roleId]?.supervises === true;
+/** True when the participant's role carries any permission beyond room access. */
+export const hasAnyPermission = (office: Office, p: Participant): boolean =>
+  (office.roles[p.roleId]?.permissions.length ?? 0) > 0;
 
 function mayActIn(office: Office, ctx: AccessContext, actor: Participant, roomId: string): Verdict {
   const decision = canOwnWorkIn(actor, roomId, ctx);
@@ -51,8 +54,7 @@ export function authorize(
   actor: Participant,
   action: Action,
 ): Verdict {
-  if (actor.kind !== "human") return no("Only people can take supervisor actions.");
-  if (supervises(office, actor)) return yes;
+  if (actor.kind !== "human") return no("Only people can take these actions.");
 
   switch (action.type) {
     case "SUBMIT_REQUEST":
@@ -79,11 +81,13 @@ export function authorize(
 
     case "GRANT_ACCESS":
     case "REVOKE_RULE":
-      return no("Only a supervising role can change access rules.");
+      return may(office, actor, "manage_access")
+        ? yes
+        : no("Your role does not include managing access rules.");
     case "REASSIGN":
-      return no("Only a supervising role can hand work to someone else.");
+      return may(office, actor, "reassign_work") ? yes : no("Your role does not include handing work over.");
     case "DECIDE":
-      return no("Only a supervising role can approve or reject at review.");
+      return may(office, actor, "decide_reviews") ? yes : no("Your role does not include deciding reviews.");
   }
 }
 
@@ -186,7 +190,7 @@ export function viewFor(
   ctx: AccessContext,
   viewer: Participant,
 ): { office: Office; hiddenMessages: Record<TaskId, number> } {
-  if (supervises(office, viewer)) return { office, hiddenMessages: {} };
+  if (may(office, viewer, "see_everything")) return { office, hiddenMessages: {} };
 
   const hiddenMessages: Record<TaskId, number> = {};
   const messages: Message[] = [];

@@ -10,13 +10,18 @@ import { freeDeskSpot } from "./geometry";
 import {
   ALL_SCOPES,
   ANY_ROOM,
+  PERMISSIONS,
+  PLAYBOOK_STAGES,
   type AccessGrant,
   type AccessScope,
+  type AgentType,
   type Desk,
   type Effect,
   type Floorplan,
   type Office,
   type Participant,
+  type Permission,
+  type PlaybookStep,
   type Role,
   type Room,
   type RoomSelector,
@@ -37,6 +42,10 @@ export type AdminOp =
       roleId: string;
       roomId: string;
       capabilities: string[];
+      /** An AI agent asks a model. A playbook agent follows written steps. */
+      agentType: AgentType;
+      providerId?: string | null;
+      model?: string | null;
     }
   | {
       type: "UPDATE_PARTICIPANT";
@@ -46,10 +55,15 @@ export type AdminOp =
       roleId?: string;
       roomId?: string;
       capabilities?: string[];
+      agentType?: AgentType;
+      providerId?: string | null;
+      model?: string | null;
     }
+  | { type: "SET_PLAYBOOK"; participantId: string; steps: PlaybookStep[] }
   | { type: "REMOVE_PARTICIPANT"; participantId: string }
-  | { type: "ADD_ROLE"; name: string; description: string; supervises: boolean }
-  | { type: "UPDATE_ROLE"; roleId: string; name?: string; description?: string; supervises?: boolean }
+  | { type: "ADD_ROLE"; name: string; description: string }
+  | { type: "UPDATE_ROLE"; roleId: string; name?: string; description?: string }
+  | { type: "SET_ROLE_PERMISSION"; roleId: string; permission: Permission; allowed: boolean }
   | { type: "REMOVE_ROLE"; roleId: string }
   | {
       type: "SET_ROLE_GRANT";
@@ -105,13 +119,100 @@ function withDesks(floorplan: Floorplan, desks: Desk[]): Floorplan {
   };
 }
 
-const supervisingHumans = (office: Office): Participant[] =>
-  office.participants.filter((p) => p.kind === "human" && office.roles[p.roleId]?.supervises);
-
-function requireSupervisor(office: Office): void {
-  if (supervisingHumans(office).length === 0) {
-    refuse("That would leave the office with no person who supervises it.");
+/** The permission a person needs for each kind of set-up change. */
+export function permissionFor(op: AdminOp): Permission {
+  switch (op.type) {
+    case "RENAME_OFFICE":
+    case "CLEAR_WORK":
+      return "manage_office";
+    case "ADD_AGENT":
+    case "UPDATE_PARTICIPANT":
+    case "REMOVE_PARTICIPANT":
+    case "SET_PLAYBOOK":
+      return "manage_people";
+    case "ADD_ROLE":
+    case "UPDATE_ROLE":
+    case "REMOVE_ROLE":
+    case "SET_ROLE_GRANT":
+    case "SET_ROLE_PERMISSION":
+      return "manage_roles";
+    case "ADD_ROOM":
+    case "UPDATE_ROOM":
+    case "REMOVE_ROOM":
+    case "SET_STAGE_ROOM":
+      return "manage_rooms";
   }
+}
+
+const hasPermissions = (role: Role | undefined): boolean => (role?.permissions.length ?? 0) > 0;
+
+/** Someone must always be able to repair the roles, or the office locks itself out. */
+function requireRoleManager(office: Office): void {
+  const keepers = office.participants.filter(
+    (p) => p.kind === "human" && office.roles[p.roleId]?.permissions.includes("manage_roles"),
+  );
+  if (keepers.length === 0) refuse("That would leave the office with no person who can manage its roles.");
+}
+
+const short = (value: string, max: number): string => value.trim().slice(0, max);
+
+/**
+ * Check and tidy a playbook before it is stored. People and rooms it names
+ * must exist. Empty parts become null, so a step only does what was filled in.
+ */
+function cleanPlaybook(office: Office, steps: PlaybookStep[], newId: () => string): PlaybookStep[] {
+  if (steps.length > 30) refuse("A playbook can hold up to 30 steps.");
+  const people = new Set(office.participants.map((p) => p.id));
+  const rooms = new Set(office.floorplan.rooms.map((r) => r.id));
+  return steps.map((step, index) => {
+    const label = `Step ${index + 1}`;
+    const stage = step.when.stage;
+    if (stage !== "any" && !PLAYBOOK_STAGES.includes(stage)) refuse(`${label}: choose a stage.`);
+    const requestedBy = step.when.requestedBy;
+    if (requestedBy !== "anyone" && !people.has(requestedBy)) refuse(`${label}: that person is not in the office.`);
+
+    const { output, question, assumption, need } = step.then;
+    if (question && question.to !== "requester" && !people.has(question.to)) {
+      refuse(`${label}: the question is addressed to someone who is not in the office.`);
+    }
+    if (need && !rooms.has(need.room)) refuse(`${label}: the room it needs does not exist.`);
+    if (need && !ALL_SCOPES.includes(need.scope)) refuse(`${label}: choose a scope.`);
+
+    const cleaned: PlaybookStep = {
+      id: step.id || `pb-${newId()}`,
+      when: { stage, requestContains: short(step.when.requestContains, 80), requestedBy },
+      then: {
+        statusNote: short(step.then.statusNote, 300),
+        output:
+          output && output.body.trim()
+            ? { label: short(output.label, 60) || "Output", body: short(output.body, 1200) }
+            : null,
+        question:
+          question && question.body.trim()
+            ? {
+                body: short(question.body, 400),
+                to: question.to,
+                blocking: question.blocking === true,
+                options: question.options.map((o) => short(o, 80)).filter((o) => o.length > 0).slice(0, 4),
+              }
+            : null,
+        assumption:
+          assumption && assumption.assumed.trim()
+            ? {
+                assumed: short(assumption.assumed, 200),
+                because: short(assumption.because, 300),
+                confidence: ["low", "medium", "high"].includes(assumption.confidence) ? assumption.confidence : "medium",
+              }
+            : null,
+        need: need ? { room: need.room, scope: need.scope, purpose: short(need.purpose, 200) } : null,
+      },
+    };
+    const t = cleaned.then;
+    if (!t.statusNote && !t.output && !t.question && !t.assumption && !t.need) {
+      refuse(`${label} does nothing yet. Give it at least a status note.`);
+    }
+    return cleaned;
+  });
 }
 
 /** Where a participant shows up in the office's history, if anywhere. */
@@ -180,13 +281,29 @@ function setRoleGrant(
  * @param actorId the supervising person making the change
  * @param newId   supplies a fresh unique suffix for anything created
  */
-export function applyAdminOp(office: Office, op: AdminOp, actorId: string, newId: () => string): Office {
+export function applyAdminOp(
+  office: Office,
+  op: AdminOp,
+  actorId: string,
+  newId: () => string,
+  /** Ids of the office's AI providers, when the caller knows them. */
+  providerIds?: ReadonlySet<string>,
+): Office {
+  const knownProvider = (id: string | null | undefined): string | null => {
+    if (!id) return null;
+    if (providerIds && !providerIds.has(id)) refuse("That AI provider does not exist in this office.");
+    return id;
+  };
   const { floorplan } = office;
   const findRoom = (id: string): Room =>
     floorplan.rooms.find((r) => r.id === id) ?? refuse("That room does not exist.");
   const findRole = (id: string): Role => office.roles[id] ?? refuse("That role does not exist.");
   const findPerson = (id: string): Participant =>
     office.participants.find((p) => p.id === id) ?? refuse("That person or agent does not exist.");
+  // Nobody can hand out more than they hold themselves.
+  const actorRole = office.roles[office.participants.find((p) => p.id === actorId)?.roleId ?? ""];
+  const actorHolds = (permissions: Permission[]): boolean =>
+    permissions.every((p) => actorRole?.permissions.includes(p));
 
   switch (op.type) {
     case "RENAME_OFFICE":
@@ -206,7 +323,8 @@ export function applyAdminOp(office: Office, op: AdminOp, actorId: string, newId
       const title = named(op.title, "the agent's title");
       const role = findRole(op.roleId);
       const room = findRoom(op.roomId);
-      if (role.supervises) refuse("An agent cannot hold a supervising role.");
+      if (hasPermissions(role)) refuse("An agent cannot hold a role that carries permissions.");
+      if (op.agentType !== "ai" && op.agentType !== "playbook") refuse("Choose what kind of agent this is.");
       const spot = freeDeskSpot(floorplan, room.id) ?? refuse(`${room.name} has no space for another desk.`);
 
       const suffix = newId();
@@ -226,6 +344,10 @@ export function applyAdminOp(office: Office, op: AdminOp, actorId: string, newId
         deskId: desk.id,
         capabilities: op.capabilities.map((c) => c.trim()).filter((c) => c.length > 0).slice(0, 8),
         backing: null,
+        agentType: op.agentType,
+        providerId: op.agentType === "ai" ? knownProvider(op.providerId) : null,
+        model: op.agentType === "ai" && op.model?.trim() ? op.model.trim().slice(0, 80) : null,
+        playbook: [],
         appearance: { color: COLOURS[office.participants.length % COLOURS.length] },
       };
       return {
@@ -250,8 +372,31 @@ export function applyAdminOp(office: Office, op: AdminOp, actorId: string, newId
       }
       if (op.roleId !== undefined && op.roleId !== person.roleId) {
         const role = findRole(op.roleId);
-        if (role.supervises && person.kind === "agent") refuse("An agent cannot hold a supervising role.");
+        if (hasPermissions(role) && person.kind === "agent") {
+          refuse("An agent cannot hold a role that carries permissions.");
+        }
+        if (!actorHolds(role.permissions)) {
+          refuse(`You can only give someone a role whose permissions you hold yourself. ${role.name} has more.`);
+        }
         next = { ...next, roleId: role.id };
+      }
+      if (op.agentType !== undefined || op.providerId !== undefined || op.model !== undefined) {
+        if (person.kind !== "agent") refuse("Only an agent has these settings.");
+        const agentType = op.agentType ?? next.agentType ?? "playbook";
+        next = {
+          ...next,
+          agentType,
+          providerId:
+            agentType === "ai" ? (op.providerId !== undefined ? knownProvider(op.providerId) : next.providerId) : null,
+          model:
+            agentType === "ai"
+              ? op.model !== undefined
+                ? op.model?.trim()
+                  ? op.model.trim().slice(0, 80)
+                  : null
+                : next.model
+              : null,
+        };
       }
       if (op.roomId !== undefined) {
         const room = findRoom(op.roomId);
@@ -279,8 +424,18 @@ export function applyAdminOp(office: Office, op: AdminOp, actorId: string, newId
         floorplan: desks === floorplan.desks ? floorplan : withDesks(floorplan, desks),
         participants: office.participants.map((p) => (p.id === person.id ? next : p)),
       };
-      requireSupervisor(updated);
+      requireRoleManager(updated);
       return updated;
+    }
+
+    case "SET_PLAYBOOK": {
+      const person = findPerson(op.participantId);
+      if (person.kind !== "agent") refuse("Only an agent has a playbook.");
+      const playbook = cleanPlaybook(office, op.steps, newId);
+      return {
+        ...office,
+        participants: office.participants.map((p) => (p.id === person.id ? { ...p, playbook } : p)),
+      };
     }
 
     case "REMOVE_PARTICIPANT": {
@@ -301,7 +456,7 @@ export function applyAdminOp(office: Office, op: AdminOp, actorId: string, newId
         participants: office.participants.filter((p) => p.id !== person.id),
         rules: office.rules.filter((r) => r.participantId !== person.id),
       };
-      requireSupervisor(updated);
+      requireRoleManager(updated);
       return updated;
     }
 
@@ -315,7 +470,7 @@ export function applyAdminOp(office: Office, op: AdminOp, actorId: string, newId
         id,
         name,
         description: op.description.trim().slice(0, 200),
-        supervises: op.supervises,
+        permissions: [],
         grants: [],
       };
       return { ...office, roles: { ...office.roles, [id]: role } };
@@ -327,13 +482,22 @@ export function applyAdminOp(office: Office, op: AdminOp, actorId: string, newId
         ...role,
         ...(op.name !== undefined ? { name: named(op.name, "a name for the role") } : {}),
         ...(op.description !== undefined ? { description: op.description.trim().slice(0, 200) } : {}),
-        ...(op.supervises !== undefined ? { supervises: op.supervises } : {}),
       };
-      if (next.supervises && office.participants.some((p) => p.kind === "agent" && p.roleId === role.id)) {
-        refuse("Agents hold this role, and an agent cannot supervise.");
+      return { ...office, roles: { ...office.roles, [role.id]: next } };
+    }
+
+    case "SET_ROLE_PERMISSION": {
+      const role = findRole(op.roleId);
+      if (!PERMISSIONS.includes(op.permission)) refuse("Unknown permission.");
+      if (op.allowed && !actorHolds([op.permission])) refuse("You can only grant a permission you hold yourself.");
+      if (op.allowed && office.participants.some((p) => p.kind === "agent" && p.roleId === role.id)) {
+        refuse("Agents hold this role, and permissions are for people. Give the agents another role first.");
       }
-      const updated: Office = { ...office, roles: { ...office.roles, [role.id]: next } };
-      requireSupervisor(updated);
+      const permissions = PERMISSIONS.filter((p) =>
+        p === op.permission ? op.allowed : role.permissions.includes(p),
+      );
+      const updated: Office = { ...office, roles: { ...office.roles, [role.id]: { ...role, permissions } } };
+      requireRoleManager(updated);
       return updated;
     }
 
@@ -522,6 +686,10 @@ export function blankOffice(input: {
         deskId,
         capabilities: [],
         backing: null,
+        agentType: null,
+        providerId: null,
+        model: null,
+        playbook: [],
         appearance: { color: "#2f6f4f" },
       },
     ],
@@ -529,15 +697,15 @@ export function blankOffice(input: {
       [adminRole]: {
         id: adminRole,
         name: "Administrator",
-        description: "Sets up the office and supervises the work.",
-        supervises: true,
+        description: "Sets up the office and oversees the work.",
+        permissions: [...PERMISSIONS],
         grants: [{ room: ANY_ROOM, scopes: ALL_SCOPES, effect: "allow" }],
       },
       [memberRole]: {
         id: memberRole,
         name: "Member",
         description: "Works in the main room.",
-        supervises: false,
+        permissions: [],
         grants: [{ room: roomId, scopes: ALL_SCOPES, effect: "allow" }],
       },
     },
@@ -549,6 +717,57 @@ export function blankOffice(input: {
 
 const text = (value: unknown, max = 200): value is string => typeof value === "string" && value.length <= max;
 const optionalText = (value: unknown, max = 200): string | undefined => (text(value, max) ? value : undefined);
+
+/** Read playbook steps out of untrusted JSON, keeping only known fields. */
+function parseSteps(input: unknown[]): PlaybookStep[] {
+  const str = (value: unknown, max: number): string => (typeof value === "string" ? value.slice(0, max) : "");
+  const obj = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return input.slice(0, 40).flatMap((raw) => {
+    const step = obj(raw);
+    const when = obj(step?.when);
+    const then = obj(step?.then);
+    if (!step || !when || !then) return [];
+    const output = obj(then.output);
+    const question = obj(then.question);
+    const assumption = obj(then.assumption);
+    const need = obj(then.need);
+    return [
+      {
+        id: str(step.id, 60),
+        when: {
+          stage: str(when.stage, 20) as PlaybookStep["when"]["stage"],
+          requestContains: str(when.requestContains, 200),
+          requestedBy: str(when.requestedBy, 60) || "anyone",
+        },
+        then: {
+          statusNote: str(then.statusNote, 600),
+          output: output ? { label: str(output.label, 200), body: str(output.body, 4000) } : null,
+          question: question
+            ? {
+                body: str(question.body, 1000),
+                to: str(question.to, 60) || "requester",
+                blocking: question.blocking === true,
+                options: Array.isArray(question.options)
+                  ? question.options.filter((o): o is string => typeof o === "string").slice(0, 8)
+                  : [],
+              }
+            : null,
+          assumption: assumption
+            ? {
+                assumed: str(assumption.assumed, 600),
+                because: str(assumption.because, 600),
+                confidence: str(assumption.confidence, 10) as "low" | "medium" | "high",
+              }
+            : null,
+          need: need
+            ? { room: str(need.room, 60), scope: str(need.scope, 10) as AccessScope, purpose: str(need.purpose, 600) }
+            : null,
+        },
+      },
+    ];
+  });
+}
 
 /** Turn untrusted JSON into an admin operation, or null when it is not one. */
 export function parseAdminOp(input: unknown): AdminOp | null {
@@ -571,7 +790,14 @@ export function parseAdminOp(input: unknown): AdminOp | null {
             roleId: o.roleId,
             roomId: o.roomId,
             capabilities: list(o.capabilities),
+            agentType: o.agentType === "ai" ? "ai" : "playbook",
+            providerId: text(o.providerId, 80) ? o.providerId : null,
+            model: text(o.model, 80) ? o.model : null,
           }
+        : null;
+    case "SET_PLAYBOOK":
+      return text(o.participantId, 60) && Array.isArray(o.steps)
+        ? { type: "SET_PLAYBOOK", participantId: o.participantId, steps: parseSteps(o.steps) }
         : null;
     case "UPDATE_PARTICIPANT":
       return text(o.participantId, 60)
@@ -583,6 +809,9 @@ export function parseAdminOp(input: unknown): AdminOp | null {
             ...(optionalText(o.roleId, 60) !== undefined ? { roleId: o.roleId as string } : {}),
             ...(optionalText(o.roomId, 60) !== undefined ? { roomId: o.roomId as string } : {}),
             ...(Array.isArray(o.capabilities) ? { capabilities: list(o.capabilities) } : {}),
+            ...(o.agentType === "ai" || o.agentType === "playbook" ? { agentType: o.agentType } : {}),
+            ...(o.providerId === null || text(o.providerId, 80) ? { providerId: o.providerId as string | null } : {}),
+            ...(o.model === null || text(o.model, 80) ? { model: o.model as string | null } : {}),
           }
         : null;
     case "REMOVE_PARTICIPANT":
@@ -593,8 +822,11 @@ export function parseAdminOp(input: unknown): AdminOp | null {
             type: "ADD_ROLE",
             name: o.name,
             description: optionalText(o.description) ?? "",
-            supervises: o.supervises === true,
           }
+        : null;
+    case "SET_ROLE_PERMISSION":
+      return text(o.roleId, 60) && PERMISSIONS.includes(o.permission as Permission) && typeof o.allowed === "boolean"
+        ? { type: "SET_ROLE_PERMISSION", roleId: o.roleId, permission: o.permission as Permission, allowed: o.allowed }
         : null;
     case "UPDATE_ROLE":
       return text(o.roleId, 60)
@@ -603,7 +835,6 @@ export function parseAdminOp(input: unknown): AdminOp | null {
             roleId: o.roleId,
             ...(optionalText(o.name) !== undefined ? { name: o.name as string } : {}),
             ...(optionalText(o.description) !== undefined ? { description: o.description as string } : {}),
-            ...(typeof o.supervises === "boolean" ? { supervises: o.supervises } : {}),
           }
         : null;
     case "REMOVE_ROLE":

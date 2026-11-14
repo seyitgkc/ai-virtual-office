@@ -6,13 +6,13 @@ import { resolveAccess, type Office } from "../lib/model";
 import { floorplan, participants, roles, rules, stageRooms, contextFor, byId } from "../lib/seed";
 import {
   reduce,
-  ScriptedRuntime,
   eligibleOwners,
   type Action,
   type EngineState,
 } from "../lib/engine";
+import { PlaybookRuntime } from "../lib/playbook";
 
-const runtime = new ScriptedRuntime();
+const runtime = new PlaybookRuntime();
 let failures = 0;
 
 function expect(label: string, actual: unknown, wanted: unknown): void {

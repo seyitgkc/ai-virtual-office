@@ -35,6 +35,48 @@ export type RoomSelector = RoomId | typeof ANY_ROOM;
 
 export type ParticipantKind = "human" | "agent";
 
+/**
+ * How an agent decides what to do. An AI agent asks a language model. A
+ * playbook agent follows an ordered list of when-then steps written by a
+ * person, and involves no model at all.
+ */
+export type AgentType = "ai" | "playbook";
+
+export const PLAYBOOK_STAGES = ["intake", "planning", "execution", "review"] as const;
+
+/**
+ * One step of a playbook. The agent takes the first step whose conditions all
+ * hold for the work in front of it, and does what that step says.
+ */
+export interface PlaybookStep {
+  id: string;
+  when: {
+    /** The stage of the workflow the work is in, or "any". */
+    stage: (typeof PLAYBOOK_STAGES)[number] | "any";
+    /** Text the request must contain, ignoring case. Empty matches anything. */
+    requestContains: string;
+    /** Who filed the request, or "anyone". */
+    requestedBy: ParticipantId | "anyone";
+  };
+  then: {
+    /** One sentence logged to the thread. */
+    statusNote: string;
+    /** Something produced for colleagues to use. */
+    output: { label: string; body: string } | null;
+    /** A question, addressed to a named person or to whoever filed the request. */
+    question: {
+      body: string;
+      to: ParticipantId | "requester";
+      blocking: boolean;
+      options: string[];
+    } | null;
+    /** A guess the agent records so that people can confirm or correct it. */
+    assumption: { assumed: string; because: string; confidence: "low" | "medium" | "high" } | null;
+    /** Access the step cannot proceed without. Halts the task if denied. */
+    need: { room: RoomId; scope: AccessScope; purpose: string } | null;
+  };
+}
+
 export interface Participant {
   id: ParticipantId;
   kind: ParticipantKind;
@@ -49,8 +91,19 @@ export interface Participant {
    * supervisor can see the limits of the thing sitting at that desk.
    */
   capabilities: string[];
-  /** Agents only: the model/runtime backing it, or null when simulated. */
+  /**
+   * Agents only: the provider and model answering for it right now. Null for
+   * people, for playbook agents, and for an AI agent with no working provider.
+   */
   backing: { provider: string; model: string } | null;
+  /** Null for people. */
+  agentType: AgentType | null;
+  /** AI agents: which of the office's AI providers to use. */
+  providerId: string | null;
+  /** AI agents: a model id that overrides the provider's default, or null. */
+  model: string | null;
+  /** Playbook agents: their steps, in order. Empty for everyone else. */
+  playbook: PlaybookStep[];
   appearance: { color: string };
 }
 
@@ -131,17 +184,62 @@ export interface AccessGrant {
   effect: Effect;
 }
 
+/**
+ * Things a role may do beyond working in rooms. Each one is granted to a role
+ * on its own, so an office can have someone who approves quotes without being
+ * able to change access, or the other way round.
+ */
+export const PERMISSIONS = [
+  "manage_access",
+  "reassign_work",
+  "decide_reviews",
+  "see_everything",
+  "invite_people",
+  "manage_people",
+  "manage_rooms",
+  "manage_roles",
+  "manage_providers",
+  "manage_office",
+] as const;
+
+export type Permission = (typeof PERMISSIONS)[number];
+
+export const PERMISSION_INFO: Record<Permission, { label: string; description: string }> = {
+  manage_access: {
+    label: "Manage access",
+    description: "Grant and revoke individual access rules and permission tokens. Receives escalations.",
+  },
+  reassign_work: { label: "Hand work over", description: "Give a task to a different owner." },
+  decide_reviews: { label: "Decide reviews", description: "Approve or reject work at the review stage." },
+  see_everything: {
+    label: "See everything",
+    description: "Read every message and the whole activity log, including messages between other people.",
+  },
+  invite_people: { label: "Invite people", description: "Add a person to the office with a role and a desk." },
+  manage_people: {
+    label: "Manage people and agents",
+    description: "Add, configure and remove agents. Rename people, change roles, move desks.",
+  },
+  manage_rooms: { label: "Manage rooms", description: "Add, rename and remove rooms. Choose where each stage happens." },
+  manage_roles: { label: "Manage roles", description: "Add and remove roles and change what each role may do." },
+  manage_providers: {
+    label: "Manage AI providers",
+    description: "Add, change and remove AI providers and their API keys.",
+  },
+  manage_office: { label: "Manage the office", description: "Rename the office, clear all work, or remove the office." },
+};
+
 export interface Role {
   id: RoleId;
   name: string;
   description: string;
-  /**
-   * May change access rules, reassign work and decide reviews. Escalations
-   * are addressed to a human holding a role like this.
-   */
-  supervises: boolean;
+  /** What the role may do beyond working in rooms. */
+  permissions: Permission[];
   grants: AccessGrant[];
 }
+
+export const roleMay = (role: Role | undefined, permission: Permission): boolean =>
+  role?.permissions.includes(permission) === true;
 
 /**
  * A rule attached to one participant. Outranks their role.
@@ -511,3 +609,7 @@ export function canOwnWorkIn(
   if (enter.effect === "deny") return enter;
   return resolveAccess(participant, room, "act", ctx);
 }
+
+/** May this participant do this, by the permissions of their role? */
+export const may = (office: Office, participant: Participant, permission: Permission): boolean =>
+  roleMay(office.roles[participant.roleId], permission);

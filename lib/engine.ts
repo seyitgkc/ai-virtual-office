@@ -15,14 +15,15 @@
  *
  *  2. Agent reasoning sits behind one interface, `AgentRuntime`, which returns
  *     five primitives: a status note, questions, assumptions, access needs and
- *     output. The demo ships a `ScriptedRuntime`. A model-backed runtime
- *     implements the same interface and nothing else in the engine changes.
+ *     output. A playbook agent answers from steps a person wrote, an AI agent
+ *     from a language model, and the engine cannot tell them apart.
  */
 
 import {
   canOwnWorkIn,
   canRead,
   resolveAccess,
+  roleMay,
   type AccessContext,
   type AccessScope,
   type AccessDecision,
@@ -59,6 +60,10 @@ export const PIPELINE: StageSpec[] = [
 ];
 
 /** The room that hosts a stage, or null for the final stage. */
+/** A room's name for notes people read, falling back to its id. */
+const roomName = (office: Office, id: RoomId): string =>
+  office.floorplan.rooms.find((r) => r.id === id)?.name ?? id;
+
 export const roomForStage = (office: Office, stage: WorkflowStage): RoomId | null =>
   stage === "done" ? null : office.stageRooms[stage];
 
@@ -135,105 +140,12 @@ export interface AgentStepResult {
 }
 
 /**
- * `step` is asynchronous because a real agent takes time to answer. The
- * scripted runtime resolves at once; a model-backed one resolves when the
- * model replies.
+ * `step` is asynchronous because an AI agent takes time to answer. A playbook
+ * agent resolves at once; an AI agent resolves when its model replies.
  */
 export interface AgentRuntime {
-  readonly kind: "scripted" | "model";
   step(input: AgentStepInput): Promise<AgentStepResult>;
 }
-
-const EMPTY: AgentStepResult = { questions: [], assumptions: [] };
-
-/**
- * Deterministic stand-in for real agents, keyed `participantId:stage`.
- * Reproducible on purpose: a demo that behaves differently each run is
- * impossible to walk someone through.
- */
-export class ScriptedRuntime implements AgentRuntime {
-  readonly kind = "scripted" as const;
-  constructor(private readonly script: Record<string, AgentStepResult> = DEFAULT_SCRIPT) {}
-  async step(input: AgentStepInput): Promise<AgentStepResult> {
-    const scripted = this.script[`${input.participant.id}:${input.stage}`];
-    if (scripted) return scripted;
-    // An agent the script does not know still leaves a trace, and says
-    // plainly that nothing thought about the work.
-    return {
-      ...EMPTY,
-      statusNote: `No model is connected, so ${input.participant.displayName} only logged the ${stageSpec(input.stage).label.toLowerCase()} step.`,
-    };
-  }
-}
-
-export const DEFAULT_SCRIPT: Record<string, AgentStepResult> = {
-  "p-iris:intake": {
-    statusNote: "Matched the dealer to an account. Parsing line items.",
-    questions: [
-      {
-        body: "Are these standalone heads, or paired with condensers? Pricing differs.",
-        toParticipantId: "p-sam",
-        blocking: true,
-        options: ["Standalone heads", "Paired with condensers", "Dealer to confirm"],
-      },
-    ],
-    assumptions: [
-      {
-        assumed: "Fulfilment branch is Richmond Hill",
-        because: "The request named no branch; the account's service address is Richmond Hill.",
-        confidence: "medium",
-      },
-    ],
-  },
-  "p-atlas:planning": {
-    statusNote: "Decomposed into line items and a single shipment.",
-    questions: [],
-    assumptions: [
-      {
-        assumed: "Five working days from order confirmation",
-        because: "No contract terms were attached to the account record.",
-        confidence: "low",
-      },
-    ],
-  },
-  "p-vera:execution": {
-    statusNote: "Checked stock across branches; a transfer is required to fill the order.",
-    questions: [],
-    assumptions: [
-      {
-        assumed: "The dealer will accept a split-origin shipment",
-        because: "No single branch can fill the order and the dealer stated no preference.",
-        confidence: "medium",
-      },
-    ],
-    needs: [
-      {
-        room: "finance",
-        scope: "read",
-        purpose: "Dealer tier and landed cost, to price the transfer",
-      },
-    ],
-  },
-  "p-quill:execution": {
-    statusNote: "Assembling the quote from confirmed stock.",
-    questions: [],
-    assumptions: [],
-    needs: [
-      {
-        room: "finance",
-        scope: "read",
-        purpose: "Dealer tier pricing for account on file",
-      },
-    ],
-    output: { label: "Draft quote", body: "Six line items, split origin, pending tier pricing." },
-  },
-  "p-ledger:review": {
-    statusNote: "Dealer tier confirmed; pricing assembled.",
-    questions: [],
-    assumptions: [],
-    output: { label: "Pricing sheet", body: "Tier 2 pricing applied, net 30." },
-  },
-};
 
 // ---------------------------------------------------------------------------
 // Engine state & actions
@@ -412,7 +324,7 @@ export async function reduce(
       };
       emitted.push(request);
       office = { ...office, tasks: [...office.tasks, task], messages: [...office.messages, request] };
-      notes.push(`${task.id} opened in ${room}${owner ? `, owned by ${owner.displayName}` : " with no eligible owner"}`);
+      notes.push(`${task.id} opened in ${roomName(office, room)}${owner ? `, owned by ${owner.displayName}` : " with no eligible owner"}`);
 
       if (owner) {
         const run = await runAgent(office, task, "intake", owner, runtime, now, nextId);
@@ -482,7 +394,7 @@ export async function reduce(
 
       if (!carrier) {
         const supervisor =
-          office.participants.find((p) => p.kind === "human" && office.roles[p.roleId]?.supervises) ??
+          office.participants.find((p) => p.kind === "human" && roleMay(office.roles[p.roleId], "manage_access")) ??
           office.participants.find((p) => p.kind === "human");
         const escalation: Message = {
           id: nextId("m"),
@@ -546,7 +458,9 @@ export async function reduce(
         ],
       };
       office = replaceTask(office, moved);
-      notes.push(`${task.id} moved to ${targetSpec.label} (${targetRoom}), owner ${carrier.displayName}`);
+      notes.push(
+        `${task.id} moved to ${targetSpec.label} (${roomName(office, targetRoom)}), owner ${carrier.displayName}`,
+      );
 
       const run = await runAgent(office, moved, target, carrier, runtime, now, nextId);
       office = run.office;
@@ -767,7 +681,7 @@ export async function reduce(
       const decision = resolveAccess(by, task.roomId, "act", ctx);
 
       if (decision.effect === "deny") {
-        notes.push(`${by.displayName} may not decide in ${task.roomId}: ${decision.explanation}`);
+        notes.push(`${by.displayName} may not decide in ${roomName(office, task.roomId)}: ${decision.explanation}`);
         return done();
       }
 
@@ -990,7 +904,7 @@ async function runAgent(
     if (verdict.effect === "allow") continue;
 
     const supervisor =
-      office.participants.find((p) => p.kind === "human" && office.roles[p.roleId]?.supervises) ??
+      office.participants.find((p) => p.kind === "human" && roleMay(office.roles[p.roleId], "manage_access")) ??
       office.participants.find((p) => p.kind === "human");
     const alternatives = office.participants.filter(
       (p) =>
@@ -1049,7 +963,8 @@ async function runAgent(
       at: now,
       body: result.output.body,
       label: result.output.label,
-      simulated: runtime.kind === "scripted",
+      // Only an AI agent's output comes from a model. A playbook's is canned.
+      simulated: participant.agentType !== "ai",
     };
     emitted.push(output);
   }

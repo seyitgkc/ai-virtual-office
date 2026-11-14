@@ -24,6 +24,8 @@ import {
   type Office,
   type Participant,
   type Role,
+  PERMISSIONS,
+  type PlaybookStep,
   type RoleId,
   type StageRooms,
   type Room,
@@ -139,14 +141,14 @@ export const floorplan: Floorplan = {
 export const roles: Record<RoleId, Role> = {
   supervisor: {
     id: "supervisor",
-    supervises: true,
+    permissions: [...PERMISSIONS],
     name: "Operations Manager",
     description: "Full access. Resolves escalations, grants scoped exceptions.",
     grants: [{ room: ANY_ROOM, scopes: ALL_SCOPES, effect: "allow" }],
   },
   intake: {
     id: "intake",
-    supervises: false,
+    permissions: [],
     name: "Intake",
     description: "Receives dealer requests, triages, hands off to Planning.",
     grants: [
@@ -156,7 +158,7 @@ export const roles: Record<RoleId, Role> = {
   },
   planner: {
     id: "planner",
-    supervises: false,
+    permissions: [],
     name: "Planner",
     description: "Breaks requests into work and routes them.",
     grants: [
@@ -167,7 +169,7 @@ export const roles: Record<RoleId, Role> = {
   },
   fulfilment: {
     id: "fulfilment",
-    supervises: false,
+    permissions: [],
     name: "Fulfilment",
     description:
       "Stock, transfers and quoting. Explicitly denied Finance because pricing authority sits elsewhere.",
@@ -179,7 +181,7 @@ export const roles: Record<RoleId, Role> = {
   },
   finance: {
     id: "finance",
-    supervises: false,
+    permissions: [],
     name: "Finance",
     description: "Dealer tier pricing, credit checks, approval.",
     grants: [
@@ -203,6 +205,10 @@ export const participants: Participant[] = [
     deskId: "desk-ops-1",
     capabilities: ["Approve quotes", "Grant scoped access", "Override assumptions"],
     backing: null,
+    agentType: null,
+    providerId: null,
+    model: null,
+    playbook: [],
     appearance: { color: "#2f6f4f" },
   },
   {
@@ -214,6 +220,10 @@ export const participants: Participant[] = [
     deskId: "desk-rec-2",
     capabilities: ["Answer dealer queries", "Confirm order detail"],
     backing: null,
+    agentType: null,
+    providerId: null,
+    model: null,
+    playbook: [],
     appearance: { color: "#3b6ea5" },
   },
   {
@@ -229,6 +239,31 @@ export const participants: Participant[] = [
       "Ask clarifying questions before handoff",
     ],
     backing: null,
+    agentType: "playbook",
+    providerId: null,
+    model: null,
+    playbook: [
+      {
+        id: "pb-iris-intake",
+        when: { stage: "intake", requestContains: "", requestedBy: "anyone" },
+        then: {
+          statusNote: "Matched the dealer to an account. Parsing line items.",
+          output: null,
+          question: {
+            body: "Are these standalone heads, or paired with condensers? Pricing differs.",
+            to: "p-sam",
+            blocking: true,
+            options: ["Standalone heads", "Paired with condensers", "Dealer to confirm"],
+          },
+          assumption: {
+            assumed: "Fulfilment branch is Richmond Hill",
+            because: "The request named no branch; the account's service address is Richmond Hill.",
+            confidence: "medium",
+          },
+          need: null,
+        },
+      },
+    ] satisfies PlaybookStep[],
     appearance: { color: "#c98a3c" },
   },
   {
@@ -240,6 +275,26 @@ export const participants: Participant[] = [
     deskId: "desk-pla-1",
     capabilities: ["Decompose a request into tasks", "Assign owners", "Set lead times"],
     backing: null,
+    agentType: "playbook",
+    providerId: null,
+    model: null,
+    playbook: [
+      {
+        id: "pb-atlas-planning",
+        when: { stage: "planning", requestContains: "", requestedBy: "anyone" },
+        then: {
+          statusNote: "Decomposed into line items and a single shipment.",
+          output: null,
+          question: null,
+          assumption: {
+            assumed: "Five working days from order confirmation",
+            because: "No contract terms were attached to the account record.",
+            confidence: "low",
+          },
+          need: null,
+        },
+      },
+    ] satisfies PlaybookStep[],
     appearance: { color: "#7a5ea8" },
   },
   {
@@ -251,6 +306,26 @@ export const participants: Participant[] = [
     deskId: "desk-ful-1",
     capabilities: ["Check stock across branches", "Propose inter-branch transfers"],
     backing: null,
+    agentType: "playbook",
+    providerId: null,
+    model: null,
+    playbook: [
+      {
+        id: "pb-vera-execution",
+        when: { stage: "execution", requestContains: "", requestedBy: "anyone" },
+        then: {
+          statusNote: "Checked stock across branches; a transfer is required to fill the order.",
+          output: null,
+          question: null,
+          assumption: {
+            assumed: "The dealer will accept a split-origin shipment",
+            because: "No single branch can fill the order and the dealer stated no preference.",
+            confidence: "medium",
+          },
+          need: { room: "finance", scope: "read", purpose: "Dealer tier and landed cost, to price the transfer" },
+        },
+      },
+    ] satisfies PlaybookStep[],
     appearance: { color: "#4a8c8c" },
   },
   {
@@ -262,6 +337,22 @@ export const participants: Participant[] = [
     deskId: "desk-ful-2",
     capabilities: ["Assemble quotes", "Apply dealer tier pricing (requires Finance)"],
     backing: null,
+    agentType: "playbook",
+    providerId: null,
+    model: null,
+    playbook: [
+      {
+        id: "pb-quill-execution",
+        when: { stage: "execution", requestContains: "", requestedBy: "anyone" },
+        then: {
+          statusNote: "Assembling the quote from confirmed stock.",
+          output: { label: "Draft quote", body: "Six line items, split origin, pending tier pricing." },
+          question: null,
+          assumption: null,
+          need: { room: "finance", scope: "read", purpose: "Dealer tier pricing for account on file" },
+        },
+      },
+    ] satisfies PlaybookStep[],
     appearance: { color: "#b05a7a" },
   },
   {
@@ -273,6 +364,22 @@ export const participants: Participant[] = [
     deskId: "desk-fin-1",
     capabilities: ["Look up dealer tier", "Check credit standing", "Release pricing"],
     backing: null,
+    agentType: "playbook",
+    providerId: null,
+    model: null,
+    playbook: [
+      {
+        id: "pb-ledger-review",
+        when: { stage: "review", requestContains: "", requestedBy: "anyone" },
+        then: {
+          statusNote: "Dealer tier confirmed; pricing assembled.",
+          output: { label: "Pricing sheet", body: "Tier 2 pricing applied, net 30." },
+          question: null,
+          assumption: null,
+          need: null,
+        },
+      },
+    ] satisfies PlaybookStep[],
     appearance: { color: "#8c6a3c" },
   },
 ];

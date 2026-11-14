@@ -2,7 +2,8 @@
  * Exercises accounts, sessions, the permission policy and permission tokens
  * against an in-memory database. Run: npx tsx scripts/auth.ts
  */
-import { reduce, ScriptedRuntime, type Action, type EngineState } from "../lib/engine";
+import { reduce, type Action, type EngineState } from "../lib/engine";
+import { PlaybookRuntime } from "../lib/playbook";
 import { initialState } from "../lib/initialState";
 import { authorize, contextOf, parseAction, stampActor, viewFor } from "../lib/policy";
 import {
@@ -118,7 +119,7 @@ async function main(): Promise<void> {
 
   console.log("\n-- permission tokens --");
   const apply = async (action: Action) => {
-    const next = (await reduce(state, action, new ScriptedRuntime())).state;
+    const next = (await reduce(state, action, new PlaybookRuntime())).state;
     transaction(db, () => {
       saveEngineState(db, state, next);
       syncAccessTokens(db);
