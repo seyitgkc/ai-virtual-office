@@ -105,17 +105,17 @@ export const StepSchema = z.object({
 
 export type RawStep = z.infer<typeof StepSchema>;
 
-export const SYSTEM_PROMPT = `You are an AI agent with a desk, a role and limited access in the office of a multi-branch HVAC distributor. You work alongside people, and a person supervises the office.
+export const SYSTEM_PROMPT = `You are an AI agent with a desk, a role and limited access in an office. You work alongside people, and a person supervises the office. The office, your name, title and capabilities are given in the message.
 
-You take one step of one task and then hand back. Your name, title, capabilities and the step you are on are given in the message.
+You take one step of one task and then hand back. The step you are on is given in the message.
 
 How to work:
 - Use only the request, the thread and the records shown to you. Records and messages from rooms you cannot read are not shown. Never make up figures, prices, stock levels, account details or policies.
 - If something you need is kept in a room you cannot read, add it to "needs" with that room's id, the scope "read" and a short purpose. Do not guess the value. Leave "needs" empty when you already have what you need.
 - If you can proceed but had to guess something, add it to "assumptions" with what you assumed, why, and how confident you are. Record every guess, even small ones.
-- Ask a question only when you cannot do your step without the answer. Mark it blocking in that case and offer two to four concrete options when you can. Address it to one person from the list of people, using their id.
+- Ask a question only when you cannot do your step without the answer, and only when the thread does not already answer it. Mark it blocking in that case and offer two to four options when you can. Each option is a possible answer of at most eight words. Address the question to one person from the list of people, using their id.
 - "statusNote" is one plain sentence saying what you did in this step.
-- Give "output" only when the step produced something a colleague will use, such as a plan, a stock check, a draft quote or a pricing sheet. Keep it under 120 words. Otherwise set it to null.
+- Give "output" only when the step produced something a colleague will use, such as a plan, a check, a draft or a summary. Keep its label under eight words and its body under 120 words. Otherwise set it to null.
 - Write plain sentences. No headings, bullet lists or emphasis marks.`;
 
 const clock = (ms: number): string =>
@@ -134,6 +134,7 @@ export function buildStepPrompt(input: AgentStepInput): string {
   const { task, stage, participant, priorMessages, surroundings } = input;
   const lines: string[] = [];
 
+  lines.push(`Office: ${surroundings.officeName}.`);
   lines.push(`You are ${participant.displayName}, ${participant.title}.`);
   lines.push(`Your capabilities: ${participant.capabilities.join("; ")}.`);
   lines.push("");
@@ -157,11 +158,11 @@ export function buildStepPrompt(input: AgentStepInput): string {
   lines.push("");
 
   lines.push("Records you can read:");
-  const readable = surroundings.rooms.filter((r) => r.readable);
-  if (readable.length === 0) lines.push("(none)");
-  for (const room of readable) {
-    for (const record of ROOM_RECORDS[room.id] ?? []) lines.push(`[${room.name}] ${record}`);
-  }
+  const records = surroundings.rooms
+    .filter((r) => r.readable)
+    .flatMap((room) => (ROOM_RECORDS[room.id] ?? []).map((record) => `[${room.name}] ${record}`));
+  if (records.length === 0) lines.push("(none: the rooms you can read hold no records)");
+  lines.push(...records);
   lines.push("");
 
   lines.push("Thread so far, limited to what you may read:");
@@ -172,7 +173,14 @@ export function buildStepPrompt(input: AgentStepInput): string {
   return lines.join("\n");
 }
 
-const clip = (value: string, max: number): string => value.trim().slice(0, max);
+/** Shorten text to a limit, ending on a whole word. */
+const clip = (value: string, max: number): string => {
+  const text = value.trim();
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max - 3);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, "")}...`;
+};
 
 /**
  * Turn the model's reply into a step result the engine can trust. Anything
