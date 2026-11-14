@@ -1,5 +1,8 @@
 /**
- * Workflow engine. A pure reducer over an Office snapshot.
+ * Workflow engine. A state transition function over an Office snapshot.
+ *
+ * `reduce` never mutates its input and has no side effects of its own. It is
+ * asynchronous only because it waits for the agent runtime.
  *
  * Two ideas carry the whole thing:
  *
@@ -114,9 +117,14 @@ export interface AgentStepResult {
   output?: { label: string; body: string };
 }
 
+/**
+ * `step` is asynchronous because a real agent takes time to answer. The
+ * scripted runtime resolves at once; a model-backed one resolves when the
+ * model replies.
+ */
 export interface AgentRuntime {
   readonly kind: "scripted" | "model";
-  step(input: AgentStepInput): AgentStepResult;
+  step(input: AgentStepInput): Promise<AgentStepResult>;
 }
 
 const EMPTY: AgentStepResult = { questions: [], assumptions: [] };
@@ -129,7 +137,7 @@ const EMPTY: AgentStepResult = { questions: [], assumptions: [] };
 export class ScriptedRuntime implements AgentRuntime {
   readonly kind = "scripted" as const;
   constructor(private readonly script: Record<string, AgentStepResult> = DEFAULT_SCRIPT) {}
-  step(input: AgentStepInput): AgentStepResult {
+  async step(input: AgentStepInput): Promise<AgentStepResult> {
     return this.script[`${input.participant.id}:${input.stage}`] ?? EMPTY;
   }
 }
@@ -319,11 +327,11 @@ function replaceMessage(office: Office, updated: Message): Office {
 // Reducer
 // ---------------------------------------------------------------------------
 
-export function reduce(
+export async function reduce(
   state: EngineState,
   action: Action,
   runtime: AgentRuntime,
-): StepResult {
+): Promise<StepResult> {
   const now = state.now + state.clockStepMinutes * 60_000;
   let seq = state.seq;
   const nextId = (prefix: string): string => `${prefix}-${++seq}`;
@@ -379,7 +387,7 @@ export function reduce(
       notes.push(`${task.id} opened in ${room}${owner ? `, owned by ${owner.displayName}` : " with no eligible owner"}`);
 
       if (owner) {
-        const run = runAgent(office, task, "intake", owner, runtime, now, nextId);
+        const run = await runAgent(office, task, "intake", owner, runtime, now, nextId);
         office = run.office;
         emitted.push(...run.emitted);
         notes.push(...run.notes);
@@ -512,7 +520,7 @@ export function reduce(
       office = replaceTask(office, moved);
       notes.push(`${task.id} moved to ${targetSpec.label} (${targetRoom}), owner ${carrier.displayName}`);
 
-      const run = runAgent(office, moved, target, carrier, runtime, now, nextId);
+      const run = await runAgent(office, moved, target, carrier, runtime, now, nextId);
       office = run.office;
       emitted.push(...run.emitted);
       notes.push(...run.notes);
@@ -835,7 +843,7 @@ function retryBlocked(
 // Agent turn
 // ---------------------------------------------------------------------------
 
-function runAgent(
+async function runAgent(
   office: Office,
   task: Task,
   stage: WorkflowStage,
@@ -843,7 +851,7 @@ function runAgent(
   runtime: AgentRuntime,
   now: number,
   nextId: (prefix: string) => string,
-): { office: Office; emitted: Message[]; notes: string[] } {
+): Promise<{ office: Office; emitted: Message[]; notes: string[] }> {
   if (participant.kind !== "agent") {
     return { office, emitted: [], notes: [] };
   }
@@ -852,7 +860,7 @@ function runAgent(
     .filter((m) => m.taskId === task.id)
     .sort((a, b) => a.at - b.at);
 
-  const result = runtime.step({ task, stage, participant, priorMessages: prior });
+  const result = await runtime.step({ task, stage, participant, priorMessages: prior });
   const emitted: Message[] = [];
   const notes: string[] = [];
   let updated: Task = task;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useReducer } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { reduce, ScriptedRuntime, type Action, type EngineState } from "./engine";
 import { office as seedOffice } from "./seed";
 import type { Task } from "./model";
@@ -37,8 +37,8 @@ const initial: UiState = {
 
 const runtime = new ScriptedRuntime();
 
-function uiReduce(state: UiState, action: Action): UiState {
-  const result = reduce(state.engine, action, runtime);
+async function uiReduce(state: UiState, action: Action): Promise<UiState> {
+  const result = await reduce(state.engine, action, runtime);
   let seq = state.feedSeq;
   const entries = result.notes.map((text) => ({
     id: seq++,
@@ -53,7 +53,24 @@ function uiReduce(state: UiState, action: Action): UiState {
 }
 
 export function useOffice() {
-  const [state, dispatch] = useReducer(uiReduce, initial);
+  const [state, setState] = useState(initial);
+  const [pending, setPending] = useState(false);
+
+  // Actions run one at a time, each against the result of the one before it,
+  // because a transition may wait on an agent.
+  const latest = useRef(initial);
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const dispatch = useCallback((action: Action) => {
+    queue.current = queue.current.then(async () => {
+      setPending(true);
+      try {
+        latest.current = await uiReduce(latest.current, action);
+        setState(latest.current);
+      } finally {
+        setPending(false);
+      }
+    });
+  }, []);
   const office = state.engine.office;
 
   const roomOfTask = useMemo(() => {
@@ -91,6 +108,7 @@ export function useOffice() {
     openTasks,
     roomHighlight: (roomId: string) => roomOfTask[roomId] ?? "none",
     participantAlert: (id: string) => alertOfParticipant[id] ?? "none",
-    dispatch: useCallback((a: Action) => dispatch(a), []),
+    pending,
+    dispatch,
   };
 }
