@@ -79,6 +79,7 @@ export default function Page() {
         office={office}
         mode={mode}
         walkPose={walkPose}
+        walkRoomId={walkRoomId}
         onWalkRoomChange={setWalkRoomId}
         selectedId={selectedPersonId}
         onSelectParticipant={(id) => {

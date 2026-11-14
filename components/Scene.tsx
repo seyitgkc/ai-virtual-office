@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, type RefObject } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, ContactShadows } from "@react-three/drei";
 import { Fog, PerspectiveCamera, Vector3 } from "three";
 import type { Office } from "../lib/model";
-import { planExtent, seatPosition, type WalkPose } from "../lib/geometry";
+import { planExtent, roomCentre, seatPosition, type WalkPose } from "../lib/geometry";
 import { RoomMesh } from "./RoomMesh";
 import { DeskMesh } from "./Desk";
 import { Figure } from "./Figure";
 import { WalkControls } from "./WalkControls";
+import { LabelLayer, LabelProjector, type LabelSpec } from "./Labels";
 
 const FOV = 34;
 /** The plan has no ceiling, so on foot the space above the walls is open sky. */
@@ -33,7 +34,7 @@ function Framing({
   target: Vector3;
   nearEdge: Vector3;
   planWidth: number;
-  touched: MutableRefObject<boolean>;
+  touched: RefObject<boolean>;
 }) {
   const { camera, scene, size } = useThree();
 
@@ -61,6 +62,7 @@ export function Scene({
   office,
   mode,
   walkPose,
+  walkRoomId,
   onWalkRoomChange,
   selectedId,
   onSelectParticipant,
@@ -71,7 +73,9 @@ export function Scene({
   office: Office;
   /** Overview orbits the whole plan. Walk puts the camera at eye level. */
   mode: "overview" | "walk";
-  walkPose: MutableRefObject<WalkPose>;
+  walkPose: RefObject<WalkPose>;
+  /** The room the walker is standing in, or null when outside. */
+  walkRoomId: string | null;
   onWalkRoomChange: (roomId: string | null) => void;
   selectedId: string | null;
   onSelectParticipant: (id: string) => void;
@@ -93,13 +97,54 @@ export function Scene({
   // Coming back from a walk always returns to the fitted overview.
   if (walking) cameraTouched.current = false;
 
+  // Room names lie on the floor in the overview. Name tags float above each
+  // head; on foot they show only for people in the room the walker is in.
+  const labelElements = useRef(new Map<string, HTMLDivElement>());
+  const labels = useMemo<LabelSpec[]>(() => {
+    const roomLabels: LabelSpec[] = rooms.map((room) => ({
+      id: `room:${room.id}`,
+      position: [roomCentre(room).cx, 0.06, room.bounds.z + 0.95],
+      hidden: walking,
+      fullSizeAt: 34,
+      node: (
+        <div className="room-label">
+          <div className="name">{room.name}</div>
+          <div className="purpose">{room.purpose}</div>
+        </div>
+      ),
+    }));
+    const nameTags: LabelSpec[] = office.participants.flatMap((p) => {
+      const desk = p.deskId ? desks.find((d) => d.id === p.deskId) : null;
+      if (!desk) return [];
+      const seat = seatPosition(desk);
+      return [
+        {
+          id: `tag:${p.id}`,
+          position: [seat.x, 1.95, seat.z] as [number, number, number],
+          hidden: walking && desk.roomId !== walkRoomId,
+          node: (
+            <div className="name-tag">
+              <span className="kind-badge" data-kind={p.kind}>
+                {p.kind === "agent" ? "AI" : "Human"}
+              </span>
+              {p.displayName}
+            </div>
+          ),
+        },
+      ];
+    });
+    return [...roomLabels, ...nameTags];
+  }, [rooms, desks, office.participants, walking, walkRoomId]);
+
   return (
+    <>
     <Canvas
       shadows
       camera={{ position: [cx + 1.5, 28, cz + 28], fov: FOV }}
       gl={{ antialias: true }}
       style={{ position: "absolute", inset: 0 }}
     >
+      <LabelProjector specs={labels} elements={labelElements} />
       <color attach="background" args={[walking ? WALK_SKY : "#16181d"]} />
       <fog attach="fog" args={[walking ? WALK_SKY : "#16181d", 48, 96]} />
       {walking ? (
@@ -164,7 +209,6 @@ export function Scene({
             key={p.id}
             participant={p}
             position={[seat.x, seat.z]}
-            walking={walking}
             facing={desk.facing + Math.PI}
             selected={selectedId === p.id}
             alert={participantAlert(p.id)}
@@ -195,5 +239,7 @@ export function Scene({
         />
       )}
     </Canvas>
+    <LabelLayer specs={labels} elements={labelElements} />
+    </>
   );
 }

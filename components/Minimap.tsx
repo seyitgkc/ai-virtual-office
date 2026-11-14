@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, type RefObject } from "react";
 import type { Office } from "../lib/model";
 import {
   planExtent,
@@ -25,7 +25,7 @@ export function Minimap({
   participantAlert,
 }: {
   office: Office;
-  pose: MutableRefObject<WalkPose>;
+  pose: RefObject<WalkPose>;
   currentRoomId: string | null;
   roomHighlight: (roomId: string) => "none" | "question" | "permission";
   participantAlert: (id: string) => "none" | "question" | "permission";

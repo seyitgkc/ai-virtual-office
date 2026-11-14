@@ -2,7 +2,6 @@
 
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Html } from "@react-three/drei";
 import type { Mesh } from "three";
 import type { Participant } from "../lib/model";
 import { CLICK_SLOP } from "./RoomMesh";
@@ -18,7 +17,6 @@ export function Figure({
   facing,
   selected,
   alert,
-  walking,
   onSelect,
 }: {
   participant: Participant;
@@ -26,8 +24,6 @@ export function Figure({
   facing: number;
   selected: boolean;
   alert: "none" | "question" | "permission";
-  /** On foot, walls hide the name tags of people in other rooms. */
-  walking: boolean;
   onSelect: () => void;
 }) {
   const ring = useRef<Mesh>(null);
@@ -124,20 +120,6 @@ export function Figure({
           />
         </mesh>
       )}
-
-      <Html
-        position={[0, 1.95, 0]}
-        center
-        zIndexRange={[20, 0]}
-        occlude={walking ? "raycast" : undefined}
-      >
-        <div className="name-tag">
-          <span className="kind-badge" data-kind={participant.kind}>
-            {isAgent ? "AI" : "Human"}
-          </span>
-          {participant.displayName}
-        </div>
-      </Html>
     </group>
   );
 }

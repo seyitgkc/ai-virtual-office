@@ -1,6 +1,5 @@
 "use client";
 
-import { Html } from "@react-three/drei";
 import type { Room } from "../lib/model";
 import {
   WALL_HEIGHT,
@@ -127,20 +126,6 @@ export function RoomMesh({
         ),
       )}
 
-      {/* Annotation sits in a corner, clear of the desks. */}
-      {!walking && (
-        <Html
-          position={[cx, 0.06, room.bounds.z + 0.95]}
-          center
-          distanceFactor={26}
-          zIndexRange={[10, 0]}
-        >
-          <div className="room-label">
-            <div className="name">{room.name}</div>
-            <div className="purpose">{room.purpose}</div>
-          </div>
-        </Html>
-      )}
     </group>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, type RefObject } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Fog, PerspectiveCamera } from "three";
 import type { Floorplan } from "../lib/model";
@@ -57,7 +57,7 @@ export function WalkControls({
   onRoomChange,
 }: {
   floorplan: Floorplan;
-  pose: MutableRefObject<WalkPose>;
+  pose: RefObject<WalkPose>;
   onRoomChange: (roomId: string | null) => void;
 }) {
   const { camera, gl, scene } = useThree();

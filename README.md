@@ -291,16 +291,17 @@ it and a width. `wallSegments()` cuts each wall into boxes around its doors.
 
 - Walls are 1.15 m high. Full-height walls hide every room behind them at any
   angle that shows the whole plan, so the office is drawn as a cutaway model.
-- Labels are DOM elements positioned over the canvas. They stay sharp at any
+- Labels are DOM elements positioned over the canvas by projecting their 3D
+  anchor each frame. They stay sharp at any
   zoom and need no font download at runtime.
 - The opening camera distance is computed from the window size so the plan
   fits between the side panels.
 
 ## Tech stack
 
-- Next.js 14 (App Router) with static export. The deployed site is plain files
+- Next.js 16 (App Router) with static export. The deployed site is plain files
   with no server code.
-- React 18 and TypeScript in strict mode.
+- React 19 and TypeScript 7 in strict mode.
 - three.js through @react-three/fiber and @react-three/drei.
 - tsx to run the two check scripts under Node.
 - Docker with nginx for self-hosting.
