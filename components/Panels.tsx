@@ -54,7 +54,7 @@ export function TitleCard({
   viewer,
   runtime,
   onSignOut,
-  onRestore,
+  onSettings,
   onInvite,
 }: {
   mode: "overview" | "walk";
@@ -62,7 +62,7 @@ export function TitleCard({
   viewer: OfficeView["viewer"];
   runtime: OfficeView["runtime"];
   onSignOut: () => void;
-  onRestore: () => void;
+  onSettings: () => void;
   onInvite: () => void;
 }) {
   if (mode === "walk") {
@@ -122,8 +122,8 @@ export function TitleCard({
               <button className="btn" onClick={onInvite}>
                 Invite
               </button>
-              <button className="btn" onClick={onRestore} title="Put the seeded tasks and rules back">
-                Restore demo
+              <button className="btn" onClick={onSettings}>
+                Settings
               </button>
             </>
           )}

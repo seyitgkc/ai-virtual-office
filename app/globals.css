@@ -357,3 +357,81 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 .login-card a.btn { display: inline-block; text-decoration: none; margin: 0; }
 #title .who-actions { flex-wrap: wrap; }
 #title .who-actions .btn { font-size: 10.5px; padding: 5px 6px; white-space: nowrap; }
+
+/* ---- settings ---- */
+.dialog.settings {
+  width: min(820px, 100%); max-height: min(86vh, 900px); padding: 0;
+  display: flex; flex-direction: column;
+}
+.settings-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 10px;
+}
+.settings-head h2 { margin: 0; }
+.settings-head .btn { margin: 0; }
+.settings-tabs, .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-tabs { padding: 0 20px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.settings-tab {
+  font: inherit; font-size: 11.5px; cursor: pointer; color: rgba(232,230,225,0.65);
+  background: transparent; border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 100px; padding: 5px 11px;
+}
+.settings-tab[data-active="true"] {
+  color: #e8e6e1; background: rgba(110,169,217,0.2); border-color: rgba(110,169,217,0.5);
+}
+.settings-body { padding: 4px 20px 20px; overflow-y: auto; }
+.settings-section { margin-top: 18px; }
+.settings-section h3 {
+  margin: 0 0 6px; font-size: 10px; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase; color: rgba(232,230,225,0.5);
+}
+.settings .hint { margin: 0 0 10px; font-size: 11.5px; color: rgba(232,230,225,0.5); }
+.settings input, .settings select, .settings textarea {
+  font: inherit; font-size: 12px; color: #e8e6e1;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.14); border-radius: 6px;
+  padding: 6px 8px; margin: 0; width: 100%; min-width: 0;
+}
+.settings textarea { resize: vertical; }
+.settings .row {
+  display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 10px;
+  margin-bottom: 7px; font-size: 12px; text-transform: none; letter-spacing: 0;
+  color: rgba(232,230,225,0.8);
+}
+.settings .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.settings .row-actions .btn, .settings .entity .btn, .settings form .btn { margin: 0; }
+.settings .entity {
+  display: flex; align-items: center; gap: 10px; padding: 9px 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.settings .entity-fields { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.settings .entity-name { display: flex; align-items: center; gap: 7px; }
+.settings .entity-selects { flex: 0 0 170px; display: flex; flex-direction: column; gap: 5px; }
+.settings .entity-meta { font-size: 11px; color: rgba(232,230,225,0.5); }
+.settings .entity > .entity-meta { flex: 0 0 auto; max-width: 210px; }
+.settings .entity .btn { flex: 0 0 auto; white-space: nowrap; }
+.settings strong[data-effect="allow"] { color: #7fc39a; }
+.settings strong[data-effect="deny"] { color: #eba294; }
+.settings .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; align-items: end; }
+.settings .form-grid label, .settings .scopes legend {
+  display: flex; flex-direction: column; gap: 4px; margin: 0;
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(232,230,225,0.5);
+}
+.settings .form-grid .wide { grid-column: 1 / -1; }
+.settings .form-grid .btn { justify-self: start; padding: 7px 14px; }
+.settings .form-inline { display: flex; gap: 8px; }
+.settings .form-inline .btn { white-space: nowrap; }
+.settings .scopes { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.settings .scopes legend { width: 100%; padding: 0; margin-bottom: 4px; }
+.settings .check {
+  display: flex; flex-direction: row; align-items: center; gap: 6px; white-space: nowrap;
+  font-size: 12px; text-transform: none; letter-spacing: 0; color: rgba(232,230,225,0.8);
+}
+.settings .check input { width: auto; }
+.settings-matrix select { padding: 3px 5px; font-size: 11px; }
+.settings-matrix select[data-effect="allow"] { color: #7fc39a; border-color: rgba(127,195,154,0.4); }
+.settings-matrix select[data-effect="deny"] { color: #eba294; border-color: rgba(235,162,148,0.4); }
+.settings-matrix td, .settings-matrix th { padding: 4px 6px; }
+.notice[data-over-dialog="true"] { z-index: 5; }
+.dialog-backdrop { z-index: 4; }
+.notice, .working { z-index: 5; }

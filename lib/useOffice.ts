@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AdminOp } from "./admin";
 import type { Action } from "./engine";
 import type { OfficeView } from "./view";
 
@@ -67,7 +68,12 @@ export function useOffice(initial: OfficeView) {
     (action: Action) => send("/api/office/actions", { action }),
     [send],
   );
-  const restoreDemo = useCallback(() => send("/api/office/restore", {}), [send]);
+  const adminOp = useCallback((op: AdminOp) => send("/api/admin", { op }), [send]);
+  // Starting over replaces the whole office and the session, so reload.
+  const startOver = useCallback(
+    (kind: "empty" | "demo") => send("/api/admin/reset", { kind }, () => window.location.assign("/")),
+    [send],
+  );
 
   const tokenOperation = useCallback(
     (tokenId: string, operation: "reveal" | "revoke") =>
@@ -143,7 +149,8 @@ export function useOffice(initial: OfficeView) {
     roomHighlight: useCallback((roomId: string): Halt => roomHalts[roomId] ?? "none", [roomHalts]),
     participantAlert: useCallback((id: string): Halt => ownerHalts[id] ?? "none", [ownerHalts]),
     dispatch,
-    restoreDemo,
+    adminOp,
+    startOver,
     tokenOperation,
     signOut,
   };

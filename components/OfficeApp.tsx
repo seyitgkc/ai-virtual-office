@@ -9,6 +9,7 @@ import type { OfficeView } from "../lib/view";
 import { Feed, Inspector, TaskList, TitleCard } from "./Panels";
 import { Minimap } from "./Minimap";
 import { InviteDialog } from "./InviteDialog";
+import { Settings } from "./Settings";
 
 const Scene = dynamic(() => import("./Scene").then((m) => m.Scene), {
   ssr: false,
@@ -28,7 +29,8 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     roomHighlight,
     participantAlert,
     dispatch,
-    restoreDemo,
+    adminOp,
+    startOver,
     tokenOperation,
     signOut,
   } = useOffice(initial);
@@ -39,6 +41,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
 
   const [inviting, setInviting] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [mode, setMode] = useState<"overview" | "walk">("overview");
   const [walkRoomId, setWalkRoomId] = useState<string | null>(null);
   const walkPose = useRef(entryPose(office.floorplan.rooms));
@@ -101,7 +104,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           viewer={view.viewer}
           runtime={view.runtime}
           onSignOut={signOut}
-          onRestore={restoreDemo}
+          onSettings={() => setSettingsOpen(true)}
           onInvite={() => setInviting(true)}
         />
         <TaskList
@@ -147,7 +150,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
       />
 
       {notice && (
-        <div className="notice" role="status">
+        <div className="notice" role="status" data-over-dialog={settingsOpen || inviting}>
           <span>{notice}</span>
           <button className="btn" onClick={dismissNotice}>
             Dismiss
@@ -156,6 +159,16 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
       )}
       {pending && <div className="working">Working...</div>}
       {inviting && <InviteDialog office={office} onClose={() => setInviting(false)} />}
+      {settingsOpen && view.viewer.supervises && (
+        <Settings
+          view={view}
+          viewer={viewer}
+          adminOp={adminOp}
+          dispatch={dispatch}
+          startOver={startOver}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </main>
   );
 }

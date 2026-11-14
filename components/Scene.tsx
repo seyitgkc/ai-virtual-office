@@ -90,8 +90,9 @@ export function Scene({
 
   const deskById = Object.fromEntries(desks.map((d) => [d.id, d]));
 
-  const target = useRef(new Vector3(cx + 0.5, 0, cz + 1.2)).current;
-  const nearEdge = useRef(new Vector3(cx, 0, ext.maxZ)).current;
+  // Recomputed when rooms are added or removed, so the framing follows the plan.
+  const target = useMemo(() => new Vector3(cx + 0.5, 0, cz + 1.2), [cx, cz]);
+  const nearEdge = useMemo(() => new Vector3(cx, 0, ext.maxZ), [cx, ext.maxZ]);
   const cameraTouched = useRef(false);
   const walking = mode === "walk";
   // Coming back from a walk always returns to the fitted overview.
