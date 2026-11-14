@@ -69,13 +69,15 @@ pricing, and a finance approval before a quote goes out.
   does.
 - **An audit log.** Every action is recorded with who did it, when, and what
   it was about.
-- **Agents that can run on a live model.** Scripted by default. With a key on
-  the server, each agent step becomes a model call that is shown only what
-  that agent may read.
+- **Agents that can run on a live model.** Each office connects its own
+  provider in Settings. Each agent step is then a model call that is shown
+  only what that agent may read.
+- **Many offices.** An account can add offices, switch between them and remove
+  them. Each office is separate, and a new one starts empty.
 - **Invites.** A supervisor adds a person, who gets a desk and sets their own
   password.
 - **Settings.** A supervisor can add rooms, agents and roles, edit each role's
-  access, move workflow stages between rooms, or start from an empty office.
+  access, move workflow stages between rooms and connect an AI provider.
 - **A walkable office.** An overview from above, and a first-person mode with
   a map.
 
@@ -115,8 +117,12 @@ access.
 
 ## User guide
 
-**Signing in.** The sign-in page takes an email and password. A demo office
-also lists the seeded people for password-free entry:
+**Signing in.** The sign-in page takes an email and password. An account
+signed in this way starts with an empty office of its own.
+
+The page also lists the people of the **demo office** for password-free entry.
+The demo office is the seeded distributor described above. It is separate from
+every account's own offices and nothing in it carries over to them.
 
 ![The sign-in page, with demo access for the two seeded people](docs/sign-in.jpg)
 
@@ -172,19 +178,32 @@ change is checked on the server, stored, and written to the audit log.
 
 | Tab | What you can do |
 | --- | --- |
-| Office | Rename the office. Choose which room hosts each workflow stage. Clear all work, start an empty office, or load the demo office. |
+| Offices | See every office your account has a seat in. Open another one. Add a new office. Remove one you supervise. |
+| This office | Rename the office. Choose which room hosts each workflow stage. Clear all work, or remove the office. |
 | Rooms | Rename a room or change its purpose. Add a room against a wall of an existing one, with a door between them. Remove an empty room. |
 | People and agents | Add an agent with a desk and a role. Rename anyone, change their role, or move their desk to another room. Remove someone who has no history. |
 | Roles | Add or remove a role. Set allow, deny or nothing for each scope in each room. Mark a role as supervising. |
 | Access rules | See every individual rule, revoke one, or add one with a reason. |
+| AI provider | Choose between the fixed script and a live model. Pick the model, store the provider's API key, and test the connection. |
+
+Everyone sees the Offices tab. The rest appear for people who supervise the
+office they are in.
 
 The screen refuses changes that would leave the office broken, and says why: a
 room that hosts a stage or still has people in it cannot be removed, the last
 supervising person cannot lose that power, and a role still in use cannot be
 deleted.
 
-An **empty office** has one room and you in it. Add rooms, assign the stages,
-add agents and set the roles from there.
+**A new office starts empty**: one room with you in it, two starter roles, no
+agents, no work and no rules. Add rooms, assign the stages, add agents and set
+the roles from there. Demo access cannot add offices.
+
+**Connecting a model.** In *AI provider*, choose "A live language model", pick
+a model, paste the provider's API key and save. *Test connection* checks the
+key and the model with the provider without generating anything. The key is
+encrypted before it is stored and is never sent back to the page: afterwards
+the screen shows only that a key exists and its last four characters. The
+shared demo office cannot hold a key.
 
 ## Example workflows
 
@@ -315,7 +334,7 @@ flowchart TB
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>39 tables in 3NF")]
+  db[("SQLite<br/>41 tables in 3NF")]
   llm["Model API<br/>optional"]
 
   hook -->|"action"| http
@@ -377,7 +396,8 @@ lib/server/schema.ts      the database schema
 lib/server/db.ts          SQLite connection and transactions
 lib/server/officeStore.ts maps the office to tables and back
 lib/server/officeService.ts  applies actions, builds per-viewer views, writes the audit log
-lib/server/auth.ts        password hashing, users, JWT sessions
+lib/server/auth.ts        password hashing, users, seats, JWT sessions
+lib/server/secrets.ts     encryption for stored API keys
 lib/server/accessTokens.ts   scoped permission tokens
 lib/server/invites.ts     inviting people
 lib/server/modelRuntime.ts   the model-backed agent runtime
@@ -385,7 +405,7 @@ app/api/                  route handlers
 app/page.tsx              the office, for a signed-in person
 app/login, app/invite     sign-in and invite pages
 components/               3D scene, panels, settings, sign-in and invite forms
-scripts/                  six check scripts
+scripts/                  seven check scripts
 Dockerfile, compose.yaml  container build and run
 ```
 
@@ -594,12 +614,14 @@ last reason, until `r-02` is revoked.
 | Method and path | Who | Purpose |
 | --- | --- | --- |
 | `POST /api/auth/login` | anyone | Sign in with email and password |
-| `POST /api/auth/demo` | anyone, demo offices | Enter as a seeded person with no password set |
+| `POST /api/auth/demo` | anyone, when demo sign-in is on | Enter the demo office as one of its people |
 | `POST /api/auth/logout` | signed in | Revoke the session |
 | `GET /api/office` | signed in | The office as this viewer may see it |
 | `POST /api/office/actions` | signed in | Apply one action |
 | `POST /api/admin` | supervisor | Apply one set-up change |
-| `POST /api/admin/reset` | supervisor | Replace the office with an empty one or the demo |
+| `POST /api/admin/ai` | supervisor, password account | Set the runtime and model, store or remove the API key |
+| `POST /api/admin/ai/test` | supervisor | Check the stored key and model with the provider |
+| `POST /api/offices` | signed in | Add an office, switch to another, or remove one |
 | `POST /api/invites` | supervisor | Create a person, a desk and an invite link |
 | `POST /api/invites/accept` | invite holder | Set email and password, sign in |
 | `POST /api/tokens/:id` | supervisor, or holder to reveal | Reveal or revoke a permission token |
@@ -621,7 +643,8 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 39 tables. The schema is in third normal form:
+SQLite, one file, 41 tables. One database holds many offices. The schema is in
+third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
   question options are rows in child tables. There are no JSON or delimited
@@ -827,8 +850,11 @@ decision is kept as evidence after the rule it names has been revoked.
 
 ```mermaid
 erDiagram
-  participants ||--o| users : "signs in as"
+  users ||--o{ memberships : holds
+  participants ||--o| memberships : "is the seat of"
   users ||--o{ sessions : holds
+  participants o|--o{ sessions : "currently viewing"
+  offices ||--o| office_ai : configures
   participants ||--o| invites : "invited by link"
   access_rules ||--o{ access_tokens : issues
   access_rule_scopes ||--o| access_tokens : "one per scope"
@@ -838,16 +864,29 @@ erDiagram
 
   users {
     text id PK
-    text participant_id FK
     text email UK
     text password_hash
+    text display_name
+  }
+  memberships {
+    text participant_id PK
+    text user_id FK
   }
   sessions {
     text id PK
     text user_id FK
+    text participant_id FK
     int issued_at
     int expires_at
     int revoked_at
+  }
+  office_ai {
+    text office_id PK
+    text runtime
+    text provider
+    text model
+    text api_key_cipher
+    text key_hint
   }
   invites {
     text id PK
@@ -882,6 +921,11 @@ erDiagram
   }
 ```
 
+A user is a sign-in and exists apart from any office. A row in `memberships`
+is that user's seat in one office: the human participant they are there. A
+session points at one seat at a time, which is what selects the office a
+request acts on.
+
 The audit log is append-only. Its subject columns are plain text without
 foreign keys, so an entry survives the task or rule it describes.
 
@@ -909,8 +953,12 @@ foreign keys, so an entry survives the task or rule it describes.
   authorization.
 - Permission tokens and the room thread endpoint they open.
 - Persistence in SQLite and the audit log.
-- The settings screen: rooms, people and agents, roles, access rules, and
-  starting over with an empty or demo office.
+- The settings screen: rooms, people and agents, roles, access rules and the
+  AI provider.
+- Many offices per account, each isolated, with adding, switching and
+  removing.
+- AI provider settings: an encrypted, write-only API key per office and a
+  connection test against the provider.
 - The 3D office, walking, the map.
 - The model-backed runtime's code path: prompt assembly from what the agent may
   read, the structured call, and validation of the reply.
@@ -923,17 +971,18 @@ foreign keys, so an entry survives the task or rule it describes.
 - All business data: dealers, branches, stock, pricing tiers, people. The
   records in `lib/referenceData.ts` are invented.
 
-With `AGENT_RUNTIME=model` the reasoning is live and the business data is
-still invented. The stored data says which is which: an agent has a row in
+With a model connected the reasoning is live and the business data is still
+invented. The stored data says which is which: an agent has a row in
 `agent_backings` only while a model answers for it, and every output message
 carries a `simulated` flag.
 
 **Not verified in this repository**
 
-- A live model call. The runtime compiles against the SDK and its prompt
-  assembly and reply handling are covered by checks that never touch the
-  network. No request has been sent to a model from this code, because no key
-  was available while it was written.
+- A live agent step. The connection test has been run against the real
+  provider and correctly reported a rejected key, so the network path and the
+  SDK call work. The prompt assembly and the handling of a model's reply are
+  covered by checks that never touch the network. No agent step has been run
+  with a working key, because none was available while this was written.
 
 **Proposed**
 
@@ -958,8 +1007,14 @@ carries a `simulated` flag.
   invite token, and only the id of a permission token, are kept.
 - Input is parsed into known actions field by field. Unknown fields never
   reach the engine.
-- The model API key is read from the server environment and never sent to the
-  browser.
+- A model provider's API key is entered in Settings, encrypted with
+  AES-256-GCM under a key derived from the server's signing key, and never
+  sent back to a browser. It is not written to the audit log. If the signing
+  key changes, stored keys become unreadable and must be entered again.
+- Offices are isolated on the server. Every request acts on the office of the
+  session's seat, and ids from another office are treated as not existing.
+- Demo access cannot add offices, cannot remove the demo office and cannot
+  store an API key.
 - The signing key comes from `AUTH_SECRET`, or is generated once and kept
   beside the database with owner-only permissions.
 - The container runs as a non-root user on a read-only filesystem, with one
@@ -997,12 +1052,13 @@ Requires Node 24 or later, for the built-in SQLite module.
 ```bash
 npm install
 npm run dev       # http://localhost:3000
-npm run verify    # type check, then all six check scripts
+npm run verify    # type check, then all seven check scripts
 npm run build     # production server in .next/standalone
 ```
 
-The database is created at `./data/office.db` on first run and seeded with the
-demo office. Delete the `data` folder to start again.
+The database is created at `./data/office.db` on first run, with the demo
+office in it. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` to get an account with its
+own empty office. Delete the `data` folder to start again.
 
 ### Configuration
 
@@ -1011,14 +1067,10 @@ All optional. See `.env.example`.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `AUTH_SECRET` | generated and kept beside the database | Signs session and permission tokens. At least 32 characters. |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | unset | Gives the supervising person a password account at start-up. |
-| `DEMO_LOGIN` | `1` | Password-free entry as a seeded person. `0` turns it off. |
-| `AGENT_RUNTIME` | unset (scripted) | `model` makes each agent step a model call. |
-| `AGENT_MODEL` | `claude-opus-5-5` | The model agents run on. |
-| `ANTHROPIC_API_KEY` | unset | Needed only with `AGENT_RUNTIME=model`. |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | unset | Creates an account at start-up, with an empty office of its own. |
+| `DEMO_LOGIN` | `1` | Creates the demo office and allows password-free entry to it. `0` turns that off. |
 | `OFFICE_DB_PATH` | `./data/office.db` | Where the SQLite file lives. |
-| `OFFICE_SEED` | unset (demo office) | `empty` starts a new database with a blank office. |
-| `ADMIN_NAME` | `Administrator` | The administrator's name in a blank office. |
+| `ADMIN_NAME` | taken from the email | The administrator's display name. |
 
 ### Docker
 
@@ -1034,7 +1086,7 @@ flowchart LR
   user["Browser"] -->|HTTPS| proxy["Reverse proxy<br/>TLS"]
   proxy -->|"HTTP on 127.0.0.1:8080"| app["Container<br/>Node server, non-root"]
   app --> vol[("Volume /data<br/>office.db, auth-secret")]
-  app -.->|"only with AGENT_RUNTIME=model"| api["Model API"]
+  app -.->|"only for offices with a model connected"| api["Model API"]
 ```
 
 The container listens on localhost only, so a reverse proxy with TLS belongs
@@ -1053,16 +1105,18 @@ fresh filesystem.
 
 ## Verification
 
-Every script runs under Node with an in-memory database and no network.
+Every script runs under Node with no network. Six use an in-memory database
+and one a temporary database file.
 
 | What | Command | Result |
 | --- | --- | --- |
 | Access precedence, expiry, read gating, walking through doors, desk placement | `npm run check` | 34 of 34 pass |
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, foreign keys, integrity | `npm run store` | 34 of 34 pass |
-| Passwords, sessions, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 39 of 39 pass |
+| Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
 | What an agent is shown, and cleaning of a model's reply | `npm run agents` | 20 of 20 pass |
-| Set-up changes, their refusals, and an office built from nothing | `npm run admin` | 45 of 45 pass |
+| Set-up changes, their refusals, and an office built from nothing | `npm run admin` | 48 of 48 pass |
+| Several offices in one database: the administrator's empty office, isolation, AI key handling, removal | `npm run offices` | 53 of 53 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 

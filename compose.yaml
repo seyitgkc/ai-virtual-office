@@ -7,23 +7,15 @@ services:
     ports:
       - "127.0.0.1:${OFFICE_PORT:-8080}:8080"
     environment:
-      # Signs session and permission tokens. When unset, a random key is
-      # generated once and kept on the data volume.
+      # Signs session and permission tokens and protects stored API keys. When
+      # unset, a random key is generated once and kept on the data volume.
       AUTH_SECRET: ${AUTH_SECRET:-}
-      # Optional first administrator. When unset, the office starts with demo
-      # sign-in only.
+      # Optional account created at start-up, with an empty office of its own.
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      # Set to 0 to turn off password-free demo sign-in.
-      DEMO_LOGIN: ${DEMO_LOGIN:-1}
-      # Set OFFICE_SEED=empty to start a new database with a blank office.
-      OFFICE_SEED: ${OFFICE_SEED:-}
       ADMIN_NAME: ${ADMIN_NAME:-}
-      # Set AGENT_RUNTIME=model and provide a key to have a live model answer
-      # for the agents. Left unset, agents follow the fixed script.
-      AGENT_RUNTIME: ${AGENT_RUNTIME:-}
-      AGENT_MODEL: ${AGENT_MODEL:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # The demo office and password-free entry to it. Set to 0 to turn off.
+      DEMO_LOGIN: ${DEMO_LOGIN:-1}
     volumes:
       - office-data:/data
     restart: unless-stopped
