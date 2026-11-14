@@ -1,0 +1,504 @@
+/**
+ * AI Virtual Office core data model
+ *
+ * Design principles
+ *  1. Humans and agents are the same kind of thing: a participant with a seat
+ *     and a role. The uniformity is the product statement.
+ *  2. The office is data. Rooms, desks, doors and occupants all load from JSON;
+ *     the 3D scene is a renderer over this model, never a source of truth.
+ *  3. Access control governs movement AND information. If you cannot enter a
+ *     room, you cannot read what was said in it.
+ *  4. Nothing changes silently. Every individual rule records who granted it
+ *     and why; every access decision reports what it overrode.
+ *  5. Agents declare what they assumed. Always.
+ */
+
+// ---------------------------------------------------------------------------
+// Identifiers
+// ---------------------------------------------------------------------------
+
+export type ParticipantId = string;
+export type RoleId = string;
+export type RoomId = string;
+export type DeskId = string;
+export type TaskId = string;
+export type MessageId = string;
+export type RuleId = string;
+
+/** Rooms-wildcard, used in grants that apply office-wide. */
+export const ANY_ROOM = "*" as const;
+export type RoomSelector = RoomId | typeof ANY_ROOM;
+
+// ---------------------------------------------------------------------------
+// Participants
+// ---------------------------------------------------------------------------
+
+export type ParticipantKind = "human" | "agent";
+
+export interface Participant {
+  id: ParticipantId;
+  kind: ParticipantKind;
+  displayName: string;
+  /** Job title shown in the office, e.g. "Inventory Analyst". */
+  title: string;
+  roleId: RoleId;
+  /** Null when the participant is not seated (a visiting human, say). */
+  deskId: DeskId | null;
+  /**
+   * What an agent can actually do. Shown verbatim in the inspector so a
+   * supervisor can see the limits of the thing sitting at that desk.
+   */
+  capabilities: string[];
+  /** Agents only: the model/runtime backing it, or null when simulated. */
+  backing: { provider: string; model: string } | null;
+  appearance: { color: string };
+}
+
+// ---------------------------------------------------------------------------
+// Space
+// ---------------------------------------------------------------------------
+
+export type Wall = "north" | "south" | "east" | "west";
+
+export interface Point2 {
+  x: number;
+  z: number;
+}
+
+/** Axis-aligned floor-plan rectangle, in metres. Walls are extruded from it. */
+export interface Bounds {
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+}
+
+export interface Door {
+  id: string;
+  /** The adjoining room, or null for an exterior door. */
+  toRoomId: RoomId | null;
+  wall: Wall;
+  /** Offset along that wall, 0..1. */
+  along: number;
+  width: number;
+}
+
+export interface Room {
+  id: RoomId;
+  name: string;
+  /** Shown in the UI: what work happens here. */
+  purpose: string;
+  bounds: Bounds;
+  doors: Door[];
+  deskIds: DeskId[];
+}
+
+export interface Desk {
+  id: DeskId;
+  roomId: RoomId;
+  position: Point2;
+  /** Facing direction in radians. */
+  facing: number;
+  occupantId: ParticipantId | null;
+}
+
+export interface Floorplan {
+  id: string;
+  name: string;
+  description: string;
+  rooms: Room[];
+  desks: Desk[];
+}
+
+// ---------------------------------------------------------------------------
+// Access control
+// ---------------------------------------------------------------------------
+
+export type Effect = "allow" | "deny";
+
+/**
+ * enter: may be present in the room
+ * read:  may see messages addressed to the room
+ * act:   may own tasks and produce outputs there
+ */
+export type AccessScope = "enter" | "read" | "act";
+
+export const ALL_SCOPES: AccessScope[] = ["enter", "read", "act"];
+
+export interface AccessGrant {
+  room: RoomSelector;
+  scopes: AccessScope[];
+  effect: Effect;
+}
+
+export interface Role {
+  id: RoleId;
+  name: string;
+  description: string;
+  grants: AccessGrant[];
+}
+
+/**
+ * A rule attached to one participant. Outranks their role.
+ * `reason` and `grantedBy` are required: permissions never change silently.
+ */
+export interface IndividualRule {
+  id: RuleId;
+  participantId: ParticipantId;
+  room: RoomSelector;
+  scopes: AccessScope[];
+  effect: Effect;
+  reason: string;
+  grantedBy: ParticipantId;
+  grantedAt: number;
+  /** Optional expiry. */
+  expiresAt?: number;
+  /** The "just for this one task" grant. Expires when the task closes. */
+  expiresOnTaskId?: TaskId;
+}
+
+// --- resolution ------------------------------------------------------------
+
+export type DecisionSource =
+  | { kind: "individual"; ruleId: RuleId; effect: Effect }
+  | { kind: "role"; roleId: RoleId; grantIndex: number; effect: Effect }
+  | { kind: "default"; effect: "deny" };
+
+/** Precedence, highest first. Index 0 wins. */
+export const PRECEDENCE = [
+  "individual:deny",
+  "individual:allow",
+  "role:deny",
+  "role:allow",
+  "default:deny",
+] as const;
+
+export interface AccessDecision {
+  participantId: ParticipantId;
+  room: RoomId;
+  scope: AccessScope;
+  effect: Effect;
+  decidedBy: DecisionSource;
+  /** Everything that lost, in precedence order. Drives the conflict warning. */
+  overrode: DecisionSource[];
+  /** One-line, human-readable, shown in the inspector. */
+  explanation: string;
+}
+
+function tierOf(source: DecisionSource): number {
+  if (source.kind === "individual") {
+    return source.effect === "deny" ? 0 : 1;
+  }
+  if (source.kind === "role") {
+    return source.effect === "deny" ? 2 : 3;
+  }
+  return 4;
+}
+
+function matchesRoom(selector: RoomSelector, room: RoomId): boolean {
+  return selector === ANY_ROOM || selector === room;
+}
+
+export interface AccessContext {
+  roles: Record<RoleId, Role>;
+  rules: IndividualRule[];
+  /** Used to drop expired rules; pass Date.now() in production. */
+  now: number;
+  /** Task ids that have closed, for expiresOnTaskId. */
+  closedTaskIds: ReadonlySet<TaskId>;
+}
+
+export function isRuleLive(rule: IndividualRule, ctx: AccessContext): boolean {
+  if (rule.expiresAt !== undefined && rule.expiresAt <= ctx.now) return false;
+  if (rule.expiresOnTaskId !== undefined && ctx.closedTaskIds.has(rule.expiresOnTaskId)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Resolve one (participant, room, scope) triple.
+ *
+ * Returns the winning decision plus every rule it beat, so the UI can show
+ * "denied by role Fulfilment, overridden by individual rule #4" rather than a
+ * bare yes/no.
+ */
+export function resolveAccess(
+  participant: Participant,
+  room: RoomId,
+  scope: AccessScope,
+  ctx: AccessContext,
+): AccessDecision {
+  const candidates: DecisionSource[] = [];
+
+  for (const rule of ctx.rules) {
+    if (rule.participantId !== participant.id) continue;
+    if (!matchesRoom(rule.room, room)) continue;
+    if (!rule.scopes.includes(scope)) continue;
+    if (!isRuleLive(rule, ctx)) continue;
+    candidates.push({ kind: "individual", ruleId: rule.id, effect: rule.effect });
+  }
+
+  const role = ctx.roles[participant.roleId];
+  if (role) {
+    role.grants.forEach((grant, grantIndex) => {
+      if (!matchesRoom(grant.room, room)) return;
+      if (!grant.scopes.includes(scope)) return;
+      candidates.push({
+        kind: "role",
+        roleId: role.id,
+        grantIndex,
+        effect: grant.effect,
+      });
+    });
+  }
+
+  candidates.push({ kind: "default", effect: "deny" });
+  candidates.sort((a, b) => tierOf(a) - tierOf(b));
+
+  const [winner, ...losers] = candidates;
+  return {
+    participantId: participant.id,
+    room,
+    scope,
+    effect: winner.effect,
+    decidedBy: winner,
+    overrode: losers,
+    explanation: explain(winner, losers, ctx),
+  };
+}
+
+function describe(source: DecisionSource, ctx: AccessContext): string {
+  if (source.kind === "individual") {
+    const rule = ctx.rules.find((r) => r.id === source.ruleId);
+    return `individual rule ${source.ruleId} (${source.effect}${rule ? `: ${rule.reason}` : ""})`;
+  }
+  if (source.kind === "role") {
+    const role = ctx.roles[source.roleId];
+    return `role ${role ? role.name : source.roleId} (${source.effect})`;
+  }
+  return "default deny";
+}
+
+function explain(
+  winner: DecisionSource,
+  losers: DecisionSource[],
+  ctx: AccessContext,
+): string {
+  const head = `${winner.effect === "allow" ? "Allowed" : "Denied"} by ${describe(winner, ctx)}`;
+  const beaten = losers.filter((l) => l.kind !== "default" && l.effect !== winner.effect);
+  if (beaten.length === 0) return head;
+  return `${head}; overrides ${beaten.map((l) => describe(l, ctx)).join(", ")}`;
+}
+
+/** True when a participant has competing rules for a room. Drives the banner. */
+export function hasConflict(decision: AccessDecision): boolean {
+  return decision.overrode.some(
+    (s) => s.kind !== "default" && s.effect !== decision.effect,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Communication
+// ---------------------------------------------------------------------------
+
+export type MessageKind =
+  | "request"
+  | "assignment"
+  | "question"
+  | "answer"
+  | "assumption"
+  | "status"
+  | "handoff"
+  | "escalation"
+  | "decision"
+  | "output";
+
+export type Audience =
+  | { to: "participant"; id: ParticipantId }
+  | { to: "room"; id: RoomId }
+  | { to: "everyone" };
+
+export interface MessageBase {
+  id: MessageId;
+  kind: MessageKind;
+  taskId: TaskId;
+  fromId: ParticipantId | "system";
+  audience: Audience;
+  /** Where it was said. With a room audience, `read` on this room gates it. */
+  roomId: RoomId;
+  at: number;
+  inReplyTo?: MessageId;
+  body: string;
+}
+
+export interface RequestMessage extends MessageBase {
+  kind: "request";
+}
+
+export interface AssignmentMessage extends MessageBase {
+  kind: "assignment";
+  toParticipantId: ParticipantId;
+}
+
+/** A clarification. Blocking questions halt the task until answered. */
+export interface QuestionMessage extends MessageBase {
+  kind: "question";
+  blocking: boolean;
+  /** Offer concrete choices wherever possible. */
+  options?: string[];
+  answeredByMessageId?: MessageId;
+}
+
+export interface AnswerMessage extends MessageBase {
+  kind: "answer";
+  questionId: MessageId;
+  chosenOption?: string;
+}
+
+/**
+ * Something the agent took as true in order to proceed. An assumption never
+ * blocks. It is what you record when you *can* continue but had to guess.
+ */
+export interface AssumptionMessage extends MessageBase {
+  kind: "assumption";
+  assumed: string;
+  /** What was missing that forced the guess. */
+  because: string;
+  confidence: "low" | "medium" | "high";
+  status: "open" | "confirmed" | "contradicted";
+  /** Work resting on this, invalidated if it is contradicted. */
+  affectsTaskIds: TaskId[];
+}
+
+export interface StatusMessage extends MessageBase {
+  kind: "status";
+  progress?: number;
+}
+
+export interface HandoffMessage extends MessageBase {
+  kind: "handoff";
+  fromParticipantId: ParticipantId;
+  toParticipantId: ParticipantId;
+  toRoomId: RoomId;
+}
+
+/** Needs a human. Carries the failed decision when the cause is permission. */
+export interface EscalationMessage extends MessageBase {
+  kind: "escalation";
+  cause: "permission" | "ambiguity" | "policy" | "error";
+  deniedDecision?: AccessDecision;
+}
+
+export interface DecisionMessage extends MessageBase {
+  kind: "decision";
+  verdict: "approved" | "rejected" | "changes_requested";
+}
+
+export interface OutputMessage extends MessageBase {
+  kind: "output";
+  label: string;
+  /** Marked so the UI never passes simulated output off as real. */
+  simulated: boolean;
+}
+
+export type Message =
+  | RequestMessage
+  | AssignmentMessage
+  | QuestionMessage
+  | AnswerMessage
+  | AssumptionMessage
+  | StatusMessage
+  | HandoffMessage
+  | EscalationMessage
+  | DecisionMessage
+  | OutputMessage;
+
+/** Message visibility follows the `read` scope on the room it was said in. */
+export function canRead(
+  message: Message,
+  viewer: Participant,
+  ctx: AccessContext,
+): boolean {
+  if (message.audience.to === "everyone") return true;
+  if (message.audience.to === "participant") {
+    return message.audience.id === viewer.id || message.fromId === viewer.id;
+  }
+  return resolveAccess(viewer, message.audience.id, "read", ctx).effect === "allow";
+}
+
+// ---------------------------------------------------------------------------
+// Work
+// ---------------------------------------------------------------------------
+
+export type WorkflowStage =
+  | "intake"
+  | "planning"
+  | "execution"
+  | "review"
+  | "done";
+
+/**
+ * Two blocked states, deliberately. A task stops either because the owner
+ * lacks permission or because it lacks information. Those are different
+ * problems with different fixes, and the UI shows them differently.
+ */
+export type TaskStatus =
+  | "requested"
+  | "in_progress"
+  | "blocked_permission"
+  | "blocked_question"
+  | "in_review"
+  | "completed"
+  | "rejected";
+
+export interface TaskEvent {
+  at: number;
+  summary: string;
+  messageId?: MessageId;
+  /** Recorded whenever a permission check gated the transition. */
+  decision?: AccessDecision;
+}
+
+export interface Task {
+  id: TaskId;
+  title: string;
+  detail: string;
+  requestedById: ParticipantId;
+  ownerId: ParticipantId | null;
+  /** Where the task currently sits. Movement between rooms is the handoff. */
+  roomId: RoomId;
+  stage: WorkflowStage;
+  status: TaskStatus;
+  openQuestionIds: MessageId[];
+  assumptionIds: MessageId[];
+  history: TaskEvent[];
+  createdAt: number;
+  closedAt: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Office
+// ---------------------------------------------------------------------------
+
+export interface Office {
+  id: string;
+  name: string;
+  floorplan: Floorplan;
+  participants: Participant[];
+  roles: Record<RoleId, Role>;
+  rules: IndividualRule[];
+  tasks: Task[];
+  messages: Message[];
+}
+
+/** Can this participant take ownership of work in this room? */
+export function canOwnWorkIn(
+  participant: Participant,
+  room: RoomId,
+  ctx: AccessContext,
+): AccessDecision {
+  const enter = resolveAccess(participant, room, "enter", ctx);
+  if (enter.effect === "deny") return enter;
+  return resolveAccess(participant, room, "act", ctx);
+}

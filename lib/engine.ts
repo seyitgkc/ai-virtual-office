@@ -1,0 +1,1016 @@
+/**
+ * Workflow engine. A pure reducer over an Office snapshot.
+ *
+ * Two ideas carry the whole thing:
+ *
+ *  1. A stage transition is an ordinary handoff. The task moves to the next
+ *     room and is picked up by whoever is seated there and allowed to `act`.
+ *     A permission block comes from somewhere else: an agent declaring, in the
+ *     middle of its step, that it `needs` a scope on another room. If the
+ *     access model denies that, the task stops and an escalation goes to a
+ *     human.
+ *
+ *  2. Agent reasoning sits behind one interface, `AgentRuntime`, which returns
+ *     five primitives: a status note, questions, assumptions, access needs and
+ *     output. The demo ships a `ScriptedRuntime`. A model-backed runtime
+ *     implements the same interface and nothing else in the engine changes.
+ */
+
+import {
+  canOwnWorkIn,
+  resolveAccess,
+  type AccessContext,
+  type AccessScope,
+  type AccessDecision,
+  type AssumptionMessage,
+  type Message,
+  type Office,
+  type Participant,
+  type ParticipantId,
+  type QuestionMessage,
+  type RoomId,
+  type Task,
+  type TaskId,
+  type WorkflowStage,
+} from "./model";
+
+// ---------------------------------------------------------------------------
+// Pipeline
+// ---------------------------------------------------------------------------
+
+export interface StageSpec {
+  stage: WorkflowStage;
+  /** Null for the terminal stage: completing does not move the task. */
+  roomId: RoomId | null;
+  label: string;
+  /** Review is closed by a human decision, not by advancing. */
+  humanGate: boolean;
+}
+
+export const PIPELINE: StageSpec[] = [
+  { stage: "intake", roomId: "reception", label: "Intake", humanGate: false },
+  { stage: "planning", roomId: "planning", label: "Planning", humanGate: false },
+  { stage: "execution", roomId: "fulfilment", label: "Execution", humanGate: false },
+  { stage: "review", roomId: "finance", label: "Review", humanGate: true },
+  { stage: "done", roomId: null, label: "Complete", humanGate: false },
+];
+
+export const stageSpec = (stage: WorkflowStage): StageSpec => {
+  const found = PIPELINE.find((s) => s.stage === stage);
+  if (!found) throw new Error(`Unknown stage ${stage}`);
+  return found;
+};
+
+export const nextStage = (stage: WorkflowStage): WorkflowStage | null => {
+  const i = PIPELINE.findIndex((s) => s.stage === stage);
+  return i >= 0 && i < PIPELINE.length - 1 ? PIPELINE[i + 1].stage : null;
+};
+
+// ---------------------------------------------------------------------------
+// Agent runtime
+// ---------------------------------------------------------------------------
+
+export interface AgentStepInput {
+  task: Task;
+  stage: WorkflowStage;
+  participant: Participant;
+  /** Everything already said about this task, oldest first. */
+  priorMessages: Message[];
+}
+
+export interface DraftQuestion {
+  body: string;
+  toParticipantId: ParticipantId;
+  blocking: boolean;
+  options?: string[];
+}
+
+export interface DraftAssumption {
+  assumed: string;
+  because: string;
+  confidence: "low" | "medium" | "high";
+  body?: string;
+}
+
+/**
+ * A room an agent must reach into to finish its current step. This is where
+ * permission blocks actually come from: not from moving between stages, which
+ * is an ordinary handoff, but from an agent needing data held somewhere it is
+ * not allowed to look.
+ */
+export interface AccessNeed {
+  room: RoomId;
+  scope: AccessScope;
+  /** Shown to the human in the escalation: why this access is needed. */
+  purpose: string;
+}
+
+export interface AgentStepResult {
+  statusNote?: string;
+  questions: DraftQuestion[];
+  /** Agents declare every guess they had to make. Non-negotiable. */
+  assumptions: DraftAssumption[];
+  needs?: AccessNeed[];
+  output?: { label: string; body: string };
+}
+
+export interface AgentRuntime {
+  readonly kind: "scripted" | "model";
+  step(input: AgentStepInput): AgentStepResult;
+}
+
+const EMPTY: AgentStepResult = { questions: [], assumptions: [] };
+
+/**
+ * Deterministic stand-in for real agents, keyed `participantId:stage`.
+ * Reproducible on purpose: a demo that behaves differently each run is
+ * impossible to walk someone through.
+ */
+export class ScriptedRuntime implements AgentRuntime {
+  readonly kind = "scripted" as const;
+  constructor(private readonly script: Record<string, AgentStepResult> = DEFAULT_SCRIPT) {}
+  step(input: AgentStepInput): AgentStepResult {
+    return this.script[`${input.participant.id}:${input.stage}`] ?? EMPTY;
+  }
+}
+
+export const DEFAULT_SCRIPT: Record<string, AgentStepResult> = {
+  "p-iris:intake": {
+    statusNote: "Matched the dealer to an account. Parsing line items.",
+    questions: [
+      {
+        body: "Are these standalone heads, or paired with condensers? Pricing differs.",
+        toParticipantId: "p-sam",
+        blocking: true,
+        options: ["Standalone heads", "Paired with condensers", "Dealer to confirm"],
+      },
+    ],
+    assumptions: [
+      {
+        assumed: "Fulfilment branch is Richmond Hill",
+        because: "The request named no branch; the account's service address is Richmond Hill.",
+        confidence: "medium",
+      },
+    ],
+  },
+  "p-atlas:planning": {
+    statusNote: "Decomposed into line items and a single shipment.",
+    questions: [],
+    assumptions: [
+      {
+        assumed: "Five working days from order confirmation",
+        because: "No contract terms were attached to the account record.",
+        confidence: "low",
+      },
+    ],
+  },
+  "p-vera:execution": {
+    statusNote: "Checked stock across branches; a transfer is required to fill the order.",
+    questions: [],
+    assumptions: [
+      {
+        assumed: "The dealer will accept a split-origin shipment",
+        because: "No single branch can fill the order and the dealer stated no preference.",
+        confidence: "medium",
+      },
+    ],
+    needs: [
+      {
+        room: "finance",
+        scope: "read",
+        purpose: "Dealer tier and landed cost, to price the transfer",
+      },
+    ],
+  },
+  "p-quill:execution": {
+    statusNote: "Assembling the quote from confirmed stock.",
+    questions: [],
+    assumptions: [],
+    needs: [
+      {
+        room: "finance",
+        scope: "read",
+        purpose: "Dealer tier pricing for account on file",
+      },
+    ],
+    output: { label: "Draft quote", body: "Six line items, split origin, pending tier pricing." },
+  },
+  "p-ledger:review": {
+    statusNote: "Dealer tier confirmed; pricing assembled.",
+    questions: [],
+    assumptions: [],
+    output: { label: "Pricing sheet", body: "Tier 2 pricing applied, net 30." },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Engine state & actions
+// ---------------------------------------------------------------------------
+
+export interface EngineState {
+  office: Office;
+  now: number;
+  seq: number;
+  /** Minutes the clock advances per action, so timestamps read sensibly. */
+  clockStepMinutes: number;
+}
+
+export type Action =
+  | { type: "SUBMIT_REQUEST"; title: string; detail: string; requestedById: ParticipantId }
+  | { type: "ADVANCE"; taskId: TaskId }
+  | {
+      type: "ANSWER_QUESTION";
+      questionId: string;
+      answeredById: ParticipantId;
+      body: string;
+      chosenOption?: string;
+    }
+  | {
+      type: "GRANT_ACCESS";
+      participantId: ParticipantId;
+      room: RoomId;
+      scopes: ("enter" | "read" | "act")[];
+      effect: "allow" | "deny";
+      reason: string;
+      grantedBy: ParticipantId;
+      expiresOnTaskId?: TaskId;
+      expiresAt?: number;
+    }
+  | { type: "REVOKE_RULE"; ruleId: string; revokedBy: ParticipantId }
+  | { type: "REASSIGN"; taskId: TaskId; toParticipantId: ParticipantId; byId: ParticipantId }
+  | {
+      type: "RESOLVE_ASSUMPTION";
+      assumptionId: string;
+      status: "confirmed" | "contradicted";
+      byId: ParticipantId;
+    }
+  | {
+      type: "DECIDE";
+      taskId: TaskId;
+      byId: ParticipantId;
+      verdict: "approved" | "rejected" | "changes_requested";
+    };
+
+export interface StepResult {
+  state: EngineState;
+  /** Messages produced by this action, in order. */
+  emitted: Message[];
+  /** Plain-language trace for the activity feed and for debugging. */
+  notes: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function contextOf(state: EngineState): AccessContext {
+  return {
+    roles: state.office.roles,
+    rules: state.office.rules,
+    now: state.now,
+    closedTaskIds: new Set(
+      state.office.tasks.filter((t) => t.closedAt !== null).map((t) => t.id),
+    ),
+  };
+}
+
+const findParticipant = (o: Office, id: ParticipantId): Participant => {
+  const p = o.participants.find((x) => x.id === id);
+  if (!p) throw new Error(`No participant ${id}`);
+  return p;
+};
+
+const findTask = (o: Office, id: TaskId): Task => {
+  const t = o.tasks.find((x) => x.id === id);
+  if (!t) throw new Error(`No task ${id}`);
+  return t;
+};
+
+/** The room a participant is seated in, or null if unseated. */
+export function roomOf(office: Office, p: Participant): RoomId | null {
+  if (!p.deskId) return null;
+  const desk = office.floorplan.desks.find((d) => d.id === p.deskId);
+  return desk ? desk.roomId : null;
+}
+
+/** Everyone who could legitimately own work in this room. Drives the "Hand to" buttons. */
+export function eligibleOwners(
+  office: Office,
+  room: RoomId,
+  ctx: AccessContext,
+): Participant[] {
+  return office.participants.filter(
+    (p) => canOwnWorkIn(p, room, ctx).effect === "allow",
+  );
+}
+
+function replaceTask(office: Office, updated: Task): Office {
+  return { ...office, tasks: office.tasks.map((t) => (t.id === updated.id ? updated : t)) };
+}
+
+function replaceMessage(office: Office, updated: Message): Office {
+  return {
+    ...office,
+    messages: office.messages.map((m) => (m.id === updated.id ? updated : m)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Reducer
+// ---------------------------------------------------------------------------
+
+export function reduce(
+  state: EngineState,
+  action: Action,
+  runtime: AgentRuntime,
+): StepResult {
+  const now = state.now + state.clockStepMinutes * 60_000;
+  let seq = state.seq;
+  const nextId = (prefix: string): string => `${prefix}-${++seq}`;
+  const emitted: Message[] = [];
+  const notes: string[] = [];
+  let office = state.office;
+
+  const done = (): StepResult => ({
+    state: { ...state, office, now, seq },
+    emitted,
+    notes,
+  });
+
+  switch (action.type) {
+    // -- a human files new work ------------------------------------------
+    case "SUBMIT_REQUEST": {
+      const spec = stageSpec("intake");
+      const room = spec.roomId!;
+      const ctx = contextOf({ ...state, office, now });
+      const candidates = eligibleOwners(office, room, ctx).filter(
+        (p) => p.kind === "agent",
+      );
+      const owner = candidates[0] ?? null;
+
+      const task: Task = {
+        id: nextId("T"),
+        title: action.title,
+        detail: action.detail,
+        requestedById: action.requestedById,
+        ownerId: owner ? owner.id : null,
+        roomId: room,
+        stage: "intake",
+        status: owner ? "in_progress" : "requested",
+        openQuestionIds: [],
+        assumptionIds: [],
+        history: [{ at: now, summary: `Request received in ${room}` }],
+        createdAt: now,
+        closedAt: null,
+      };
+
+      const request: Message = {
+        id: nextId("m"),
+        kind: "request",
+        taskId: task.id,
+        fromId: action.requestedById,
+        audience: { to: "room", id: room },
+        roomId: room,
+        at: now,
+        body: action.detail,
+      };
+      emitted.push(request);
+      office = { ...office, tasks: [...office.tasks, task], messages: [...office.messages, request] };
+      notes.push(`${task.id} opened in ${room}${owner ? `, owned by ${owner.displayName}` : " with no eligible owner"}`);
+
+      if (owner) {
+        const run = runAgent(office, task, "intake", owner, runtime, now, nextId);
+        office = run.office;
+        emitted.push(...run.emitted);
+        notes.push(...run.notes);
+      }
+      return done();
+    }
+
+    // -- move a task to the next stage ------------------------------------
+    case "ADVANCE": {
+      const task = findTask(office, action.taskId);
+
+      if (task.status === "blocked_question") {
+        notes.push(`${task.id} cannot advance: ${task.openQuestionIds.length} question(s) unanswered`);
+        return done();
+      }
+      if (task.closedAt !== null) {
+        notes.push(`${task.id} is already closed`);
+        return done();
+      }
+
+      const current = stageSpec(task.stage);
+      if (current.humanGate) {
+        notes.push(`${task.id} is in ${current.label} and needs a human decision, not an advance`);
+        return done();
+      }
+
+      const target = nextStage(task.stage);
+      if (target === null) {
+        notes.push(`${task.id} is already at the end of the pipeline`);
+        return done();
+      }
+      const targetSpec = stageSpec(target);
+      const targetRoom = targetSpec.roomId ?? task.roomId;
+      const ctx = contextOf({ ...state, office, now });
+
+      // Moving between stages is an ordinary handoff: the work goes to whoever
+      // is seated in the next room and allowed to act there. Keep the current
+      // owner only when they qualify, which happens when two stages share a
+      // room. A block here means nobody at all may work in that room.
+      const owner = task.ownerId ? findParticipant(office, task.ownerId) : null;
+      let carrier: Participant | null = null;
+      let decision: AccessDecision | null = null;
+
+      if (owner) {
+        const d = canOwnWorkIn(owner, targetRoom, ctx);
+        if (d.effect === "allow") {
+          carrier = owner;
+          decision = d;
+        }
+      }
+      if (!carrier) {
+        const seatedFirst = eligibleOwners(office, targetRoom, ctx)
+          .filter((p) => p.kind === "agent")
+          .sort((a, b) => {
+            const aHere = roomOf(office, a) === targetRoom ? 0 : 1;
+            const bHere = roomOf(office, b) === targetRoom ? 0 : 1;
+            return aHere - bHere;
+          });
+        if (seatedFirst.length > 0) {
+          carrier = seatedFirst[0];
+          decision = canOwnWorkIn(carrier, targetRoom, ctx);
+        }
+      }
+
+      if (!carrier) {
+        const supervisor =
+          office.participants.find((p) => p.kind === "human" && p.roleId === "supervisor") ??
+          office.participants.find((p) => p.kind === "human");
+        const escalation: Message = {
+          id: nextId("m"),
+          kind: "escalation",
+          taskId: task.id,
+          fromId: owner ? owner.id : "system",
+          audience: supervisor ? { to: "participant", id: supervisor.id } : { to: "everyone" },
+          roomId: task.roomId,
+          at: now,
+          body: `${task.id} cannot move to ${targetSpec.label}: nobody may act in ${targetRoom}.`,
+          cause: "permission",
+        };
+        emitted.push(escalation);
+        office = {
+          ...replaceTask(office, {
+            ...task,
+            status: "blocked_permission",
+            history: [
+              ...task.history,
+              { at: now, summary: `No eligible owner in ${targetRoom}`, messageId: escalation.id },
+            ],
+          }),
+          messages: [...office.messages, escalation],
+        };
+        notes.push(`${task.id} blocked: no eligible owner in ${targetRoom}`);
+        return done();
+      }
+
+      const changedHands = carrier.id !== owner?.id;
+      if (changedHands) {
+        const handoff: Message = {
+          id: nextId("m"),
+          kind: "handoff",
+          taskId: task.id,
+          fromId: owner ? owner.id : "system",
+          audience: { to: "room", id: targetRoom },
+          roomId: targetRoom,
+          at: now,
+          body: `${task.id} handed to ${carrier.displayName} for ${targetSpec.label}.`,
+          fromParticipantId: owner ? owner.id : carrier.id,
+          toParticipantId: carrier.id,
+          toRoomId: targetRoom,
+        };
+        emitted.push(handoff);
+        office = { ...office, messages: [...office.messages, handoff] };
+      }
+
+      const moved: Task = {
+        ...task,
+        stage: target,
+        roomId: targetRoom,
+        ownerId: carrier.id,
+        status: targetSpec.humanGate ? "in_review" : "in_progress",
+        history: [
+          ...task.history,
+          {
+            at: now,
+            summary: `Moved to ${targetSpec.label} in ${targetRoom}, owned by ${carrier.displayName}`,
+            ...(decision ? { decision } : {}),
+          },
+        ],
+      };
+      office = replaceTask(office, moved);
+      notes.push(`${task.id} moved to ${targetSpec.label} (${targetRoom}), owner ${carrier.displayName}`);
+
+      const run = runAgent(office, moved, target, carrier, runtime, now, nextId);
+      office = run.office;
+      emitted.push(...run.emitted);
+      notes.push(...run.notes);
+      return done();
+    }
+
+    // -- a human answers a blocking question -------------------------------
+    case "ANSWER_QUESTION": {
+      const question = office.messages.find(
+        (m): m is QuestionMessage => m.id === action.questionId && m.kind === "question",
+      );
+      if (!question) {
+        notes.push(`No question ${action.questionId}`);
+        return done();
+      }
+
+      const answer: Message = {
+        id: nextId("m"),
+        kind: "answer",
+        taskId: question.taskId,
+        fromId: action.answeredById,
+        audience: { to: "participant", id: question.fromId as ParticipantId },
+        roomId: question.roomId,
+        at: now,
+        inReplyTo: question.id,
+        body: action.body,
+        questionId: question.id,
+        ...(action.chosenOption ? { chosenOption: action.chosenOption } : {}),
+      };
+      emitted.push(answer);
+      office = replaceMessage(office, { ...question, answeredByMessageId: answer.id });
+      office = { ...office, messages: [...office.messages, answer] };
+
+      const task = findTask(office, question.taskId);
+      const stillOpen = task.openQuestionIds.filter((id) => id !== question.id);
+      const unblocked: Task = {
+        ...task,
+        openQuestionIds: stillOpen,
+        status:
+          stillOpen.length === 0 && task.status === "blocked_question"
+            ? "in_progress"
+            : task.status,
+        history: [
+          ...task.history,
+          { at: now, summary: `Question answered by ${action.answeredById}`, messageId: answer.id },
+        ],
+      };
+      office = replaceTask(office, unblocked);
+      notes.push(
+        `${task.id}: question answered` +
+          (stillOpen.length === 0 ? ", unblocked" : `, ${stillOpen.length} still open`),
+      );
+      return done();
+    }
+
+    // -- a supervisor grants or denies access -------------------------------
+    case "GRANT_ACCESS": {
+      const rule = {
+        id: nextId("r"),
+        participantId: action.participantId,
+        room: action.room,
+        scopes: action.scopes,
+        effect: action.effect,
+        reason: action.reason,
+        grantedBy: action.grantedBy,
+        grantedAt: now,
+        ...(action.expiresOnTaskId ? { expiresOnTaskId: action.expiresOnTaskId } : {}),
+        ...(action.expiresAt ? { expiresAt: action.expiresAt } : {}),
+      };
+      office = { ...office, rules: [...office.rules, rule] };
+
+      const who = findParticipant(office, action.participantId);
+      notes.push(
+        `${rule.id}: ${action.effect} ${action.scopes.join("/")} on ${action.room} for ${who.displayName}` +
+          (action.expiresOnTaskId ? ` (expires with ${action.expiresOnTaskId})` : ""),
+      );
+
+      const retried = retryBlocked(office, { ...state, office, now }, now, rule.id, rule.participantId);
+      office = retried.office;
+      notes.push(...retried.notes);
+      return done();
+    }
+
+    case "REVOKE_RULE": {
+      const rule = office.rules.find((r) => r.id === action.ruleId);
+      if (!rule) {
+        notes.push(`No rule ${action.ruleId}`);
+        return done();
+      }
+      office = { ...office, rules: office.rules.filter((r) => r.id !== action.ruleId) };
+      notes.push(
+        `${action.ruleId} revoked by ${findParticipant(office, action.revokedBy).displayName}`,
+      );
+      const afterRevoke = retryBlocked(
+        office,
+        { ...state, office, now },
+        now,
+        `revocation of ${action.ruleId}`,
+        rule.participantId,
+      );
+      office = afterRevoke.office;
+      notes.push(...afterRevoke.notes);
+      return done();
+    }
+
+    // -- hand the task to someone who is allowed ---------------------------
+    case "REASSIGN": {
+      const task = findTask(office, action.taskId);
+      const to = findParticipant(office, action.toParticipantId);
+      const target = nextStage(task.stage);
+      const room = target ? stageSpec(target).roomId ?? task.roomId : task.roomId;
+      const ctx = contextOf({ ...state, office, now });
+      const decision = canOwnWorkIn(to, room, ctx);
+
+      if (decision.effect === "deny") {
+        notes.push(`Cannot reassign ${task.id} to ${to.displayName}: ${decision.explanation}`);
+        return done();
+      }
+
+      const handoff: Message = {
+        id: nextId("m"),
+        kind: "handoff",
+        taskId: task.id,
+        fromId: action.byId,
+        audience: { to: "room", id: room },
+        roomId: room,
+        at: now,
+        body: `${to.displayName} picks up ${task.id}.`,
+        fromParticipantId: task.ownerId ?? action.byId,
+        toParticipantId: to.id,
+        toRoomId: room,
+      };
+      emitted.push(handoff);
+      office = {
+        ...replaceTask(office, {
+          ...task,
+          ownerId: to.id,
+          status: task.status === "blocked_permission" ? "in_progress" : task.status,
+          history: [
+            ...task.history,
+            { at: now, summary: `Reassigned to ${to.displayName}`, messageId: handoff.id, decision },
+          ],
+        }),
+        messages: [...office.messages, handoff],
+      };
+      notes.push(`${task.id} reassigned to ${to.displayName}`);
+      return done();
+    }
+
+    // -- a human rules on an assumption ------------------------------------
+    case "RESOLVE_ASSUMPTION": {
+      const assumption = office.messages.find(
+        (m): m is AssumptionMessage =>
+          m.id === action.assumptionId && m.kind === "assumption",
+      );
+      if (!assumption) {
+        notes.push(`No assumption ${action.assumptionId}`);
+        return done();
+      }
+      office = replaceMessage(office, { ...assumption, status: action.status });
+      notes.push(`${assumption.id} marked ${action.status} by ${action.byId}`);
+
+      if (action.status === "confirmed") return done();
+
+      // Contradicted: work resting on it must stop and be re-asked.
+      for (const taskId of assumption.affectsTaskIds) {
+        const task = office.tasks.find((t) => t.id === taskId);
+        if (!task || task.closedAt !== null) continue;
+
+        const question: Message = {
+          id: nextId("m"),
+          kind: "question",
+          taskId: task.id,
+          fromId: "system",
+          audience: task.ownerId
+            ? { to: "participant", id: task.ownerId }
+            : { to: "room", id: task.roomId },
+          roomId: task.roomId,
+          at: now,
+          inReplyTo: assumption.id,
+          body: `"${assumption.assumed}" was contradicted by ${action.byId}. What is the correct value?`,
+          blocking: true,
+        };
+        emitted.push(question);
+        office = {
+          ...replaceTask(office, {
+            ...task,
+            status: "blocked_question",
+            openQuestionIds: [...task.openQuestionIds, question.id],
+            history: [
+              ...task.history,
+              {
+                at: now,
+                summary: `Halted: rested on a contradicted assumption (${assumption.id})`,
+                messageId: question.id,
+              },
+            ],
+          }),
+          messages: [...office.messages, question],
+        };
+        notes.push(`${task.id} halted because it rested on ${assumption.id}`);
+      }
+      return done();
+    }
+
+    // -- the review gate ----------------------------------------------------
+    case "DECIDE": {
+      const task = findTask(office, action.taskId);
+      const by = findParticipant(office, action.byId);
+      const ctx = contextOf({ ...state, office, now });
+      const decision = resolveAccess(by, task.roomId, "act", ctx);
+
+      if (decision.effect === "deny") {
+        notes.push(`${by.displayName} may not decide in ${task.roomId}: ${decision.explanation}`);
+        return done();
+      }
+
+      const ruling: Message = {
+        id: nextId("m"),
+        kind: "decision",
+        taskId: task.id,
+        fromId: by.id,
+        audience: { to: "room", id: task.roomId },
+        roomId: task.roomId,
+        at: now,
+        body:
+          action.verdict === "approved"
+            ? "Approved."
+            : action.verdict === "rejected"
+              ? "Rejected."
+              : "Changes requested.",
+        verdict: action.verdict,
+      };
+      emitted.push(ruling);
+
+      const closed = action.verdict === "approved" || action.verdict === "rejected";
+      office = {
+        ...replaceTask(office, {
+          ...task,
+          stage: action.verdict === "approved" ? "done" : task.stage,
+          status:
+            action.verdict === "approved"
+              ? "completed"
+              : action.verdict === "rejected"
+                ? "rejected"
+                : "in_progress",
+          closedAt: closed ? now : null,
+          history: [
+            ...task.history,
+            { at: now, summary: `${by.displayName}: ${action.verdict}`, messageId: ruling.id, decision },
+          ],
+        }),
+        messages: [...office.messages, ruling],
+      };
+      notes.push(`${task.id} ${action.verdict} by ${by.displayName}`);
+      return done();
+    }
+  }
+}
+
+/**
+ * After any permission change, re-test every task that is blocked on one.
+ * The thing to re-test is recorded on the task's most recent permission
+ * escalation, so there is no guessing about what it was waiting for.
+ */
+function retryBlocked(
+  office: Office,
+  state: EngineState,
+  now: number,
+  cause: string,
+  /** Whose access just changed. Other people's blocks are re-tested quietly. */
+  changedFor: ParticipantId,
+): { office: Office; notes: string[] } {
+  const ctx = contextOf(state);
+  const notes: string[] = [];
+  let next = office;
+
+  for (const task of office.tasks) {
+    if (task.status !== "blocked_permission") continue;
+
+    const escalation = [...office.messages]
+      .reverse()
+      .find(
+        (m): m is Message & { deniedDecision: AccessDecision } =>
+          m.taskId === task.id &&
+          m.kind === "escalation" &&
+          (m as { deniedDecision?: AccessDecision }).deniedDecision !== undefined,
+      );
+    if (!escalation) continue;
+
+    const { participantId, room, scope } = escalation.deniedDecision;
+    const who = office.participants.find((p) => p.id === participantId);
+    if (!who) continue;
+
+    const verdict = resolveAccess(who, room, scope, ctx);
+    if (verdict.effect !== "allow") {
+      if (participantId === changedFor) {
+        notes.push(
+          `${task.id} still blocked after ${cause}. ${verdict.explanation}`,
+        );
+      }
+      continue;
+    }
+
+    next = replaceTask(next, {
+      ...task,
+      status: "in_progress",
+      history: [
+        ...task.history,
+        { at: now, summary: `Unblocked by ${cause}`, decision: verdict },
+      ],
+    });
+    notes.push(`${task.id} unblocked by ${cause}. Advance it to continue.`);
+  }
+
+  return { office: next, notes };
+}
+
+// ---------------------------------------------------------------------------
+// Agent turn
+// ---------------------------------------------------------------------------
+
+function runAgent(
+  office: Office,
+  task: Task,
+  stage: WorkflowStage,
+  participant: Participant,
+  runtime: AgentRuntime,
+  now: number,
+  nextId: (prefix: string) => string,
+): { office: Office; emitted: Message[]; notes: string[] } {
+  if (participant.kind !== "agent") {
+    return { office, emitted: [], notes: [] };
+  }
+
+  const prior = office.messages
+    .filter((m) => m.taskId === task.id)
+    .sort((a, b) => a.at - b.at);
+
+  const result = runtime.step({ task, stage, participant, priorMessages: prior });
+  const emitted: Message[] = [];
+  const notes: string[] = [];
+  let updated: Task = task;
+
+  if (result.statusNote) {
+    const status: Message = {
+      id: nextId("m"),
+      kind: "status",
+      taskId: task.id,
+      fromId: participant.id,
+      audience: { to: "room", id: task.roomId },
+      roomId: task.roomId,
+      at: now,
+      body: result.statusNote,
+    };
+    emitted.push(status);
+  }
+
+  for (const draft of result.assumptions) {
+    const assumption: Message = {
+      id: nextId("m"),
+      kind: "assumption",
+      taskId: task.id,
+      fromId: participant.id,
+      audience: { to: "room", id: task.roomId },
+      roomId: task.roomId,
+      at: now,
+      body: draft.body ?? `Assuming: ${draft.assumed}`,
+      assumed: draft.assumed,
+      because: draft.because,
+      confidence: draft.confidence,
+      status: "open",
+      affectsTaskIds: [task.id],
+    };
+    emitted.push(assumption);
+    updated = { ...updated, assumptionIds: [...updated.assumptionIds, assumption.id] };
+    notes.push(`${participant.displayName} recorded an assumption: ${draft.assumed}`);
+  }
+
+  for (const draft of result.questions) {
+    const question: Message = {
+      id: nextId("m"),
+      kind: "question",
+      taskId: task.id,
+      fromId: participant.id,
+      audience: { to: "participant", id: draft.toParticipantId },
+      roomId: task.roomId,
+      at: now,
+      body: draft.body,
+      blocking: draft.blocking,
+      ...(draft.options ? { options: draft.options } : {}),
+    };
+    emitted.push(question);
+    if (draft.blocking) {
+      updated = {
+        ...updated,
+        openQuestionIds: [...updated.openQuestionIds, question.id],
+        status: "blocked_question",
+      };
+      notes.push(`${participant.displayName} is waiting on an answer: ${draft.body}`);
+    }
+  }
+
+  // Does this step need to reach into a room the agent may not touch?
+  // Checked after the status and assumptions, because that is the order it
+  // happens in: the agent works, records what it guessed, then hits the wall.
+  const ctx: AccessContext = {
+    roles: office.roles,
+    rules: office.rules,
+    now,
+    closedTaskIds: new Set(
+      office.tasks.filter((t) => t.closedAt !== null).map((t) => t.id),
+    ),
+  };
+  let wallHit = false;
+
+  for (const need of result.needs ?? []) {
+    const verdict = resolveAccess(participant, need.room, need.scope, ctx);
+    if (verdict.effect === "allow") continue;
+
+    const supervisor =
+      office.participants.find((p) => p.kind === "human" && p.roleId === "supervisor") ??
+      office.participants.find((p) => p.kind === "human");
+    const alternatives = office.participants.filter(
+      (p) =>
+        p.id !== participant.id &&
+        p.kind === "agent" &&
+        resolveAccess(p, need.room, need.scope, ctx).effect === "allow",
+    );
+
+    const escalation: Message = {
+      id: nextId("m"),
+      kind: "escalation",
+      taskId: task.id,
+      fromId: participant.id,
+      audience: supervisor ? { to: "participant", id: supervisor.id } : { to: "everyone" },
+      roomId: task.roomId,
+      at: now,
+      body:
+        `I need ${need.scope} access to ${need.room}. Purpose: ${need.purpose}. ` +
+        `${verdict.explanation}. ` +
+        (alternatives.length > 0
+          ? `Grant me scoped access, or hand this to ${alternatives.map((p) => p.displayName).join(" / ")}.`
+          : `Grant me scoped access; no other agent holds it either.`),
+      cause: "permission",
+      deniedDecision: verdict,
+    };
+    emitted.push(escalation);
+    updated = {
+      ...updated,
+      status: "blocked_permission",
+      history: [
+        ...updated.history,
+        {
+          at: now,
+          summary: `Blocked: needs ${need.scope} on ${need.room}`,
+          messageId: escalation.id,
+          decision: verdict,
+        },
+      ],
+    };
+    notes.push(
+      `${participant.displayName} blocked on ${need.scope} access to ${need.room}. ${verdict.explanation}`,
+    );
+    wallHit = true;
+    break;
+  }
+
+  // Output only lands when the step actually completed.
+  if (result.output && !wallHit) {
+    const output: Message = {
+      id: nextId("m"),
+      kind: "output",
+      taskId: task.id,
+      fromId: participant.id,
+      audience: { to: "room", id: task.roomId },
+      roomId: task.roomId,
+      at: now,
+      body: result.output.body,
+      label: result.output.label,
+      simulated: runtime.kind === "scripted",
+    };
+    emitted.push(output);
+  }
+
+  if (emitted.length > 0) {
+    updated = {
+      ...updated,
+      history: [
+        ...updated.history,
+        { at: now, summary: `${participant.displayName} worked ${stageSpec(stage).label}` },
+      ],
+    };
+  }
+
+  return {
+    office: { ...replaceTask(office, updated), messages: [...office.messages, ...emitted] },
+    emitted,
+    notes,
+  };
+}
