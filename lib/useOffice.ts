@@ -36,7 +36,12 @@ const errorOf = (data: unknown): string =>
 export function useOffice(initial: OfficeView) {
   const [view, setView] = useState(initial);
   const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNoticeText] = useState<string | null>(null);
+  const [noticeTone, setNoticeTone] = useState<"problem" | "info">("problem");
+  const setNotice = useCallback((text: string | null, tone: "problem" | "info" = "problem") => {
+    setNoticeText(text);
+    setNoticeTone(tone);
+  }, []);
 
   // Requests run one at a time so that views arrive in the order they were made.
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -62,17 +67,31 @@ export function useOffice(initial: OfficeView) {
         setPending(false);
       }
     });
-  }, []);
+  }, [setNotice]);
 
   const dispatch = useCallback(
     (action: Action) => send("/api/office/actions", { action }),
     [send],
   );
   const adminOp = useCallback((op: AdminOp) => send("/api/admin", { op }), [send]);
-  // Starting over replaces the whole office and the session, so reload.
-  const startOver = useCallback(
-    (kind: "empty" | "demo") => send("/api/admin/reset", { kind }, () => window.location.assign("/")),
+  // Adding, switching or removing an office changes what the whole page
+  // shows, so the page is reloaded once the server has done it.
+  const officeOp = useCallback(
+    (body: { operation: "create"; name: string } | { operation: "switch" | "remove"; officeId: string }) =>
+      send("/api/offices", body, () => window.location.assign("/")),
     [send],
+  );
+  const saveAi = useCallback(
+    (body: { runtime: "scripted" | "model"; model: string; apiKey?: string; removeKey?: boolean }) =>
+      send("/api/admin/ai", body),
+    [send],
+  );
+  const testAi = useCallback(
+    () =>
+      send("/api/admin/ai/test", {}, (data) =>
+        setNotice(`Connected. The provider recognises ${(data as { model?: string }).model ?? "the model"}.`, "info"),
+      ),
+    [send, setNotice],
   );
 
   const tokenOperation = useCallback(
@@ -85,10 +104,10 @@ export function useOffice(initial: OfficeView) {
         const token = (data as { token?: string }).token ?? "";
         navigator.clipboard
           .writeText(token)
-          .then(() => setNotice("Token copied. Send it as a Bearer token to /api/rooms/<room>/thread."))
-          .catch(() => setNotice(`Token: ${token}`));
+          .then(() => setNotice("Token copied. Send it as a Bearer token to /api/rooms/<room>/thread.", "info"))
+          .catch(() => setNotice(`Token: ${token}`, "info"));
       }),
-    [send],
+    [send, setNotice],
   );
 
   const signOut = useCallback(async () => {
@@ -145,12 +164,15 @@ export function useOffice(initial: OfficeView) {
     feed: view.feed,
     pending,
     notice,
+    noticeTone,
     dismissNotice: useCallback(() => setNotice(null), []),
     roomHighlight: useCallback((roomId: string): Halt => roomHalts[roomId] ?? "none", [roomHalts]),
     participantAlert: useCallback((id: string): Halt => ownerHalts[id] ?? "none", [ownerHalts]),
     dispatch,
     adminOp,
-    startOver,
+    officeOp,
+    saveAi,
+    testAi,
     tokenOperation,
     signOut,
   };

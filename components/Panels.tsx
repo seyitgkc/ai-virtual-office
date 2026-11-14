@@ -52,6 +52,9 @@ export function TitleCard({
   mode,
   onToggleMode,
   viewer,
+  officeName,
+  offices,
+  onSwitchOffice,
   runtime,
   onSignOut,
   onSettings,
@@ -60,6 +63,9 @@ export function TitleCard({
   mode: "overview" | "walk";
   onToggleMode: () => void;
   viewer: OfficeView["viewer"];
+  officeName: string;
+  offices: OfficeView["offices"];
+  onSwitchOffice: (officeId: string) => void;
   runtime: OfficeView["runtime"];
   onSignOut: () => void;
   onSettings: () => void;
@@ -90,7 +96,21 @@ export function TitleCard({
   }
   return (
     <div className="panel" id="title">
-      <h1>Virtual Office</h1>
+      <h1>{officeName}</h1>
+      {offices.length > 1 && (
+        <select
+          className="office-switch"
+          aria-label="Switch office"
+          value={offices.find((o) => o.active)?.officeId ?? ""}
+          onChange={(e) => onSwitchOffice(e.target.value)}
+        >
+          {offices.map((o) => (
+            <option key={o.officeId} value={o.officeId}>
+              {o.name}
+            </option>
+          ))}
+        </select>
+      )}
       <p>
         Agents and people hold seats, roles and permissions. Work moves between
         rooms, and stops where someone lacks access or information.
@@ -106,7 +126,7 @@ export function TitleCard({
       <div className="sim">
         {runtime === "model"
           ? "Agents answer through a live language model."
-          : "Every agent here is simulated. Their replies come from a fixed script."}
+          : "No model is connected. Agents here follow a fixed script."}
       </div>
       <button className="btn primary mode" onClick={onToggleMode}>
         Walk the office
@@ -118,15 +138,13 @@ export function TitleCard({
         </div>
         <div className="who-actions">
           {viewer.supervises && (
-            <>
-              <button className="btn" onClick={onInvite}>
-                Invite
-              </button>
-              <button className="btn" onClick={onSettings}>
-                Settings
-              </button>
-            </>
+            <button className="btn" onClick={onInvite}>
+              Invite
+            </button>
           )}
+          <button className="btn" onClick={onSettings}>
+            Settings
+          </button>
           <button className="btn" onClick={onSignOut}>
             Sign out
           </button>

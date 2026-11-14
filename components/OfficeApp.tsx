@@ -25,12 +25,15 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     feed,
     pending,
     notice,
+    noticeTone,
     dismissNotice,
     roomHighlight,
     participantAlert,
     dispatch,
     adminOp,
-    startOver,
+    officeOp,
+    saveAi,
+    testAi,
     tokenOperation,
     signOut,
   } = useOffice(initial);
@@ -102,6 +105,9 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           mode={mode}
           onToggleMode={() => setMode((m) => (m === "walk" ? "overview" : "walk"))}
           viewer={view.viewer}
+          officeName={office.name}
+          offices={view.offices}
+          onSwitchOffice={(officeId) => officeOp({ operation: "switch", officeId })}
           runtime={view.runtime}
           onSignOut={signOut}
           onSettings={() => setSettingsOpen(true)}
@@ -150,7 +156,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
       />
 
       {notice && (
-        <div className="notice" role="status" data-over-dialog={settingsOpen || inviting}>
+        <div className="notice" role="status" data-tone={noticeTone}>
           <span>{notice}</span>
           <button className="btn" onClick={dismissNotice}>
             Dismiss
@@ -159,13 +165,15 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
       )}
       {pending && <div className="working">Working...</div>}
       {inviting && <InviteDialog office={office} onClose={() => setInviting(false)} />}
-      {settingsOpen && view.viewer.supervises && (
+      {settingsOpen && (
         <Settings
           view={view}
           viewer={viewer}
           adminOp={adminOp}
           dispatch={dispatch}
-          startOver={startOver}
+          officeOp={officeOp}
+          saveAi={saveAi}
+          testAi={testAi}
           onClose={() => setSettingsOpen(false)}
         />
       )}

@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { CONFIGURABLE_STAGES, type AdminOp } from "../lib/admin";
+import { SUGGESTED_MODELS } from "../lib/aiModels";
 import { stageSpec, type Action } from "../lib/engine";
 import {
   ALL_SCOPES,
@@ -17,14 +18,19 @@ import {
 import type { OfficeView } from "../lib/view";
 import { KindBadge } from "./Panels";
 
-type Tab = "office" | "people" | "roles" | "rooms" | "rules";
-const TABS: { id: Tab; label: string }[] = [
-  { id: "office", label: "Office" },
+type Tab = "offices" | "office" | "rooms" | "people" | "roles" | "rules" | "ai";
+/** Tabs that change how an office is set up, for people who supervise it. */
+const SETUP_TABS: { id: Tab; label: string }[] = [
+  { id: "office", label: "This office" },
   { id: "rooms", label: "Rooms" },
   { id: "people", label: "People and agents" },
   { id: "roles", label: "Roles" },
   { id: "rules", label: "Access rules" },
+  { id: "ai", label: "AI provider" },
 ];
+
+type OfficeOp = { operation: "create"; name: string } | { operation: "switch" | "remove"; officeId: string };
+type AiInput = { runtime: "scripted" | "model"; model: string; apiKey?: string; removeKey?: boolean };
 
 /** A button that asks for a second click before doing something drastic. */
 function ConfirmButton({ label, onConfirm }: { label: string; onConfirm: () => void }) {
@@ -89,25 +95,35 @@ const SIDES: { wall: Wall; label: string }[] = [
 ];
 
 /**
- * Where a supervisor sets the office up: its name, rooms, people, agents,
- * roles and access rules. Every change is checked and stored on the server.
+ * Settings. Everyone sees their offices here. People who supervise the office
+ * they are in also see the tabs that set it up: rooms, people and agents,
+ * roles, access rules and the AI provider. Every change is checked and stored
+ * on the server.
  */
 export function Settings({
   view,
   viewer,
   adminOp,
   dispatch,
-  startOver,
+  officeOp,
+  saveAi,
+  testAi,
   onClose,
 }: {
   view: OfficeView;
   viewer: Participant;
   adminOp: (op: AdminOp) => void;
   dispatch: (action: Action) => void;
-  startOver: (kind: "empty" | "demo") => void;
+  officeOp: (op: OfficeOp) => void;
+  saveAi: (input: AiInput) => void;
+  testAi: () => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<Tab>("office");
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "offices", label: "Offices" },
+    ...(view.viewer.supervises ? SETUP_TABS : []),
+  ];
+  const [tab, setTab] = useState<Tab>(view.viewer.supervises ? "office" : "offices");
   const office = view.office;
 
   return (
@@ -126,7 +142,7 @@ export function Settings({
           </button>
         </div>
         <div className="settings-tabs" role="tablist">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               role="tab"
@@ -140,11 +156,13 @@ export function Settings({
           ))}
         </div>
         <div className="settings-body">
-          {tab === "office" && <OfficeTab view={view} adminOp={adminOp} startOver={startOver} />}
+          {tab === "offices" && <OfficesTab view={view} officeOp={officeOp} />}
+          {tab === "office" && <OfficeTab view={view} adminOp={adminOp} officeOp={officeOp} />}
           {tab === "rooms" && <RoomsTab office={office} adminOp={adminOp} />}
           {tab === "people" && <PeopleTab office={office} viewer={viewer} adminOp={adminOp} />}
           {tab === "roles" && <RolesTab office={office} adminOp={adminOp} />}
           {tab === "rules" && <RulesTab office={office} dispatch={dispatch} />}
+          {tab === "ai" && view.ai && <AiTab ai={view.ai} isDemoOffice={view.isDemoOffice} saveAi={saveAi} testAi={testAi} />}
         </div>
       </div>
     </div>
@@ -153,14 +171,84 @@ export function Settings({
 
 // ---------------------------------------------------------------------------
 
+function OfficesTab({ view, officeOp }: { view: OfficeView; officeOp: (op: OfficeOp) => void }) {
+  const [name, setName] = useState("");
+  return (
+    <>
+      <Section
+        title="Your offices"
+        hint={`Signed in as ${view.account.displayName} (${view.account.email}). Each office is separate: its own rooms, people, work, rules and AI provider.`}
+      >
+        {view.offices.map((o) => (
+          <div key={o.officeId} className="entity">
+            <div className="entity-fields">
+              <span>
+                <strong>{o.name}</strong>
+                {o.active ? " · you are here" : ""}
+              </span>
+              <span className="entity-meta">
+                {o.isDemo ? "Shared demo office" : o.supervises ? "You supervise this office" : "You are a member"}
+              </span>
+            </div>
+            {!o.active && (
+              <button className="btn" onClick={() => officeOp({ operation: "switch", officeId: o.officeId })}>
+                Open
+              </button>
+            )}
+            {o.supervises && !o.isDemo && (
+              <ConfirmButton
+                label="Remove"
+                onConfirm={() => officeOp({ operation: "remove", officeId: o.officeId })}
+              />
+            )}
+          </div>
+        ))}
+      </Section>
+
+      <Section
+        title="Add a new office"
+        hint={
+          view.account.isDemo
+            ? "Demo access cannot add offices. Sign in with a password account to have offices of your own."
+            : "A new office starts empty: one room with you in it, no agents, no work and no rules."
+        }
+      >
+        <form
+          className="form-inline"
+          onSubmit={(e) => {
+            e.preventDefault();
+            officeOp({ operation: "create", name });
+          }}
+        >
+          <input
+            aria-label="New office name"
+            placeholder="Office name"
+            value={name}
+            maxLength={60}
+            onChange={(e) => setName(e.target.value)}
+            disabled={view.account.isDemo}
+            required
+          />
+          <button type="submit" className="btn primary" disabled={view.account.isDemo}>
+            Add a new office
+          </button>
+        </form>
+        <p className="hint">Removing an office deletes everything in it for everyone, and cannot be undone.</p>
+      </Section>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
 function OfficeTab({
   view,
   adminOp,
-  startOver,
+  officeOp,
 }: {
   view: OfficeView;
   adminOp: (op: AdminOp) => void;
-  startOver: (kind: "empty" | "demo") => void;
+  officeOp: (op: OfficeOp) => void;
 }) {
   const { office } = view;
   return (
@@ -194,26 +282,136 @@ function OfficeTab({
         ))}
       </Section>
 
-      <Section title="Agents">
-        <p className="hint">
-          {view.runtime === "model"
-            ? `Agents answer through a live language model (${view.agentModel}).`
-            : "Agents follow a fixed script. A live model is switched on in the server's configuration, where its API key is kept. The key is never entered here."}
-        </p>
-      </Section>
-
-      <Section
-        title="Start over"
-        hint="These cannot be undone. Your own sign-in is kept in every case."
-      >
+      <Section title="Danger zone" hint="These cannot be undone.">
         <div className="row-actions">
           <ConfirmButton label="Clear all work" onConfirm={() => adminOp({ type: "CLEAR_WORK" })} />
-          <ConfirmButton label="Start an empty office" onConfirm={() => startOver("empty")} />
-          <ConfirmButton label="Load the demo office" onConfirm={() => startOver("demo")} />
+          {!view.isDemoOffice && (
+            <ConfirmButton
+              label="Remove this office"
+              onConfirm={() => officeOp({ operation: "remove", officeId: office.id })}
+            />
+          )}
         </div>
         <p className="hint">
-          Clearing work removes tasks and messages and keeps rooms, people and roles. An empty
-          office has one room and you in it. The demo office is the seeded distributor.
+          Clearing work removes tasks and messages and keeps rooms, people and roles. Removing the
+          office deletes all of it, for everyone in it.
+        </p>
+      </Section>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+function AiTab({
+  ai,
+  isDemoOffice,
+  saveAi,
+  testAi,
+}: {
+  ai: NonNullable<OfficeView["ai"]>;
+  isDemoOffice: boolean;
+  saveAi: (input: AiInput) => void;
+  testAi: () => void;
+}) {
+  const [runtime, setRuntime] = useState(ai.runtime);
+  const [model, setModel] = useState(ai.model);
+  const [apiKey, setApiKey] = useState("");
+  const locked = !ai.editable;
+  const keyState = ai.keyUnreadable
+    ? "A key was stored but can no longer be read. Enter it again."
+    : ai.hasKey
+      ? `A key is stored, ending in ${ai.keyHint}.`
+      : "No key is stored.";
+
+  return (
+    <>
+      <Section
+        title="How the agents think"
+        hint={
+          isDemoOffice
+            ? "The demo office is shared with every visitor, so it always follows the fixed script and cannot hold an API key."
+            : locked
+              ? "Sign in with a password account to change this."
+              : "Each office has its own provider settings. With no model connected, agents only log their steps."
+        }
+      >
+        <form
+          className="form-grid"
+          onSubmit={(e) => {
+            e.preventDefault();
+            saveAi({ runtime, model, ...(apiKey ? { apiKey } : {}) });
+            setApiKey("");
+          }}
+        >
+          <fieldset className="scopes wide" disabled={locked}>
+            <legend>Agents answer from</legend>
+            <label className="check">
+              <input type="radio" name="runtime" checked={runtime === "scripted"} onChange={() => setRuntime("scripted")} />
+              No model (fixed script)
+            </label>
+            <label className="check">
+              <input type="radio" name="runtime" checked={runtime === "model"} onChange={() => setRuntime("model")} />
+              A live language model
+            </label>
+          </fieldset>
+          <label>
+            Provider
+            <select disabled={locked} value={ai.provider} onChange={() => undefined}>
+              <option value="anthropic">Anthropic</option>
+            </select>
+          </label>
+          <label>
+            Model
+            <input
+              list="suggested-models"
+              value={model}
+              maxLength={64}
+              disabled={locked}
+              onChange={(e) => setModel(e.target.value)}
+              required
+            />
+            <datalist id="suggested-models">
+              {SUGGESTED_MODELS.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+          </label>
+          <label className="wide">
+            API key
+            <input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={ai.hasKey ? "Leave empty to keep the stored key" : "Paste the provider's API key"}
+              value={apiKey}
+              disabled={locked}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+          </label>
+          <div className="wide row-actions">
+            <button type="submit" className="btn primary" disabled={locked}>
+              Save
+            </button>
+            <button type="button" className="btn" disabled={locked || !ai.hasKey} onClick={testAi}>
+              Test connection
+            </button>
+            {ai.hasKey && !locked && (
+              <ConfirmButton
+                label="Remove stored key"
+                onConfirm={() => saveAi({ runtime: "scripted", model, removeKey: true })}
+              />
+            )}
+          </div>
+        </form>
+        <p className="hint">
+          {keyState} The key is encrypted before it is stored, used only by the server when an agent
+          takes a step, and never sent back to this page. Testing checks the key and the model with
+          the provider and costs nothing.
+        </p>
+        <p className="hint">
+          A live agent is shown only the messages and room records it is allowed to read. One model
+          call is made each time work reaches an agent.
         </p>
       </Section>
     </>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 interface InviteDetails {
+  officeName: string;
   displayName: string;
   title: string;
   roleName: string;
@@ -46,8 +47,9 @@ export function InviteForm({ token, invite }: { token: string; invite: InviteDet
       <div className="login-card">
         <h1>Welcome, {invite.displayName}</h1>
         <p>
-          You have been invited to the office as {invite.title}, with the {invite.roleName} role
-          and a desk in {invite.roomName}. Choose how you will sign in.
+          You have been invited to {invite.officeName} as {invite.title}, with the{" "}
+          {invite.roleName} role and a desk in {invite.roomName}. Choose how you will sign in. If
+          you already have an account here, enter its email and password to join with it.
         </p>
         <form
           onSubmit={(e) => {
@@ -69,7 +71,6 @@ export function InviteForm({ token, invite }: { token: string; invite: InviteDet
             id="invite-password"
             type="password"
             autoComplete="new-password"
-            minLength={10}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required

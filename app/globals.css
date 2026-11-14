@@ -435,3 +435,21 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 .notice[data-over-dialog="true"] { z-index: 5; }
 .dialog-backdrop { z-index: 4; }
 .notice, .working { z-index: 5; }
+
+/* ---- offices ---- */
+#title .office-switch {
+  width: 100%; margin: 0 0 8px; font: inherit; font-size: 11.5px; color: #e8e6e1;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px; padding: 5px 7px;
+}
+#title .office-switch option { background: #1b1d23; }
+.settings select option { background: #1b1d23; color: #e8e6e1; }
+.settings fieldset.scopes:disabled { opacity: 0.55; }
+.settings input:disabled, .settings select:disabled { opacity: 0.55; cursor: not-allowed; }
+.notice[data-tone="info"] {
+  background: rgba(22, 34, 44, 0.96); color: #cfe3f3; border-color: rgba(110,169,217,0.5);
+}
+.settings .form-grid label.check {
+  flex-direction: row; align-items: center; gap: 6px;
+  font-size: 12px; text-transform: none; letter-spacing: 0; color: rgba(232,230,225,0.8);
+}
