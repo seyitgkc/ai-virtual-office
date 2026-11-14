@@ -9,7 +9,9 @@ import {
   type AgentStepResult,
 } from "../lib/engine";
 import { initialState } from "../lib/initialState";
-import { buildStepPrompt, toStepResult } from "../lib/server/modelRuntime";
+import { resolveAccess } from "../lib/model";
+import { contextOf } from "../lib/policy";
+import { buildStepPrompt, SYSTEM_PROMPT, toStepResult } from "../lib/server/modelRuntime";
 
 let failures = 0;
 function expect(label: string, actual: unknown, wanted: unknown): void {
@@ -109,6 +111,72 @@ async function main(): Promise<void> {
   expect("long text is clipped", cleaned.assumptions[0].assumed.length, 200);
   expect("needs for unknown or already readable rooms are dropped", cleaned.needs?.map((n) => n.room).join(","), "finance");
   expect("an empty output is no output", cleaned.output, undefined);
+
+  const wordy = toStepResult(
+    {
+      statusNote: "Done.",
+      questions: [
+        {
+          body: "Which one?",
+          toParticipantId: "p-dana",
+          blocking: true,
+          options: ["Send the delivery address plus zone and capacity requirements in one reply and I will draft the quote", "Short"],
+        },
+      ],
+      assumptions: [],
+      needs: [],
+      output: null,
+    },
+    vera,
+  );
+  const longOption = wordy.questions[0].options?.[0] ?? "";
+  expect("a long option is cut at a whole word", longOption.length <= 80 && longOption.endsWith("...") && !/\s\.\.\.$/.test(longOption), true);
+  expect("and never in the middle of one", "Send the delivery address plus zone and capacity requirements in one reply and I will draft the quote".startsWith(longOption.slice(0, -3) + " "), true);
+
+  console.log("\n-- the prompt is about the agent's own office --");
+  expect("the prompt names the office", buildStepPrompt(vera).startsWith(`Office: ${initialState.office.name}.`), true);
+  expect("the standing instructions name no line of business", /HVAC|distributor/i.test(SYSTEM_PROMPT), false);
+  const bare = buildStepPrompt({ ...vera, surroundings: { ...vera.surroundings, rooms: vera.surroundings.rooms.map((r) => ({ ...r, id: `other-${r.id}` })) } });
+  expect("rooms with no records say so", bare.includes("(none: the rooms you can read hold no records)"), true);
+
+  console.log("\n-- a halt at review ends in a decision --");
+  const ledgerPerson = initialState.office.participants.find((p) => p.id === "p-ledger")!;
+  const closedRoom = initialState.office.floorplan.rooms.find(
+    (r) => resolveAccess(ledgerPerson, r.id, "read", contextOf(initialState.office, initialState.now)).effect === "deny",
+  )!;
+  const reviewer = (answer: AgentStepResult) =>
+    new Recorder((input) => (input.stage === "review" ? answer : { questions: [], assumptions: [] }));
+  const toReview = async (runtime: Recorder) => {
+    let at = (await reduce(initialState, { type: "SUBMIT_REQUEST", title: "Order 4700", detail: "One head.", requestedById: "p-dana" }, runtime)).state;
+    const id = at.office.tasks.at(-1)!.id;
+    for (let i = 0; i < 3; i++) at = (await reduce(at, { type: "ADVANCE", taskId: id }, runtime)).state;
+    return { at, id };
+  };
+
+  const asking = reviewer({ questions: [{ body: "Approve at list price?", toParticipantId: "p-dana", blocking: true }], assumptions: [] });
+  let review = await toReview(asking);
+  const reviewTask = () => review.at.office.tasks.find((t) => t.id === review.id)!;
+  expect("a question at review halts the task", `${reviewTask().stage}/${reviewTask().status}`, "review/blocked_question");
+  const asked = review.at.office.messages.findLast((m) => m.kind === "question" && m.taskId === review.id)!;
+  review.at = (await reduce(review.at, { type: "ANSWER_QUESTION", questionId: asked.id, answeredById: "p-dana", body: "Yes" }, asking)).state;
+  expect("answering it leaves the task waiting for a decision", reviewTask().status, "in_review");
+  review.at = (await reduce(review.at, { type: "DECIDE", taskId: review.id, byId: "p-dana", verdict: "approved" }, asking)).state;
+  expect("which a person can then give", reviewTask().status, "completed");
+
+  const needing = reviewer({ questions: [], assumptions: [], needs: [{ room: closedRoom.id, scope: "read", purpose: "The stock count for this order." }] });
+  review = await toReview(needing);
+  expect("a missing permission at review halts the task", `${reviewTask().stage}/${reviewTask().status}`, "review/blocked_permission");
+  const wall = review.at.office.messages.findLast((m) => m.kind === "escalation" && m.taskId === review.id)!;
+  expect("the escalation names the room", wall.body.includes(`access to ${closedRoom.name}.`), true);
+  expect("and reads cleanly", wall.body.includes(".. ") || wall.body.includes(closedRoom.id + "."), false);
+  const granted = await reduce(
+    review.at,
+    { type: "GRANT_ACCESS", participantId: "p-ledger", room: closedRoom.id, scopes: ["read"], effect: "allow", reason: "For this review", grantedBy: "p-dana", expiresOnTaskId: review.id },
+    needing,
+  );
+  review.at = granted.state;
+  expect("the grant leaves the task waiting for a decision", reviewTask().status, "in_review");
+  expect("and the note says so", granted.notes.some((n) => n.includes("It is ready for a decision.")), true);
 
   console.log(`\n${failures === 0 ? "all agent checks passed" : failures + " FAILED"}\n`);
   process.exit(failures === 0 ? 0 : 1);

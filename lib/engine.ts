@@ -37,6 +37,7 @@ import {
   type RoomId,
   type Task,
   type TaskId,
+  type TaskStatus,
   type WorkflowStage,
 } from "./model";
 
@@ -74,6 +75,13 @@ export const stageSpec = (stage: WorkflowStage): StageSpec => {
   return found;
 };
 
+/**
+ * The status of open, unblocked work at a stage. At a stage a person must
+ * close, that is waiting for their decision. Anywhere else it is in progress.
+ */
+const openStatus = (stage: WorkflowStage): TaskStatus =>
+  PIPELINE.find((s) => s.stage === stage)?.humanGate ? "in_review" : "in_progress";
+
 export const nextStage = (stage: WorkflowStage): WorkflowStage | null => {
   const i = PIPELINE.findIndex((s) => s.stage === stage);
   return i >= 0 && i < PIPELINE.length - 1 ? PIPELINE[i + 1].stage : null;
@@ -85,6 +93,8 @@ export const nextStage = (stage: WorkflowStage): WorkflowStage | null => {
 
 /** What an agent knows about the office around it when it takes a step. */
 export interface AgentSurroundings {
+  /** The name of the office the agent works in. */
+  officeName: string;
   /** Every room, and whether this agent may read what is said and kept there. */
   rooms: { id: RoomId; name: string; purpose: string; readable: boolean }[];
   /** People the agent can address a question to. */
@@ -509,7 +519,7 @@ export async function reduce(
         openQuestionIds: stillOpen,
         status:
           stillOpen.length === 0 && task.status === "blocked_question"
-            ? "in_progress"
+            ? openStatus(task.stage)
             : task.status,
         history: [
           ...task.history,
@@ -608,7 +618,7 @@ export async function reduce(
         ...replaceTask(office, {
           ...task,
           ownerId: to.id,
-          status: task.status === "blocked_permission" ? "in_progress" : task.status,
+          status: task.status === "blocked_permission" ? openStatus(task.stage) : task.status,
           history: [
             ...task.history,
             { at: now, summary: `Reassigned to ${to.displayName}`, messageId: handoff.id, decision },
@@ -777,13 +787,17 @@ function retryBlocked(
 
     next = replaceTask(next, {
       ...task,
-      status: "in_progress",
+      status: openStatus(task.stage),
       history: [
         ...task.history,
         { at: now, summary: `Unblocked by ${cause}`, decision: verdict },
       ],
     });
-    notes.push(`${task.id} unblocked by ${cause}. Advance it to continue.`);
+    notes.push(
+      `${task.id} unblocked by ${cause}. ${
+        openStatus(task.stage) === "in_review" ? "It is ready for a decision." : "Advance it to continue."
+      }`,
+    );
   }
 
   return { office: next, notes };
@@ -816,6 +830,7 @@ async function runAgent(
     .filter((m) => m.taskId === task.id && canRead(m, participant, ctx))
     .sort((a, b) => a.at - b.at);
   const surroundings: AgentSurroundings = {
+    officeName: office.name,
     rooms: office.floorplan.rooms.map((room) => ({
       id: room.id,
       name: room.name,
@@ -909,12 +924,19 @@ async function runAgent(
     const supervisor =
       office.participants.find((p) => p.kind === "human" && roleMay(office.roles[p.roleId], "manage_access")) ??
       office.participants.find((p) => p.kind === "human");
+    // Someone to hand the work to must hold the access and be able to carry
+    // the task into its next room, which is what a reassignment requires.
+    const onward = nextStage(task.stage);
+    const carryRoom = onward ? (roomForStage(office, onward) ?? task.roomId) : task.roomId;
     const alternatives = office.participants.filter(
       (p) =>
         p.id !== participant.id &&
         p.kind === "agent" &&
-        resolveAccess(p, need.room, need.scope, ctx).effect === "allow",
+        resolveAccess(p, need.room, need.scope, ctx).effect === "allow" &&
+        canOwnWorkIn(p, carryRoom, ctx).effect === "allow",
     );
+    const neededRoom = roomName(office, need.room);
+    const purpose = need.purpose.trim().replace(/[.\s]+$/, "");
 
     const escalation: Message = {
       id: nextId("m"),
@@ -925,11 +947,11 @@ async function runAgent(
       roomId: task.roomId,
       at: now,
       body:
-        `I need ${need.scope} access to ${need.room}. Purpose: ${need.purpose}. ` +
+        `I need ${need.scope} access to ${neededRoom}. Purpose: ${purpose}. ` +
         `${verdict.explanation}. ` +
         (alternatives.length > 0
           ? `Grant me scoped access, or hand this to ${alternatives.map((p) => p.displayName).join(" / ")}.`
-          : `Grant me scoped access; no other agent holds it either.`),
+          : `Grant me scoped access. No other agent who could take this over holds it.`),
       cause: "permission",
       deniedDecision: verdict,
     };
@@ -941,14 +963,14 @@ async function runAgent(
         ...updated.history,
         {
           at: now,
-          summary: `Blocked: needs ${need.scope} on ${need.room}`,
+          summary: `Blocked: needs ${need.scope} on ${neededRoom}`,
           messageId: escalation.id,
           decision: verdict,
         },
       ],
     };
     notes.push(
-      `${participant.displayName} blocked on ${need.scope} access to ${need.room}. ${verdict.explanation}`,
+      `${participant.displayName} blocked on ${need.scope} access to ${neededRoom}. ${verdict.explanation}`,
     );
     wallHit = true;
     break;
