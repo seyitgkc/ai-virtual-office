@@ -60,30 +60,39 @@ export function useOffice(initial: OfficeView) {
   }, []);
 
   // Requests run one at a time so that views arrive in the order they were made.
-  const queue = useRef<Promise<void>>(Promise.resolve());
-  const send = useCallback((url: string, body: unknown, onData?: (data: unknown) => void) => {
-    queue.current = queue.current.then(async () => {
-      setPending(true);
-      try {
-        const { status, data } = await request(url, body);
-        if (status === 401) {
-          window.location.assign("/login");
-          return;
+  // Each resolves to whether the server accepted it, so a form can keep what
+  // was typed when it did not.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const send = useCallback(
+    (url: string, body: unknown, onData?: (data: unknown) => void): Promise<boolean> => {
+      const sent = queue.current.then(async () => {
+        setPending(true);
+        try {
+          const { status, data } = await request(url, body);
+          if (status === 401) {
+            window.location.assign("/login");
+            return false;
+          }
+          if (status >= 400) {
+            setNotice(errorOf(data));
+            return false;
+          }
+          setNotice(null);
+          if (onData) onData(data);
+          else setView(data as OfficeView);
+          return true;
+        } catch {
+          setNotice("The office server could not be reached.");
+          return false;
+        } finally {
+          setPending(false);
         }
-        if (status >= 400) {
-          setNotice(errorOf(data));
-          return;
-        }
-        setNotice(null);
-        if (onData) onData(data);
-        else setView(data as OfficeView);
-      } catch {
-        setNotice("The office server could not be reached.");
-      } finally {
-        setPending(false);
-      }
-    });
-  }, [setNotice]);
+      });
+      queue.current = sent;
+      return sent;
+    },
+    [setNotice],
+  );
 
   const dispatch = useCallback(
     (action: Action) => send("/api/office/actions", { action }),

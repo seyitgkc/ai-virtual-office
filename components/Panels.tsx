@@ -236,7 +236,8 @@ export function TaskList({
   tasks: Task[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onSubmit: (title: string, detail: string) => void;
+  /** Resolves to whether the request was accepted. */
+  onSubmit: (title: string, detail: string) => Promise<boolean>;
   /** Why this viewer cannot file a request, or null when they can. */
   submitBlocked: string | null;
 }) {
@@ -254,8 +255,10 @@ export function TaskList({
             sample={isDemoOffice}
             intakeRoomName={intakeRoomName}
             onSubmit={(title, detail) => {
-              onSubmit(title, detail);
-              setComposing(false);
+              // The form stays open with its text when the request is refused.
+              void onSubmit(title, detail).then((accepted) => {
+                if (accepted) setComposing(false);
+              });
             }}
             onCancel={() => setComposing(false)}
           />

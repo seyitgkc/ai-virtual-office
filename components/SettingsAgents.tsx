@@ -100,7 +100,7 @@ export function PeopleTab({
   office: Office;
   viewer: Participant;
   providers: ProviderView[];
-  adminOp: (op: AdminOp) => void;
+  adminOp: (op: AdminOp) => Promise<boolean>;
 }) {
   const roles = Object.values(office.roles);
   const rooms = office.floorplan.rooms;
@@ -231,7 +231,7 @@ function AddAgent({
   office: Office;
   agentRoles: Office["roles"][string][];
   providers: ProviderView[];
-  adminOp: (op: AdminOp) => void;
+  adminOp: (op: AdminOp) => Promise<boolean>;
 }) {
   const rooms = office.floorplan.rooms;
   const [displayName, setDisplayName] = useState("");
@@ -255,7 +255,7 @@ function AddAgent({
         className="form-grid"
         onSubmit={(e) => {
           e.preventDefault();
-          adminOp({
+          void adminOp({
             type: "ADD_AGENT",
             displayName,
             title,
@@ -265,11 +265,13 @@ function AddAgent({
             agentType,
             providerId: agentType === "ai" ? provider?.id ?? null : null,
             model: agentType === "ai" && model.trim() ? model.trim() : null,
+          }).then((added) => {
+            if (!added) return;
+            setDisplayName("");
+            setTitle("");
+            setCapabilities("");
+            setModel("");
           });
-          setDisplayName("");
-          setTitle("");
-          setCapabilities("");
-          setModel("");
         }}
       >
         <label>
@@ -355,7 +357,7 @@ function AgentEditor({
   office: Office;
   agent: Participant;
   providers: ProviderView[];
-  adminOp: (op: AdminOp) => void;
+  adminOp: (op: AdminOp) => Promise<boolean>;
 }) {
   const agentType: AgentType = agent.agentType === "ai" ? "ai" : "playbook";
   const provider = providers.find((p) => p.id === agent.providerId);
@@ -787,7 +789,7 @@ export function ProvidersTab({
   providerOp,
 }: {
   view: OfficeView;
-  providerOp: (op: ProviderOp) => void;
+  providerOp: (op: ProviderOp) => Promise<boolean>;
 }) {
   const { providers } = view;
   const [form, setForm] = useState(EMPTY_FORM);
@@ -898,7 +900,7 @@ export function ProvidersTab({
           className="form-grid"
           onSubmit={(e) => {
             e.preventDefault();
-            providerOp({
+            void providerOp({
               operation: "save",
               ...(editing ? { id: editing.id } : {}),
               name: form.name,
@@ -906,8 +908,9 @@ export function ProvidersTab({
               baseUrl: form.baseUrl,
               defaultModel: form.defaultModel,
               ...(form.apiKey ? { apiKey: form.apiKey } : {}),
+            }).then((saved) => {
+              if (saved) setForm(EMPTY_FORM);
             });
-            setForm(EMPTY_FORM);
           }}
         >
           <label>

@@ -47,10 +47,10 @@ export function Settings({
 }: {
   view: OfficeView;
   viewer: Participant;
-  adminOp: (op: AdminOp) => void;
-  dispatch: (action: Action) => void;
+  adminOp: (op: AdminOp) => Promise<boolean>;
+  dispatch: (action: Action) => Promise<boolean>;
   officeOp: (op: OfficeOp) => void;
-  providerOp: (op: ProviderOp) => void;
+  providerOp: (op: ProviderOp) => Promise<boolean>;
   onClose: () => void;
 }) {
   const own = view.viewer.permissions;
@@ -204,7 +204,7 @@ function OfficeTab({
 
 // ---------------------------------------------------------------------------
 
-function RoomsTab({ office, adminOp }: { office: Office; adminOp: (op: AdminOp) => void }) {
+function RoomsTab({ office, adminOp }: { office: Office; adminOp: (op: AdminOp) => Promise<boolean> }) {
   const rooms = office.floorplan.rooms;
   const [name, setName] = useState("");
   const [purpose, setPurpose] = useState("");
@@ -276,9 +276,11 @@ function RoomsTab({ office, adminOp }: { office: Office; adminOp: (op: AdminOp) 
           className="form-grid"
           onSubmit={(e) => {
             e.preventDefault();
-            adminOp({ type: "ADD_ROOM", name, purpose, width, depth, attachTo: target, side });
-            setName("");
-            setPurpose("");
+            void adminOp({ type: "ADD_ROOM", name, purpose, width, depth, attachTo: target, side }).then((added) => {
+              if (!added) return;
+              setName("");
+              setPurpose("");
+            });
           }}
         >
           <label>

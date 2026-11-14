@@ -33,7 +33,7 @@ export function RolesTab({
   office: Office;
   /** The viewer's permissions. A permission can only be given by someone who holds it. */
   ownPermissions: Permission[];
-  adminOp: (op: AdminOp) => void;
+  adminOp: (op: AdminOp) => Promise<boolean>;
 }) {
   const roles = Object.values(office.roles);
   const [selected, setSelected] = useState(roles[0]?.id ?? "");
@@ -93,9 +93,11 @@ export function RolesTab({
           className="form-inline add-row"
           onSubmit={(e) => {
             e.preventDefault();
-            adminOp({ type: "ADD_ROLE", name, description });
-            setName("");
-            setDescription("");
+            void adminOp({ type: "ADD_ROLE", name, description }).then((added) => {
+              if (!added) return;
+              setName("");
+              setDescription("");
+            });
           }}
         >
           <input
@@ -207,7 +209,13 @@ export function RolesTab({
 // ---------------------------------------------------------------------------
 
 /** Rules attached to one person or agent, which outrank their role. */
-export function RulesTab({ office, dispatch }: { office: Office; dispatch: (action: Action) => void }) {
+export function RulesTab({
+  office,
+  dispatch,
+}: {
+  office: Office;
+  dispatch: (action: Action) => Promise<boolean>;
+}) {
   const rooms = office.floorplan.rooms;
   const [participantId, setParticipantId] = useState(office.participants[0]?.id ?? "");
   const [cells, setCells] = useState<Record<string, CellEffect>>({});
@@ -219,16 +227,23 @@ export function RulesTab({ office, dispatch }: { office: Office; dispatch: (acti
 
   const addRules = () => {
     // One rule per room and effect, each carrying the scopes ticked for it.
+    const sent: Promise<boolean>[] = [];
     for (const row of roomRows(office)) {
       for (const effect of ["allow", "deny"] as const) {
         const scopes = ALL_SCOPES.filter((scope) => cells[`${row.id}|${scope}`] === effect);
         if (scopes.length > 0) {
-          dispatch({ type: "GRANT_ACCESS", participantId, room: row.id, scopes, effect, reason, grantedBy: "" });
+          sent.push(
+            dispatch({ type: "GRANT_ACCESS", participantId, room: row.id, scopes, effect, reason, grantedBy: "" }),
+          );
         }
       }
     }
-    setCells({});
-    setReason("");
+    // The ticks and the reason stay when any of them was refused.
+    void Promise.all(sent).then((results) => {
+      if (!results.every(Boolean)) return;
+      setCells({});
+      setReason("");
+    });
   };
 
   return (
