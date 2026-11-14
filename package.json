@@ -8,7 +8,8 @@
     "start": "npx serve out",
     "check": "tsx scripts/check.ts",
     "scenario": "tsx scripts/scenario.ts",
-    "verify": "tsc --noEmit && tsx scripts/check.ts && tsx scripts/scenario.ts"
+    "verify": "tsc --noEmit && tsx scripts/check.ts && tsx scripts/scenario.ts && tsx scripts/store.ts",
+    "store": "tsx scripts/store.ts"
   },
   "dependencies": {
     "@react-three/drei": "10.7.9",
