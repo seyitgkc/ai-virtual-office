@@ -1,7 +1,7 @@
 /** Exercises the access model against the seed office. Run: npx tsx check.ts */
 import { resolveAccess, hasConflict, canRead, type IndividualRule } from "../lib/model";
 import { office, contextFor, byId } from "../lib/seed";
-import { entryPose, obstacles, planExtent, roomAt, stepWalker } from "../lib/geometry";
+import { entryPose, freeDeskSpot, obstacles, planExtent, roomAt, stepWalker } from "../lib/geometry";
 
 const ctx = contextFor(office);
 let failures = 0;
@@ -103,6 +103,19 @@ console.log("\n-- walking the plan --");
     const end = walk(from, dx, dz, 60);
     expect(label, roomAt(rooms, end.x, end.z)?.id, wanted);
   }
+}
+
+console.log("\n-- room for one more desk --");
+{
+  const plan = office.floorplan;
+  const spot = freeDeskSpot(plan, "finance");
+  expect("Finance has room for another desk", spot !== null, true);
+  expect("the new desk is inside Finance", spot ? roomAt(plan.rooms, spot.x, spot.z)?.id : null, "finance");
+  const nearest = Math.min(
+    ...plan.desks.filter((d) => d.roomId === "finance").map((d) => Math.hypot(d.position.x - spot!.x, d.position.z - spot!.z)),
+  );
+  expect("and clear of the desk already there", nearest >= 3, true);
+  expect("an unknown room has no spot", freeDeskSpot(plan, "vault"), null);
 }
 
 console.log(`\n${failures === 0 ? "all checks passed" : failures + " FAILED"}\n`);

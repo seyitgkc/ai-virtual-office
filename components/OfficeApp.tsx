@@ -8,6 +8,7 @@ import { entryPose } from "../lib/geometry";
 import type { OfficeView } from "../lib/view";
 import { Feed, Inspector, TaskList, TitleCard } from "./Panels";
 import { Minimap } from "./Minimap";
+import { InviteDialog } from "./InviteDialog";
 
 const Scene = dynamic(() => import("./Scene").then((m) => m.Scene), {
   ssr: false,
@@ -37,6 +38,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
   );
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
 
+  const [inviting, setInviting] = useState(false);
   const [mode, setMode] = useState<"overview" | "walk">("overview");
   const [walkRoomId, setWalkRoomId] = useState<string | null>(null);
   const walkPose = useRef(entryPose(office.floorplan.rooms));
@@ -100,6 +102,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           runtime={view.runtime}
           onSignOut={signOut}
           onRestore={restoreDemo}
+          onInvite={() => setInviting(true)}
         />
         <TaskList
           tasks={office.tasks}
@@ -152,6 +155,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         </div>
       )}
       {pending && <div className="working">Working...</div>}
+      {inviting && <InviteDialog office={office} onClose={() => setInviting(false)} />}
     </main>
   );
 }

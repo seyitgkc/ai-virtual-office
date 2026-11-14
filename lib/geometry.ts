@@ -288,3 +288,25 @@ const centreOf = (room: Room): { x: number; z: number } => ({
   x: room.bounds.x + room.bounds.w / 2,
   z: room.bounds.z + room.bounds.d / 2,
 });
+
+/**
+ * A place for one more desk in a room: clear of the walls, the doorways and
+ * the desks already there. Null when the room is full.
+ */
+export function freeDeskSpot(floorplan: Floorplan, roomId: string): { x: number; z: number } | null {
+  const room = floorplan.rooms.find((r) => r.id === roomId);
+  if (!room) return null;
+  const taken = floorplan.desks.filter((d) => d.roomId === roomId).map((d) => d.position);
+  const doors = room.doors.map((door) => doorCentre(room, door));
+  const margin = 1.8;
+  const b = room.bounds;
+
+  for (let z = b.z + margin; z <= b.z + b.d - margin; z += 0.5) {
+    for (let x = b.x + margin; x <= b.x + b.w - margin; x += 0.5) {
+      const clearOfDesks = taken.every((t) => Math.hypot(t.x - x, t.z - z) >= 3);
+      const clearOfDoors = doors.every((d) => Math.hypot(d.cx - x, d.cz - z) >= 2.2);
+      if (clearOfDesks && clearOfDoors) return { x, z };
+    }
+  }
+  return null;
+}

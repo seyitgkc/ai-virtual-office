@@ -55,6 +55,7 @@ export function TitleCard({
   runtime,
   onSignOut,
   onRestore,
+  onInvite,
 }: {
   mode: "overview" | "walk";
   onToggleMode: () => void;
@@ -62,6 +63,7 @@ export function TitleCard({
   runtime: OfficeView["runtime"];
   onSignOut: () => void;
   onRestore: () => void;
+  onInvite: () => void;
 }) {
   if (mode === "walk") {
     return (
@@ -116,9 +118,14 @@ export function TitleCard({
         </div>
         <div className="who-actions">
           {viewer.supervises && (
-            <button className="btn" onClick={onRestore} title="Put the seeded tasks and rules back">
-              Restore demo
-            </button>
+            <>
+              <button className="btn" onClick={onInvite}>
+                Invite
+              </button>
+              <button className="btn" onClick={onRestore} title="Put the seeded tasks and rules back">
+                Restore demo
+              </button>
+            </>
           )}
           <button className="btn" onClick={onSignOut}>
             Sign out
