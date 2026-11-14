@@ -1,80 +1,116 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
-import { reduce, ScriptedRuntime, type Action, type EngineState } from "./engine";
-import { office as seedOffice } from "./seed";
-import type { Task } from "./model";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Action } from "./engine";
+import type { OfficeView } from "./view";
 
-export interface FeedEntry {
-  id: number;
-  at: number;
-  text: string;
+export type { FeedEntry } from "./view";
+
+type Halt = "none" | "question" | "permission";
+
+/** How often the office is re-read, so that other people's actions show up. */
+const REFRESH_MS = 5000;
+
+async function request(url: string, body?: unknown): Promise<{ status: number; data: unknown }> {
+  const response = await fetch(url, {
+    method: body === undefined ? "GET" : "POST",
+    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: "no-store",
+  });
+  const data: unknown = await response.json().catch(() => null);
+  return { status: response.status, data };
 }
 
-interface UiState {
-  engine: EngineState;
-  feed: FeedEntry[];
-  feedSeq: number;
-}
+const errorOf = (data: unknown): string =>
+  data && typeof data === "object" && "error" in data && typeof data.error === "string"
+    ? data.error
+    : "The server did not accept that.";
 
-const initial: UiState = {
-  engine: {
-    office: seedOffice,
-    now: Date.parse("2026-11-20T09:35:00-05:00"),
-    // Above every id in the seed, so generated ids can never collide with it.
-    seq: 4000,
-    clockStepMinutes: 3,
-  },
-  feed: [
-    {
-      id: 0,
-      at: Date.parse("2026-11-20T09:35:00-05:00"),
-      text: "Office loaded. Three tasks in flight.",
-    },
-  ],
-  feedSeq: 1,
-};
-
-const runtime = new ScriptedRuntime();
-
-async function uiReduce(state: UiState, action: Action): Promise<UiState> {
-  const result = await reduce(state.engine, action, runtime);
-  let seq = state.feedSeq;
-  const entries = result.notes.map((text) => ({
-    id: seq++,
-    at: result.state.now,
-    text,
-  }));
-  return {
-    engine: result.state,
-    feed: [...entries.reverse(), ...state.feed].slice(0, 60),
-    feedSeq: seq,
-  };
-}
-
-export function useOffice() {
-  const [state, setState] = useState(initial);
+/**
+ * The browser's view of the office. State lives on the server: every action
+ * is sent there, checked against the signed-in person's permissions, applied,
+ * stored, and the resulting view comes back.
+ */
+export function useOffice(initial: OfficeView) {
+  const [view, setView] = useState(initial);
   const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  // Actions run one at a time, each against the result of the one before it,
-  // because a transition may wait on an agent.
-  const latest = useRef(initial);
+  // Requests run one at a time so that views arrive in the order they were made.
   const queue = useRef<Promise<void>>(Promise.resolve());
-  const dispatch = useCallback((action: Action) => {
+  const send = useCallback((url: string, body: unknown, onData?: (data: unknown) => void) => {
     queue.current = queue.current.then(async () => {
       setPending(true);
       try {
-        latest.current = await uiReduce(latest.current, action);
-        setState(latest.current);
+        const { status, data } = await request(url, body);
+        if (status === 401) {
+          window.location.assign("/login");
+          return;
+        }
+        if (status >= 400) {
+          setNotice(errorOf(data));
+          return;
+        }
+        setNotice(null);
+        if (onData) onData(data);
+        else setView(data as OfficeView);
+      } catch {
+        setNotice("The office server could not be reached.");
       } finally {
         setPending(false);
       }
     });
   }, []);
-  const office = state.engine.office;
 
-  const roomOfTask = useMemo(() => {
-    const map: Record<string, "none" | "question" | "permission"> = {};
+  const dispatch = useCallback(
+    (action: Action) => send("/api/office/actions", { action }),
+    [send],
+  );
+  const restoreDemo = useCallback(() => send("/api/office/restore", {}), [send]);
+
+  const tokenOperation = useCallback(
+    (tokenId: string, operation: "reveal" | "revoke") =>
+      send(`/api/tokens/${tokenId}`, { operation }, (data) => {
+        if (operation === "revoke") {
+          setView(data as OfficeView);
+          return;
+        }
+        const token = (data as { token?: string }).token ?? "";
+        navigator.clipboard
+          .writeText(token)
+          .then(() => setNotice("Token copied. Send it as a Bearer token to /api/rooms/<room>/thread."))
+          .catch(() => setNotice(`Token: ${token}`));
+      }),
+    [send],
+  );
+
+  const signOut = useCallback(async () => {
+    await request("/api/auth/logout", {});
+    window.location.assign("/login");
+  }, []);
+
+  // Pick up changes made by other people.
+  const busy = useRef(false);
+  busy.current = pending;
+  useEffect(() => {
+    const timer = window.setInterval(async () => {
+      if (busy.current || document.hidden) return;
+      try {
+        const { status, data } = await request("/api/office");
+        if (status === 401) window.location.assign("/login");
+        else if (status === 200 && !busy.current) setView(data as OfficeView);
+      } catch {
+        // Offline for a moment. The next tick tries again.
+      }
+    }, REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const { office } = view;
+
+  const roomHalts = useMemo(() => {
+    const map: Record<string, Halt> = {};
     for (const t of office.tasks) {
       if (t.status === "blocked_permission") map[t.roomId] = "permission";
       else if (t.status === "blocked_question" && map[t.roomId] !== "permission") {
@@ -84,8 +120,8 @@ export function useOffice() {
     return map;
   }, [office.tasks]);
 
-  const alertOfParticipant = useMemo(() => {
-    const map: Record<string, "none" | "question" | "permission"> = {};
+  const ownerHalts = useMemo(() => {
+    const map: Record<string, Halt> = {};
     for (const t of office.tasks) {
       if (!t.ownerId) continue;
       if (t.status === "blocked_permission") map[t.ownerId] = "permission";
@@ -96,19 +132,19 @@ export function useOffice() {
     return map;
   }, [office.tasks]);
 
-  const openTasks = useMemo(
-    () => office.tasks.filter((t: Task) => t.closedAt === null),
-    [office.tasks],
-  );
-
   return {
+    view,
     office,
-    now: state.engine.now,
-    feed: state.feed,
-    openTasks,
-    roomHighlight: (roomId: string) => roomOfTask[roomId] ?? "none",
-    participantAlert: (id: string) => alertOfParticipant[id] ?? "none",
+    now: view.now,
+    feed: view.feed,
     pending,
+    notice,
+    dismissNotice: useCallback(() => setNotice(null), []),
+    roomHighlight: useCallback((roomId: string): Halt => roomHalts[roomId] ?? "none", [roomHalts]),
+    participantAlert: useCallback((id: string): Halt => ownerHalts[id] ?? "none", [ownerHalts]),
     dispatch,
+    restoreDemo,
+    tokenOperation,
+    signOut,
   };
 }

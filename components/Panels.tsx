@@ -16,7 +16,8 @@ import {
   type TaskStatus,
 } from "../lib/model";
 import { eligibleOwners, nextStage, stageSpec, type Action } from "../lib/engine";
-import type { FeedEntry } from "../lib/useOffice";
+import { authorize, supervises } from "../lib/policy";
+import type { FeedEntry, OfficeView, TokenView } from "../lib/view";
 
 const STATUS: Record<TaskStatus, { label: string; accent: string }> = {
   requested: { label: "requested", accent: "#8a93a0" },
@@ -50,9 +51,17 @@ export function KindBadge({ kind }: { kind: Participant["kind"] }) {
 export function TitleCard({
   mode,
   onToggleMode,
+  viewer,
+  runtime,
+  onSignOut,
+  onRestore,
 }: {
   mode: "overview" | "walk";
   onToggleMode: () => void;
+  viewer: OfficeView["viewer"];
+  runtime: OfficeView["runtime"];
+  onSignOut: () => void;
+  onRestore: () => void;
 }) {
   if (mode === "walk") {
     return (
@@ -92,10 +101,30 @@ export function TitleCard({
           <KindBadge kind="agent" /> faceted, with a ring
         </span>
       </div>
-      <div className="sim">Every agent here is simulated. Their replies come from a fixed script.</div>
+      <div className="sim">
+        {runtime === "model"
+          ? "Agents answer through a live language model."
+          : "Every agent here is simulated. Their replies come from a fixed script."}
+      </div>
       <button className="btn primary mode" onClick={onToggleMode}>
         Walk the office
       </button>
+      <div className="who">
+        <div>
+          Signed in as <strong>{viewer.displayName}</strong>
+          <span>{viewer.title}</span>
+        </div>
+        <div className="who-actions">
+          {viewer.supervises && (
+            <button className="btn" onClick={onRestore} title="Put the seeded tasks and rules back">
+              Restore demo
+            </button>
+          )}
+          <button className="btn" onClick={onSignOut}>
+            Sign out
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -159,11 +188,14 @@ export function TaskList({
   selectedId,
   onSelect,
   onSubmit,
+  submitBlocked,
 }: {
   tasks: Task[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onSubmit: (title: string, detail: string) => void;
+  /** Why this viewer cannot file a request, or null when they can. */
+  submitBlocked: string | null;
 }) {
   const [composing, setComposing] = useState(false);
 
@@ -183,7 +215,12 @@ export function TaskList({
             onCancel={() => setComposing(false)}
           />
         ) : (
-          <button className="btn new-request" onClick={() => setComposing(true)}>
+          <button
+            className="btn new-request"
+            disabled={submitBlocked !== null}
+            title={submitBlocked ?? undefined}
+            onClick={() => setComposing(true)}
+          >
             New request
           </button>
         )}
@@ -235,14 +272,25 @@ export function Inspector({
   ctx,
   task,
   participant,
+  viewer,
+  hiddenMessages,
+  tokens,
+  accounts,
   dispatch,
+  onTokenOperation,
   onClear,
 }: {
   office: Office;
   ctx: AccessContext;
   task: Task | null;
   participant: Participant | null;
+  /** The signed-in person. Decides which controls are live. */
+  viewer: Participant;
+  hiddenMessages: OfficeView["hiddenMessages"];
+  tokens: TokenView[];
+  accounts: OfficeView["accounts"];
   dispatch: (a: Action) => void;
+  onTokenOperation: (tokenId: string, operation: "reveal" | "revoke") => void;
   onClear: () => void;
 }) {
   if (task) {
@@ -251,6 +299,8 @@ export function Inspector({
         office={office}
         ctx={ctx}
         task={task}
+        viewer={viewer}
+        hidden={hiddenMessages[task.id] ?? 0}
         dispatch={dispatch}
         onClear={onClear}
       />
@@ -262,6 +312,10 @@ export function Inspector({
         office={office}
         ctx={ctx}
         participant={participant}
+        viewer={viewer}
+        tokens={tokens.filter((t) => t.participantId === participant.id)}
+        account={accounts.find((a) => a.participantId === participant.id) ?? null}
+        onTokenOperation={onTokenOperation}
         onClear={onClear}
       />
     );
@@ -286,12 +340,17 @@ function TaskInspector({
   office,
   ctx,
   task,
+  viewer,
+  hidden,
   dispatch,
   onClear,
 }: {
   office: Office;
   ctx: AccessContext;
   task: Task;
+  viewer: Participant;
+  /** Messages on this task the viewer is not allowed to read. */
+  hidden: number;
   dispatch: (a: Action) => void;
   onClear: () => void;
 }) {
@@ -322,9 +381,11 @@ function TaskInspector({
     (m): m is AssumptionMessage => m.kind === "assumption",
   );
 
-  const supervisor =
-    office.participants.find((p) => p.roleId === "supervisor") ??
-    office.participants[0];
+  // Actions are sent as the signed-in person. The server stamps the real
+  // actor, so these ids only keep the action well formed.
+  const supervisor = viewer;
+  const maySupervise = supervises(office, viewer);
+  const mayAdvance = authorize(office, ctx, viewer, { type: "ADVANCE", taskId: task.id });
 
   const target = nextStage(task.stage);
   const targetRoom = target ? (stageSpec(target).roomId ?? task.roomId) : null;
@@ -336,8 +397,20 @@ function TaskInspector({
 
   const owner = office.participants.find((p) => p.id === task.ownerId) ?? null;
 
+  const mayAnswer = openQuestion
+    ? authorize(office, ctx, viewer, {
+        type: "ANSWER_QUESTION",
+        questionId: openQuestion.id,
+        answeredById: viewer.id,
+        body: "-",
+      }).allowed
+    : false;
+  const needsSupervisor =
+    !maySupervise && (task.status === "blocked_permission" || task.status === "in_review");
+
   const s = STATUS[task.status];
   const canAdvance =
+    mayAdvance.allowed &&
     task.closedAt === null &&
     task.status !== "blocked_question" &&
     task.status !== "blocked_permission" &&
@@ -385,7 +458,7 @@ function TaskInspector({
           <h3>Your move</h3>
 
           {openQuestion && (
-            <>
+            <fieldset className="moves" disabled={!mayAnswer}>
               <div className="note q">
                 <div className="meta">{name(openQuestion.fromId as string)} is waiting</div>
                 {openQuestion.body}
@@ -407,11 +480,11 @@ function TaskInspector({
                   {opt}
                 </button>
               ))}
-            </>
+            </fieldset>
           )}
 
           {task.status === "blocked_permission" && escalation?.deniedDecision && (
-            <>
+            <fieldset className="moves" disabled={!maySupervise}>
               <div className="note esc">
                 <div className="meta">{name(escalation.fromId as string)} is blocked</div>
                 {escalation.body}
@@ -485,11 +558,11 @@ function TaskInspector({
                   Hand to {p.displayName}
                 </button>
               ))}
-            </>
+            </fieldset>
           )}
 
           {task.status === "in_review" && (
-            <>
+            <fieldset className="moves" disabled={!maySupervise}>
               <button
                 className="btn primary"
                 onClick={() =>
@@ -516,16 +589,24 @@ function TaskInspector({
               >
                 Reject
               </button>
-            </>
+            </fieldset>
           )}
 
           <button
             className="btn"
             disabled={!canAdvance}
+            title={mayAdvance.allowed ? undefined : mayAdvance.reason}
             onClick={() => dispatch({ type: "ADVANCE", taskId: task.id })}
           >
             {target ? `Advance to ${stageSpec(target).label}` : "Advance"}
           </button>
+
+          {needsSupervisor && (
+            <div className="empty">This needs someone with a supervising role.</div>
+          )}
+          {!needsSupervisor && !mayAdvance.allowed && task.closedAt === null && (
+            <div className="empty">{mayAdvance.reason}</div>
+          )}
 
           {task.closedAt !== null && (
             <div className="empty">Closed at {time(task.closedAt)}. Nothing to do.</div>
@@ -556,7 +637,7 @@ function TaskInspector({
               <div style={{ marginBottom: 3 }}>{a.assumed}</div>
               <div style={{ fontSize: 10, opacity: 0.6 }}>because {a.because}</div>
               {a.status === "open" && (
-                <div style={{ marginTop: 6 }}>
+                <fieldset className="moves" disabled={!mayAdvance.allowed} style={{ marginTop: 6 }}>
                   <button
                     className="btn"
                     style={{ fontSize: 10, padding: "3px 7px" }}
@@ -585,7 +666,7 @@ function TaskInspector({
                   >
                     That's wrong
                   </button>
-                </div>
+                </fieldset>
               )}
             </div>
           ))}
@@ -594,6 +675,12 @@ function TaskInspector({
         {/* ---- the conversation ---- */}
         <div className="sec">
           <h3>Thread</h3>
+          {hidden > 0 && (
+            <div className="withheld">
+              {hidden} message{hidden === 1 ? "" : "s"} said in rooms you cannot read{" "}
+              {hidden === 1 ? "is" : "are"} not shown.
+            </div>
+          )}
           {thread.map((m) => (
             <ThreadLine key={m.id} message={m} name={name} />
           ))}
@@ -640,13 +727,24 @@ function ParticipantInspector({
   office,
   ctx,
   participant,
+  viewer,
+  tokens,
+  account,
+  onTokenOperation,
   onClear,
 }: {
   office: Office;
   ctx: AccessContext;
   participant: Participant;
+  viewer: Participant;
+  tokens: TokenView[];
+  account: OfficeView["accounts"][number] | null;
+  onTokenOperation: (tokenId: string, operation: "reveal" | "revoke") => void;
   onClear: () => void;
 }) {
+  const viewerSupervises = supervises(office, viewer);
+  const roomName = (id: string | null): string =>
+    id === null ? "Every room" : (office.floorplan.rooms.find((r) => r.id === id)?.name ?? id);
   const role = office.roles[participant.roleId];
   const rooms = office.floorplan.rooms;
 
@@ -748,6 +846,61 @@ function ParticipantInspector({
             * resolved against a competing rule. Hover for the reason.
           </div>
         </div>
+
+        {(viewerSupervises || participant.id === viewer.id) && (
+          <div className="sec">
+            <h3>Permission tokens ({tokens.length})</h3>
+            {tokens.length === 0 && (
+              <div className="empty">None. A token is issued with each access grant.</div>
+            )}
+            {tokens.map((t) => (
+              <div key={t.id} className="note" data-dead={t.problem !== null}>
+                <div className="meta">
+                  {t.scope} on {roomName(t.roomId)}
+                  {t.taskId ? ` · ${t.taskId} only` : ""} ·{" "}
+                  <span style={{ color: t.problem ? "#eba294" : "#7fc39a" }}>
+                    {t.problem ?? "usable"}
+                  </span>
+                </div>
+                <div style={{ fontSize: 10.5, opacity: 0.7 }}>
+                  Rule {t.ruleId}: {t.reason}
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <button
+                    className="btn"
+                    style={{ fontSize: 10, padding: "3px 7px" }}
+                    onClick={() => onTokenOperation(t.id, "reveal")}
+                  >
+                    Copy token
+                  </button>
+                  {viewerSupervises && t.revokedAt === null && (
+                    <button
+                      className="btn warn"
+                      style={{ fontSize: 10, padding: "3px 7px" }}
+                      onClick={() => onTokenOperation(t.id, "revoke")}
+                    >
+                      Revoke token
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {account && (
+          <div className="sec">
+            <h3>Account</h3>
+            <div className="kv">
+              <span>Email</span>
+              <span>{account.email}</span>
+            </div>
+            <div className="kv">
+              <span>Sign-in</span>
+              <span>{account.hasPassword ? "password" : "demo access, no password set"}</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

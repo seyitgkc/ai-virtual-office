@@ -2,8 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ["three"],
-  // The app is a single client-rendered page with no server code, so it ships
-  // as plain static files.
-  output: "export",
+  // Builds a self-contained Node server in .next/standalone for the container.
+  output: "standalone",
 };
 export default nextConfig;

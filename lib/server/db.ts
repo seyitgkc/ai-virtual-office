@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { SCHEMA, SCHEMA_VERSION } from "./schema";
 
@@ -8,7 +8,12 @@ export type Row = Record<string, unknown>;
 
 /** Where the database file lives. One file holds the whole office. */
 export function databasePath(): string {
-  return resolve(process.env.OFFICE_DB_PATH ?? "./data/office.db");
+  const configured = process.env.OFFICE_DB_PATH;
+  // The path is only known at run time. The marker stops the bundler from
+  // treating it as a file to include in the build.
+  return configured
+    ? resolve(/* turbopackIgnore: true */ configured)
+    : join(/* turbopackIgnore: true */ process.cwd(), "data", "office.db");
 }
 
 /** Open a database and make sure the schema exists. `:memory:` is allowed. */

@@ -5,11 +5,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "npx serve out",
+    "start": "next start",
     "check": "tsx scripts/check.ts",
     "scenario": "tsx scripts/scenario.ts",
-    "verify": "tsc --noEmit && tsx scripts/check.ts && tsx scripts/scenario.ts && tsx scripts/store.ts",
-    "store": "tsx scripts/store.ts"
+    "verify": "tsc --noEmit && tsx scripts/check.ts && tsx scripts/scenario.ts && tsx scripts/store.ts && tsx scripts/auth.ts",
+    "store": "tsx scripts/store.ts",
+    "auth": "tsx scripts/auth.ts"
   },
   "dependencies": {
     "@react-three/drei": "10.7.9",
