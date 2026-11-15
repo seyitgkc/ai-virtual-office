@@ -192,6 +192,17 @@ function OfficeTab({
         />
       </Section>
 
+      {view.isDemoOffice && (
+        <Section
+          title="Reset the demo"
+          hint="Puts this office back as it first loaded: the same people, rules and three tasks, with the dealer order halted at the Finance door. Everything added since is removed, for every visitor."
+        >
+          <div className="row-actions">
+            <ConfirmButton label="Reset the demo" onConfirm={() => officeOp({ operation: "reset_demo" })} />
+          </div>
+        </Section>
+      )}
+
       <Section title="Danger zone" hint="These cannot be undone.">
         <div className="row-actions">
           <ConfirmButton label="Clear all work" onConfirm={() => adminOp({ type: "CLEAR_WORK" })} />

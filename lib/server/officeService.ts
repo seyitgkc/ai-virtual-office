@@ -797,6 +797,46 @@ export function switchOffice(session: Session, officeId: string): void {
 }
 
 /**
+ * Put the demo office back as it first loaded: its seeded people, rules and
+ * three tasks. Everything added there since is removed. People keep their
+ * demo sign-ins, and whoever is signed in stays signed in.
+ */
+export function resetDemoOffice(session: Session): Promise<{ ok: true }> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    const state = loadOffice(db, session);
+    if (!isDemoOffice(state.office.id)) throw new OfficeError(403, "Only the demo office can be reset.");
+    requirePermission(state, session, "manage_office");
+
+    transaction(db, () => {
+      // Seats and sessions point at people in the office, and are cleared when
+      // those people are deleted. They are put back for the seeded people.
+      const seeded = new Set(initialState.office.participants.map((p) => p.id));
+      const inDemo = "(SELECT id FROM participants WHERE office_id = ?)";
+      const seats = all<{ participant_id: string; user_id: string }>(
+        db,
+        `SELECT participant_id, user_id FROM memberships WHERE participant_id IN ${inDemo}`,
+        DEMO_OFFICE_ID,
+      ).filter((seat) => seeded.has(seat.participant_id));
+      const sessions = all<{ id: string; participant_id: string }>(
+        db,
+        `SELECT id, participant_id FROM sessions WHERE participant_id IN ${inDemo}`,
+        DEMO_OFFICE_ID,
+      ).filter((s) => seeded.has(s.participant_id));
+
+      deleteOffice(db, DEMO_OFFICE_ID);
+      writeWholeOffice(db, initialState);
+      for (const seat of seats) addMembership(db, seat.user_id, seat.participant_id);
+      for (const s of sessions) run(db, "UPDATE sessions SET participant_id = ? WHERE id = ?", s.participant_id, s.id);
+      ensureDemoAccounts(db, initialState.office);
+      ensureDemoSystems(db, initialState.office);
+      syncAccessTokens(db);
+    });
+    return { ok: true };
+  });
+}
+
+/**
  * Delete an office and everything in it. The person's role there must allow
  * it, and the shared demo office cannot be deleted at all.
  */

@@ -145,10 +145,24 @@ async function main(): Promise<void> {
   expect("and Laval is down by six", await stock("GREE-MZ-12", "Laval"), 114);
   expect("the status note is not repeated", (await thread()).filter((m) => m.kind === "status" && m.body.startsWith("Checked stock")).length, 1);
 
+  console.log("\n-- the demo can be put back as it first loaded --");
+  expect("someone who does not manage the office cannot reset it", await refusal(async () => service.resetDemoOffice(await sam())), 403);
+  await service.resetDemoOffice(await dana());
+  demo = service.getView(await dana());
+  expect("the person who reset it is still signed in to their seat", demo.viewer.participantId, "p-dana");
+  expect("the three seeded tasks are back and the new one is gone", demo.office.tasks.map((t) => t.id).join(), "T-1001,T-1002,T-1003");
+  expect("the dealer order is halted at the Finance door again", demo.office.tasks[0].status, "blocked_permission");
+  expect("the revoked rule is back", demo.office.rules.some((r) => r.id === "r-02"), true);
+  expect("the systems are still connected", demo.office.systems.length, 2);
+  expect("the other demo sign-in still has its seat", service.getView(await sam()).viewer.participantId, "p-sam");
+  expect("no demo account was duplicated", auth.usersInOffice(db, service.DEMO_OFFICE_ID).length, 2);
+  expect("no dangling references after the reset", all(db, "PRAGMA foreign_key_check").length, 0);
+
   console.log("\n-- an office of one's own --");
   const admin = auth.authenticate(db, "owner@example.test", adminPassword)!;
   const owner = await sessionFor("owner@example.test", auth.seatsOf(db, admin.id)[0].participantId);
   let view = service.getView(await owner());
+  expect("an office other than the demo cannot be reset", await refusal(async () => service.resetDemoOffice(await owner())), 403);
   const main = view.office.floorplan.rooms[0].id;
   view = await service.applyAdminOperation(await owner(), { type: "ADD_ROOM", name: "Warehouse", purpose: "Stock and orders", width: 8, depth: 8, attachTo: main, side: "east" });
   const warehouse = view.office.floorplan.rooms.find((r) => r.name === "Warehouse")!.id;

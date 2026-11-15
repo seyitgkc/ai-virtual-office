@@ -29,7 +29,10 @@ export type SystemOp =
   | { operation: "save"; id?: string; name: string; kind: SystemKind; roomId: string; baseUrl: string; apiKey?: string }
   | { operation: "remove"; id: string };
 
-export type OfficeOp = { operation: "create"; name: string } | { operation: "switch" | "remove"; officeId: string };
+export type OfficeOp =
+  | { operation: "create"; name: string }
+  | { operation: "switch" | "remove"; officeId: string }
+  | { operation: "reset_demo" };
 
 /** How often the office is re-read, so that other people's actions show up. */
 const REFRESH_MS = 5000;
