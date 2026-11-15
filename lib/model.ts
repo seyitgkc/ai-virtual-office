@@ -324,11 +324,22 @@ export interface AccessContext {
   now: number;
   /** Task ids that have closed, for expiresOnTaskId. */
   closedTaskIds: ReadonlySet<TaskId>;
+  /**
+   * The task the access is wanted for. A rule granted for one task counts
+   * only for that task's work: with a task id here, rules made for other
+   * tasks are left out, and with null (outside any task) every such rule is.
+   * Left undefined, a rule made for a task counts while that task is open,
+   * which is right for showing what someone holds at the moment.
+   */
+  forTask?: TaskId | null;
 }
 
 export function isRuleLive(rule: IndividualRule, ctx: AccessContext): boolean {
   if (rule.expiresAt !== undefined && rule.expiresAt <= ctx.now) return false;
   if (rule.expiresOnTaskId !== undefined && ctx.closedTaskIds.has(rule.expiresOnTaskId)) {
+    return false;
+  }
+  if (rule.expiresOnTaskId !== undefined && ctx.forTask !== undefined && ctx.forTask !== rule.expiresOnTaskId) {
     return false;
   }
   return true;
@@ -558,7 +569,9 @@ export function canRead(
   if (message.audience.to === "participant") {
     return message.audience.id === viewer.id || message.fromId === viewer.id;
   }
-  return resolveAccess(viewer, message.audience.id, "read", ctx).effect === "allow";
+  // A grant made for one task opens that task's messages in the room, not
+  // every task's.
+  return resolveAccess(viewer, message.audience.id, "read", { ...ctx, forTask: message.taskId }).effect === "allow";
 }
 
 // ---------------------------------------------------------------------------

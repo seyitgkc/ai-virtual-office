@@ -200,7 +200,7 @@ export function viewFor(
   // A room's records follow `read` on the room for everyone, whatever else
   // their role lets them see.
   const rooms = office.floorplan.rooms.map((room) =>
-    resolveAccess(viewer, room.id, "read", ctx).effect === "allow" ? room : { ...room, records: [] },
+    resolveAccess(viewer, room.id, "read", { ...ctx, forTask: null }).effect === "allow" ? room : { ...room, records: [] },
   );
   const floorplan = { ...office.floorplan, rooms };
   if (may(office, viewer, "see_everything")) return { office: { ...office, floorplan }, hiddenMessages: {} };

@@ -449,7 +449,7 @@ export async function reduce(
       }
       const targetSpec = stageSpec(target);
       const targetRoom = roomForStage(office, target) ?? task.roomId;
-      const ctx = contextOf({ ...state, office, now });
+      const ctx: AccessContext = { ...contextOf({ ...state, office, now }), forTask: task.id };
 
       // Moving between stages is an ordinary handoff: the work goes to whoever
       // is seated in the next room and allowed to act there. Keep the current
@@ -635,7 +635,7 @@ export async function reduce(
           notes.push(`${approver} did not approve ${asker.displayName}'s action on ${task.id}`);
         } else if (!system) {
           say("The system is no longer connected, so the approved action was not carried out.");
-        } else if (resolveAccess(asker, system.roomId, "act", contextOf({ ...state, office, now })).effect !== "allow") {
+        } else if (resolveAccess(asker, system.roomId, "act", { ...contextOf({ ...state, office, now }), forTask: task.id }).effect !== "allow") {
           say(`${system.name}: not done. ${asker.displayName} may no longer act in ${roomName(office, system.roomId)}.`);
         } else {
           const outcome: SystemOutcome = runtime.perform
@@ -722,7 +722,7 @@ export async function reduce(
       const to = findParticipant(office, action.toParticipantId);
       const target = nextStage(task.stage);
       const room = target ? (roomForStage(office, target) ?? task.roomId) : task.roomId;
-      const ctx = contextOf({ ...state, office, now });
+      const ctx: AccessContext = { ...contextOf({ ...state, office, now }), forTask: task.id };
       const decision = canOwnWorkIn(to, room, ctx);
 
       if (decision.effect === "deny") {
@@ -906,7 +906,7 @@ function retryBlocked(
     const who = office.participants.find((p) => p.id === participantId);
     if (!who) continue;
 
-    const verdict = resolveAccess(who, room, scope, ctx);
+    const verdict = resolveAccess(who, room, scope, { ...ctx, forTask: task.id });
     if (verdict.effect !== "allow") {
       if (participantId === changedFor) {
         notes.push(
@@ -961,6 +961,8 @@ async function runAgent(
     rules: office.rules,
     now,
     closedTaskIds: new Set(office.tasks.filter((t) => t.closedAt !== null).map((t) => t.id)),
+    // Grants made for another task do not count for this one.
+    forTask: task.id,
   };
   const prior = office.messages
     .filter((m) => m.taskId === task.id && canRead(m, participant, ctx))

@@ -11,7 +11,15 @@ import { AdminError, applyAdminOp, blankOffice, permissionFor, type AdminOp } fr
 import { reduce, type Action, type AgentRuntime, type EngineState } from "../engine";
 import { initialState } from "../initialState";
 import { statusReply } from "../agentState";
-import { may, PERMISSION_INFO, resolveAccess, type Office, type Participant, type Permission } from "../model";
+import {
+  may,
+  PERMISSION_INFO,
+  resolveAccess,
+  type AccessContext,
+  type Office,
+  type Participant,
+  type Permission,
+} from "../model";
 import { runPlaybook } from "../playbook";
 import { authorize, contextOf, mayRead, stampActor, viewFor } from "../policy";
 import type { FeedEntry, OfficeView } from "../view";
@@ -338,7 +346,7 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
     // Addresses are for people who manage rooms, and only for systems in
     // rooms they can read.
     systems: can("manage_rooms")
-      ? systemViews(db, office.id).filter((s) => mayRead(ctx, viewer, s.roomId))
+      ? systemViews(db, office.id).filter((s) => mayRead({ ...ctx, forTask: null }, viewer, s.roomId))
       : [],
     systemsEditable: can("manage_rooms") && session.hasPassword && !isDemoOffice(office.id),
     // Token details are for people who manage access and for the holder.
@@ -555,7 +563,7 @@ export function applyAdminOperation(session: Session, op: AdminOp): Promise<Offi
     const db = officeDatabase();
     const before = loadOffice(db, session);
     const actor = requirePermission(before, session, permissionFor(op));
-    if (op.type === "SET_ROOM_RECORDS" && !mayRead(contextOf(before.office, before.now), actor, op.roomId)) {
+    if (op.type === "SET_ROOM_RECORDS" && !mayRead({ ...contextOf(before.office, before.now), forTask: null }, actor, op.roomId)) {
       throw new OfficeError(403, "You cannot read that room, so you cannot change its records.");
     }
 
@@ -715,7 +723,8 @@ export function sendDirectMessage(session: Session, toId: string, said: string):
     const body = said.trim();
     if (body.length === 0 || body.length > 600) throw new OfficeError(400, "Write a message of up to 600 characters.");
 
-    const ctx = contextOf(office, state.now);
+    // A conversation is outside any task, so grants made for a task do not count.
+    const ctx: AccessContext = { ...contextOf(office, state.now), forTask: null };
     const room = office.floorplan.rooms.find((r) => r.deskIds.includes(other.deskId ?? ""));
     let reply: string | null = null;
     if (other.kind === "agent") {
@@ -784,7 +793,7 @@ function systemManager(db: Db, session: Session, roomId: string | null): { state
   const state = loadOffice(db, session);
   const actor = requirePermission(state, session, "manage_rooms");
   if (roomId === null) throw new OfficeError(404, "That connected system does not exist in this office.");
-  if (!mayRead(contextOf(state.office, state.now), actor, roomId)) {
+  if (!mayRead({ ...contextOf(state.office, state.now), forTask: null }, actor, roomId)) {
     throw new OfficeError(403, "You cannot read that room, so you cannot manage what is connected to it.");
   }
   return { state, actor };
