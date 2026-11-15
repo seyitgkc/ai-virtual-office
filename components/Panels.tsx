@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ALL_SCOPES,
   hasConflict,
@@ -18,7 +18,8 @@ import {
 } from "../lib/model";
 import { eligibleOwners, nextStage, roomForStage, stageSpec, type Action } from "../lib/engine";
 import { authorize } from "../lib/policy";
-import type { FeedEntry, OfficeView, TokenView } from "../lib/view";
+import { deskState } from "../lib/agentState";
+import type { ChatLine, FeedEntry, OfficeView, TokenView } from "../lib/view";
 
 const STATUS: Record<TaskStatus, { label: string; accent: string }> = {
   requested: { label: "requested", accent: "#8a93a0" },
@@ -92,7 +93,9 @@ export function TitleCard({
             <kbd>Shift</kbd> faster
           </span>
           <span>Drag to look around</span>
-          <span>Click someone to inspect</span>
+          <span>
+            <kbd>F</kbd> talk to whoever you face
+          </span>
         </div>
         <button className="btn mode" onClick={onToggleMode}>
           Back to overview
@@ -351,6 +354,10 @@ export function Inspector({
   hiddenMessages,
   tokens,
   accounts,
+  chats,
+  onTalk,
+  talkFocus,
+  pending,
   dispatch,
   onTokenOperation,
   onClear,
@@ -364,6 +371,12 @@ export function Inspector({
   hiddenMessages: OfficeView["hiddenMessages"];
   tokens: TokenView[];
   accounts: OfficeView["accounts"];
+  /** What the viewer and the office's agents have said to each other. */
+  chats: ChatLine[];
+  onTalk: (agentId: string, body: string) => Promise<boolean>;
+  /** Changes each time the message box should take the keyboard. */
+  talkFocus: number;
+  pending: boolean;
   dispatch: (a: Action) => void;
   onTokenOperation: (tokenId: string, operation: "reveal" | "revoke") => void;
   onClear: () => void;
@@ -390,6 +403,10 @@ export function Inspector({
         viewer={viewer}
         tokens={tokens.filter((t) => t.participantId === participant.id)}
         account={accounts.find((a) => a.participantId === participant.id) ?? null}
+        chat={chats.filter((line) => line.agentId === participant.id)}
+        onTalk={(body) => onTalk(participant.id, body)}
+        talkFocus={talkFocus}
+        pending={pending}
         onTokenOperation={onTokenOperation}
         onClear={onClear}
       />
@@ -824,6 +841,100 @@ function ThreadLine({
 
 // ---------------------------------------------------------------------------
 
+/** A conversation with an agent at its desk. It changes nothing in the office. */
+function TalkBox({
+  agent,
+  lines,
+  cannotEnter,
+  pending,
+  focus,
+  onSend,
+}: {
+  agent: Participant;
+  lines: ChatLine[];
+  /** The room the viewer may not enter, when that is what stops them. */
+  cannotEnter: string | null;
+  pending: boolean;
+  focus: number;
+  onSend: (body: string) => Promise<boolean>;
+}) {
+  const [text, setText] = useState("");
+  const box = useRef<HTMLTextAreaElement>(null);
+  const end = useRef<HTMLDivElement>(null);
+  const ready = text.trim().length > 0 && !pending;
+
+  useEffect(() => {
+    if (focus > 0) box.current?.focus();
+  }, [focus]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" });
+  }, [lines.length]);
+
+  const send = () => {
+    if (!ready) return;
+    void onSend(text.trim()).then((sent) => {
+      if (sent) setText("");
+    });
+  };
+
+  return (
+    <div className="sec">
+      <h3>Talk to {agent.displayName}</h3>
+      {cannotEnter ? (
+        <div className="empty">
+          You cannot enter {cannotEnter}, so you cannot talk to {agent.displayName} at their desk.
+        </div>
+      ) : (
+        <>
+          {lines.length === 0 ? (
+            <div className="empty">
+              {agent.agentType === "ai"
+                ? `Ask ${agent.displayName} about its work or what it can see. It answers from what you may both read, and changes nothing.`
+                : `${agent.displayName} follows a playbook. Ask and it reports where its work stands.`}
+            </div>
+          ) : (
+            <div className="talk-thread">
+              {lines.map((line) => (
+                <div key={line.id} className="talk-line" data-from={line.fromAgent ? "agent" : "you"}>
+                  <span className="who">{line.fromAgent ? agent.displayName : "You"}</span>
+                  {line.body}
+                </div>
+              ))}
+              <div ref={end} />
+            </div>
+          )}
+          <form
+            className="answer-box"
+            onSubmit={(e) => {
+              e.preventDefault();
+              send();
+            }}
+          >
+            <textarea
+              ref={box}
+              aria-label={`Message to ${agent.displayName}`}
+              placeholder={`Say something to ${agent.displayName}`}
+              rows={2}
+              maxLength={600}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+            />
+            <button type="submit" className="btn" disabled={!ready}>
+              {pending ? "Waiting..." : "Send"}
+            </button>
+          </form>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ParticipantInspector({
   office,
   ctx,
@@ -831,6 +942,10 @@ function ParticipantInspector({
   viewer,
   tokens,
   account,
+  chat,
+  onTalk,
+  talkFocus,
+  pending,
   onTokenOperation,
   onClear,
 }: {
@@ -840,6 +955,10 @@ function ParticipantInspector({
   viewer: Participant;
   tokens: TokenView[];
   account: OfficeView["accounts"][number] | null;
+  chat: ChatLine[];
+  onTalk: (body: string) => Promise<boolean>;
+  talkFocus: number;
+  pending: boolean;
   onTokenOperation: (tokenId: string, operation: "reveal" | "revoke") => void;
   onClear: () => void;
 }) {
@@ -854,6 +973,10 @@ function ParticipantInspector({
     scopes: ALL_SCOPES.map((scope) => resolveAccess(participant, room.id, scope, ctx)),
   }));
   const clashes = decisions.flatMap((d) => d.scopes.filter(hasConflict));
+  const seatRoom = rooms.find((r) => r.deskIds.includes(participant.deskId ?? ""));
+  const desk = deskState(office, participant);
+  const cannotEnter =
+    seatRoom && resolveAccess(viewer, seatRoom.id, "enter", ctx).effect !== "allow" ? seatRoom.name : null;
 
   return (
     <div className="panel" id="inspector">
@@ -906,6 +1029,27 @@ function ParticipantInspector({
             )}
           </div>
         </div>
+
+        <div className="sec">
+          <h3>Right now</h3>
+          <div className="desk-state" data-tone={desk.tone}>
+            <strong>{desk.headline}</strong>
+            {desk.task && <span> · {desk.task.id}</span>}
+          </div>
+          <div style={{ fontSize: 11.5, opacity: 0.75, marginTop: 4 }}>{desk.detail}</div>
+        </div>
+
+        {participant.kind === "agent" && (
+          <TalkBox
+            key={participant.id}
+            agent={participant}
+            lines={chat}
+            cannotEnter={cannotEnter}
+            pending={pending}
+            focus={talkFocus}
+            onSend={onTalk}
+          />
+        )}
 
         <div className="sec">
           <h3>Can do</h3>

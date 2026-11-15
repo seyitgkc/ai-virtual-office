@@ -38,6 +38,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     providerOp,
     systemOp,
     readSystem,
+    talk,
     tokenOperation,
     signOut,
   } = useOffice(initial);
@@ -53,11 +54,23 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
   const [mode, setMode] = useState<"overview" | "walk">("overview");
   const [walkRoomId, setWalkRoomId] = useState<string | null>(null);
   const walkPose = useRef(entryPose(office.floorplan.rooms));
+  // Who the walker is close to and facing, and a counter that moves the
+  // keyboard into the message box when they choose to talk.
+  const [facedId, setFacedId] = useState<string | null>(null);
+  const [talkFocus, setTalkFocus] = useState(0);
+  const faced = mode === "walk" ? (office.participants.find((p) => p.id === facedId) ?? null) : null;
 
   useEffect(() => {
     if (mode !== "walk") return;
     const leave = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMode("overview");
+      if (e.key !== "Escape") return;
+      // Escape first leaves a text box, and only then the walk.
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && (active.tagName === "TEXTAREA" || active.tagName === "INPUT")) {
+        active.blur();
+        return;
+      }
+      setMode("overview");
     };
     window.addEventListener("keydown", leave);
     return () => window.removeEventListener("keydown", leave);
@@ -104,6 +117,13 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           setSheet("detail");
         }}
         onSelectRoom={() => setSelectedPersonId(null)}
+        onFaceParticipant={setFacedId}
+        onInteract={(id) => {
+          setSelectedPersonId(id);
+          setSelectedTaskId(null);
+          setSheet("detail");
+          setTalkFocus((n) => n + 1);
+        }}
         roomHighlight={roomHighlight}
         participantAlert={participantAlert}
       />
@@ -160,6 +180,10 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         hiddenMessages={view.hiddenMessages}
         tokens={view.accessTokens}
         accounts={view.accounts}
+        chats={view.chats}
+        onTalk={talk}
+        talkFocus={talkFocus}
+        pending={pending}
         dispatch={dispatch}
         onTokenOperation={tokenOperation}
         onClear={() => {
@@ -189,6 +213,12 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           </button>
         ))}
       </nav>
+
+      {faced && faced.id !== selectedPersonId && (
+        <div className="interact-hint" role="status">
+          Press <kbd>F</kbd> to {faced.kind === "agent" ? "talk to" : "look at"} {faced.displayName}
+        </div>
+      )}
 
       {notice && (
         <div className="notice" role="status" data-tone={noticeTone}>

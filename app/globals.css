@@ -618,3 +618,35 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
   margin: 6px 0 0; padding: 8px 10px 8px 26px; font-size: 12px; line-height: 1.5; color: rgba(232,230,225,0.85);
   background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
 }
+
+/* ---- talking to an agent, and what a desk shows ---- */
+.talk-thread {
+  display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto;
+  margin: 2px 0 8px; padding-right: 4px;
+}
+.talk-line {
+  font-size: 12px; line-height: 1.45; padding: 6px 8px; border-radius: 7px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); white-space: pre-wrap;
+}
+.talk-line[data-from="you"] { background: rgba(110,169,217,0.1); border-color: rgba(110,169,217,0.25); margin-left: 18px; }
+.talk-line[data-from="agent"] { margin-right: 18px; }
+.talk-line .who {
+  display: block; font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.5; margin-bottom: 2px;
+}
+.desk-state { font-size: 12.5px; }
+.desk-state::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: #6b7480;
+}
+.desk-state[data-tone="working"]::before { background: #6ea9d9; }
+.desk-state[data-tone="question"]::before { background: #e0a23f; }
+.desk-state[data-tone="permission"]::before { background: #e0614f; }
+.desk-state[data-tone="review"]::before { background: #9b8ad9; }
+.interact-hint {
+  position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 3; pointer-events: none;
+  padding: 8px 14px; border-radius: 9px; font-size: 13px; color: #e8e6e1; white-space: nowrap;
+  background: rgba(18, 21, 27, 0.9); border: 1px solid rgba(255,255,255,0.16); box-shadow: 0 6px 22px rgba(0,0,0,0.35);
+}
+.interact-hint kbd {
+  display: inline-block; min-width: 20px; padding: 1px 6px; margin: 0 3px; text-align: center; font: inherit; font-weight: 600;
+  border-radius: 5px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.28);
+}

@@ -20,6 +20,10 @@ const TURN_SPEED = 1.9;
 const LOOK_SENSITIVITY = 0.0042;
 const MAX_PITCH = 1.15;
 const WALK_FOV = 68;
+/** How close, and how squarely faced, someone must be to be talked to. */
+const REACH = 3.2;
+const FACING_COS = Math.cos(0.5);
+const INTERACT_KEY = "KeyF";
 /** How far past the outer walls a walker may go. */
 const OUTSIDE_MARGIN = 2.6;
 
@@ -55,15 +59,30 @@ export function WalkControls({
   floorplan,
   pose,
   onRoomChange,
+  seats,
+  onFace,
+  onInteract,
 }: {
   floorplan: Floorplan;
   pose: RefObject<WalkPose>;
   onRoomChange: (roomId: string | null) => void;
+  /** Everyone seated in the office, other than the walker. */
+  seats: { id: string; x: number; z: number; roomId: string }[];
+  /** Called when the person the walker is close to and facing changes. */
+  onFace: (id: string | null) => void;
+  /** Called when the walker presses F while facing someone. */
+  onInteract: (id: string) => void;
 }) {
   const { camera, gl, scene } = useThree();
   const keys = useRef(new Set<string>());
   const pitch = useRef(0);
   const lastRoom = useRef<string | null | undefined>(undefined);
+  const facing = useRef<string | null>(null);
+  const interact = useRef(onInteract);
+  interact.current = onInteract;
+
+  // Nobody is faced once the walk ends.
+  useEffect(() => () => onFace(null), [onFace]);
 
   const all = useMemo(() => obstacles(floorplan), [floorplan]);
   const bounds = useMemo(() => {
@@ -100,6 +119,14 @@ export function WalkControls({
     const held = keys.current;
     const down = (e: KeyboardEvent) => {
       if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.code === INTERACT_KEY) {
+        if (facing.current && !e.repeat) {
+          e.preventDefault();
+          held.clear();
+          interact.current(facing.current);
+        }
+        return;
+      }
       if (!CONTROL_KEYS.has(e.code)) return;
       held.add(e.code);
       e.preventDefault();
@@ -195,6 +222,26 @@ export function WalkControls({
     if (room !== lastRoom.current) {
       lastRoom.current = room;
       onRoomChange(room);
+    }
+
+    // The nearest person in this room who is within reach and in front.
+    let faced: string | null = null;
+    let nearest = REACH;
+    const fx = -Math.sin(p.yaw);
+    const fz = -Math.cos(p.yaw);
+    for (const seat of seats) {
+      if (seat.roomId !== room) continue;
+      const dx = seat.x - p.x;
+      const dz = seat.z - p.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance >= nearest || distance < 0.01) continue;
+      if ((dx * fx + dz * fz) / distance < FACING_COS) continue;
+      nearest = distance;
+      faced = seat.id;
+    }
+    if (faced !== facing.current) {
+      facing.current = faced;
+      onFace(faced);
     }
   });
 

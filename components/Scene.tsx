@@ -5,6 +5,7 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, ContactShadows } from "@react-three/drei";
 import { Fog, PerspectiveCamera, Vector3 } from "three";
 import type { Office } from "../lib/model";
+import { deskState } from "../lib/agentState";
 import { planExtent, roomCentre, seatPosition, type WalkPose } from "../lib/geometry";
 import { KindBadge } from "./Panels";
 import { RoomMesh } from "./RoomMesh";
@@ -69,6 +70,8 @@ export function Scene({
   selectedId,
   onSelectParticipant,
   onSelectRoom,
+  onFaceParticipant,
+  onInteract,
   roomHighlight,
   participantAlert,
 }: {
@@ -84,6 +87,10 @@ export function Scene({
   selectedId: string | null;
   onSelectParticipant: (id: string) => void;
   onSelectRoom: (id: string) => void;
+  /** While walking: who the walker is close to and facing, or null. */
+  onFaceParticipant: (id: string | null) => void;
+  /** While walking: the walker pressed the key to talk to whoever they face. */
+  onInteract: (id: string) => void;
   roomHighlight: (roomId: string) => "none" | "question" | "permission";
   participantAlert: (id: string) => "none" | "question" | "permission";
 }) {
@@ -98,6 +105,28 @@ export function Scene({
   const target = useMemo(() => new Vector3(cx + 0.5, 0, cz + 1.2), [cx, cz]);
   const nearEdge = useMemo(() => new Vector3(cx, 0, ext.maxZ), [cx, ext.maxZ]);
   const cameraTouched = useRef(false);
+
+  // Each occupied desk's monitor shows what its occupant is doing right now.
+  const screens = useMemo(
+    () =>
+      Object.fromEntries(
+        office.participants
+          .filter((p) => p.deskId)
+          .map((p) => [p.deskId as string, { name: p.displayName, state: deskState(office, p) }]),
+      ),
+    [office],
+  );
+  // Where each seated person is, for finding who the walker is facing.
+  const seats = useMemo(
+    () =>
+      office.participants.flatMap((p) => {
+        const desk = p.deskId ? desks.find((d) => d.id === p.deskId) : null;
+        if (!desk || p.id === viewerId) return [];
+        const seat = seatPosition(desk);
+        return [{ id: p.id, x: seat.x, z: seat.z, roomId: desk.roomId }];
+      }),
+    [office.participants, desks, viewerId],
+  );
   const walking = mode === "walk";
   // Coming back from a walk always returns to the fitted overview.
   if (walking) cameraTouched.current = false;
@@ -156,6 +185,9 @@ export function Scene({
           floorplan={office.floorplan}
           pose={walkPose}
           onRoomChange={onWalkRoomChange}
+          seats={seats}
+          onFace={onFaceParticipant}
+          onInteract={onInteract}
         />
       ) : (
         <Framing
@@ -199,7 +231,7 @@ export function Scene({
       ))}
 
       {desks.map((desk) => (
-        <DeskMesh key={desk.id} desk={desk} />
+        <DeskMesh key={desk.id} desk={desk} screen={screens[desk.id] ?? null} />
       ))}
 
       {office.participants.map((p) => {
