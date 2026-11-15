@@ -4,19 +4,21 @@ import { useState } from "react";
 import { CONFIGURABLE_STAGES, type AdminOp } from "../lib/admin";
 import { stageSpec, type Action } from "../lib/engine";
 import type { Office, Participant, Permission, Wall } from "../lib/model";
-import type { OfficeOp, ProviderOp } from "../lib/useOffice";
+import type { OfficeOp, ProviderOp, SystemOp } from "../lib/useOffice";
 import type { OfficeView } from "../lib/view";
 import { RolesTab, RulesTab } from "./SettingsAccess";
 import { PeopleTab, ProvidersTab } from "./SettingsAgents";
+import { RecordsTab } from "./SettingsRecords";
 import { ConfirmButton, SavedField, Section, TabBar } from "./settingsParts";
 
-type Tab = "offices" | "office" | "rooms" | "people" | "roles" | "rules" | "providers";
+type Tab = "offices" | "office" | "rooms" | "records" | "people" | "roles" | "rules" | "providers";
 
 /** Each tab and the permission that opens it. Offices is open to everyone. */
 const TABS: { id: Tab; label: string; needs: Permission | null }[] = [
   { id: "offices", label: "Offices", needs: null },
   { id: "office", label: "This office", needs: "manage_office" },
   { id: "rooms", label: "Rooms", needs: "manage_rooms" },
+  { id: "records", label: "Records and systems", needs: "manage_rooms" },
   { id: "people", label: "People and agents", needs: "manage_people" },
   { id: "roles", label: "Roles and permissions", needs: "manage_roles" },
   { id: "rules", label: "Access rules", needs: "manage_access" },
@@ -43,6 +45,8 @@ export function Settings({
   dispatch,
   officeOp,
   providerOp,
+  systemOp,
+  readSystem,
   onClose,
 }: {
   view: OfficeView;
@@ -51,6 +55,8 @@ export function Settings({
   dispatch: (action: Action) => Promise<boolean>;
   officeOp: (op: OfficeOp) => void;
   providerOp: (op: ProviderOp) => Promise<boolean>;
+  systemOp: (op: SystemOp) => Promise<boolean>;
+  readSystem: (id: string) => Promise<string[] | null>;
   onClose: () => void;
 }) {
   const own = view.viewer.permissions;
@@ -79,6 +85,9 @@ export function Settings({
           {open === "offices" && <OfficesTab view={view} officeOp={officeOp} />}
           {open === "office" && <OfficeTab view={view} adminOp={adminOp} officeOp={officeOp} />}
           {open === "rooms" && <RoomsTab office={office} adminOp={adminOp} />}
+          {open === "records" && (
+            <RecordsTab view={view} viewer={viewer} adminOp={adminOp} systemOp={systemOp} readSystem={readSystem} />
+          )}
           {open === "people" && (
             <PeopleTab office={office} viewer={viewer} providers={view.providers} adminOp={adminOp} />
           )}

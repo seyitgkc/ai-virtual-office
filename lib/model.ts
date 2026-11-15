@@ -17,6 +17,8 @@
 // Identifiers
 // ---------------------------------------------------------------------------
 
+import type { ConnectedSystem, SystemAction } from "./systems";
+
 export type ParticipantId = string;
 export type RoleId = string;
 export type RoomId = string;
@@ -74,6 +76,8 @@ export interface PlaybookStep {
     assumption: { assumed: string; because: string; confidence: "low" | "medium" | "high" } | null;
     /** Access the step cannot proceed without. Halts the task if denied. */
     need: { room: RoomId; scope: AccessScope; purpose: string } | null;
+    /** Something to do in a connected system. Needs `act` on that system's room. */
+    action: SystemAction | null;
   };
 }
 
@@ -144,6 +148,11 @@ export interface Room {
   bounds: Bounds;
   doors: Door[];
   deskIds: DeskId[];
+  /**
+   * Facts kept in this room, one sentence each. They are shown only to
+   * someone who holds `read` on the room.
+   */
+  records: string[];
 }
 
 export interface Desk {
@@ -220,7 +229,11 @@ export const PERMISSION_INFO: Record<Permission, { label: string; description: s
     label: "Manage people and agents",
     description: "Add, configure and remove agents. Rename people, change roles, move desks.",
   },
-  manage_rooms: { label: "Manage rooms", description: "Add, rename and remove rooms. Choose where each stage happens." },
+  manage_rooms: {
+    label: "Manage rooms",
+    description:
+      "Add, rename and remove rooms. Choose where each stage happens. Edit the records and connected systems of rooms they can read.",
+  },
   manage_roles: { label: "Manage roles", description: "Add and remove roles and change what each role may do." },
   manage_providers: {
     label: "Manage AI providers",
@@ -597,6 +610,8 @@ export interface Office {
   rules: IndividualRule[];
   tasks: Task[];
   messages: Message[];
+  /** Outside systems connected to rooms. Addresses and keys stay on the server. */
+  systems: ConnectedSystem[];
 }
 
 /** Can this participant take ownership of work in this room? */

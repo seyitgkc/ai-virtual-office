@@ -1,4 +1,5 @@
 import type { AccessScope, Office, Permission, TaskId } from "./model";
+import type { SystemKind } from "./systems";
 
 export interface FeedEntry {
   id: number;
@@ -42,6 +43,19 @@ export interface ProviderView {
   usable: boolean;
 }
 
+/** A system connected to a room. The API key itself is never included. */
+export interface SystemView {
+  id: string;
+  name: string;
+  kind: SystemKind;
+  roomId: string;
+  baseUrl: string;
+  hasKey: boolean;
+  keyHint: string | null;
+  /** A key is stored but can no longer be decrypted, so it must be re-entered. */
+  keyUnreadable: boolean;
+}
+
 /** Everything the browser receives: the office as this viewer may see it. */
 export interface OfficeView {
   office: Office;
@@ -61,6 +75,10 @@ export interface OfficeView {
   providers: ProviderView[];
   /** Whether this viewer may add or change providers here. */
   providersEditable: boolean;
+  /** Connected systems with their addresses, for people who manage rooms. */
+  systems: SystemView[];
+  /** Whether this viewer may connect, change or disconnect systems here. */
+  systemsEditable: boolean;
   /** The signed-in account, as distinct from the seat in this office. */
   account: { email: string; displayName: string; isDemo: boolean };
   /** Every office this account has a seat in. */

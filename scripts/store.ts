@@ -148,12 +148,13 @@ async function main(): Promise<void> {
           question: { body: "Which shelf?", to: "requester", blocking: true, options: ["A", "B"] },
           assumption: { assumed: "Counts are current", because: "Counted this morning", confidence: "high" },
           need: { room: "finance", scope: "read", purpose: "Unit cost" },
+          action: null,
         },
       },
       {
         id: "",
         when: { stage: "any", requestContains: "", requestedBy: "anyone" },
-        then: { statusNote: "Nothing to count", output: null, question: null, assumption: null, need: null },
+        then: { statusNote: "Nothing to count", output: null, question: null, assumption: null, need: null, action: null },
       },
     ],
   });

@@ -30,7 +30,7 @@ export function runPlaybook(input: AgentStepInput): AgentStepResult {
     };
   }
 
-  const { statusNote, output, question, assumption, need } = step.then;
+  const { statusNote, output, question, assumption, need, action } = step.then;
   return {
     ...(statusNote.trim() ? { statusNote: statusNote.trim() } : {}),
     questions: question
@@ -45,6 +45,7 @@ export function runPlaybook(input: AgentStepInput): AgentStepResult {
       : [],
     assumptions: assumption ? [assumption] : [],
     ...(need ? { needs: [need] } : {}),
+    ...(action ? { actions: [action] } : {}),
     ...(output ? { output } : {}),
   };
 }

@@ -180,7 +180,7 @@ async function main(): Promise<void> {
   const step = (over: Partial<PlaybookStep["then"]>, when: Partial<PlaybookStep["when"]> = {}): PlaybookStep => ({
     id: "",
     when: { stage: "any", requestContains: "", requestedBy: "anyone", ...when },
-    then: { statusNote: "", output: null, question: null, assumption: null, need: null, ...over },
+    then: { statusNote: "", output: null, question: null, assumption: null, need: null, action: null, ...over },
   });
   let booked = apply(people, {
     type: "SET_PLAYBOOK",

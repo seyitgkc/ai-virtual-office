@@ -602,3 +602,19 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 @media (pointer: coarse) {
   #title .btn.mode { display: none; }
 }
+
+/* ---- room records and connected systems ---- */
+.settings .room-records { padding: 8px 0; border-top: 1px solid rgba(255,255,255,0.06); }
+.settings .room-records:first-of-type { border-top: 0; }
+.settings .room-records label {
+  display: flex; flex-direction: column; gap: 5px; margin: 0;
+  font-size: 12.5px; font-weight: 500; text-transform: none; letter-spacing: 0; color: #e8e6e1;
+}
+.settings .room-records .entity-meta { font-weight: 400; margin-left: 4px; }
+.settings .room-records textarea { width: 100%; font-size: 12px; line-height: 1.45; }
+.settings .room-records .row-actions { margin-top: 6px; }
+.settings .live-records { margin-top: 10px; }
+.settings .live-records ul {
+  margin: 6px 0 0; padding: 8px 10px 8px 26px; font-size: 12px; line-height: 1.5; color: rgba(232,230,225,0.85);
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
+}

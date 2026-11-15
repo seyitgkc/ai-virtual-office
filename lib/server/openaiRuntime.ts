@@ -22,7 +22,7 @@ const TIMEOUT_MS = 120_000;
 const STEP_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["statusNote", "questions", "assumptions", "needs", "output"],
+  required: ["statusNote", "questions", "assumptions", "needs", "actions", "output"],
   properties: {
     statusNote: { type: "string" },
     questions: {
@@ -62,6 +62,27 @@ const STEP_JSON_SCHEMA = {
           room: { type: "string" },
           scope: { type: "string", enum: ["enter", "read", "act"] },
           purpose: { type: "string" },
+        },
+      },
+    },
+    actions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["system", "operation", "fields"],
+        properties: {
+          system: { type: "string" },
+          operation: { type: "string" },
+          fields: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["name", "value"],
+              properties: { name: { type: "string" }, value: { type: "string" } },
+            },
+          },
         },
       },
     },

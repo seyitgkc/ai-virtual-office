@@ -15,7 +15,7 @@
  *    and grants are evaluated in sequence and threads are read in sequence.
  */
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const SCHEMA = /* sql */ `
 CREATE TABLE schema_meta (
@@ -72,6 +72,31 @@ CREATE TABLE rooms (
   depth        REAL NOT NULL CHECK (depth > 0),
   UNIQUE (floorplan_id, position)
 ) STRICT;
+
+-- Facts kept in a room, one sentence each, in the order they are listed.
+CREATE TABLE room_records (
+  room_id  TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  body     TEXT NOT NULL,
+  PRIMARY KEY (room_id, position)
+) STRICT;
+
+-- An outside system connected to a room. The room's access rules cover it:
+-- read on the room shows its records, act on the room allows its operations.
+-- The API key is stored encrypted, as for AI providers.
+CREATE TABLE connected_systems (
+  id             TEXT PRIMARY KEY,
+  room_id        TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  position       INTEGER NOT NULL,
+  name           TEXT NOT NULL,
+  kind           TEXT NOT NULL CHECK (kind IN ('storefront', 'carrier')),
+  base_url       TEXT NOT NULL,
+  api_key_cipher TEXT,
+  key_hint       TEXT,
+  updated_at     INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX systems_by_room ON connected_systems(room_id);
 
 CREATE TABLE doors (
   id         TEXT PRIMARY KEY,
@@ -213,6 +238,22 @@ CREATE TABLE playbook_needs (
 ) STRICT;
 
 CREATE INDEX playbook_by_agent ON playbook_steps(participant_id, position);
+
+-- What a playbook step does in a connected system. system_id is not a foreign
+-- key: a step keeps its action when the system is disconnected, and the
+-- action is skipped until a system with that id exists again.
+CREATE TABLE playbook_actions (
+  step_id   TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  system_id TEXT NOT NULL,
+  operation TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE playbook_action_fields (
+  step_id TEXT NOT NULL REFERENCES playbook_actions(step_id) ON DELETE CASCADE,
+  name    TEXT NOT NULL,
+  value   TEXT NOT NULL,
+  PRIMARY KEY (step_id, name)
+) STRICT;
 
 -- ------------------------------------------------------------------ work
 CREATE TABLE tasks (
@@ -673,5 +714,48 @@ SELECT p.id,
 
 DROP TABLE office_ai;
 DROP TABLE agent_backings;
+`,
+  // Version 5 added room records, connected systems and playbook actions.
+  4: /* sql */ `
+-- Facts kept in a room, one sentence each, in the order they are listed.
+CREATE TABLE room_records (
+  room_id  TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  body     TEXT NOT NULL,
+  PRIMARY KEY (room_id, position)
+) STRICT;
+
+-- An outside system connected to a room. The room's access rules cover it:
+-- read on the room shows its records, act on the room allows its operations.
+-- The API key is stored encrypted, as for AI providers.
+CREATE TABLE connected_systems (
+  id             TEXT PRIMARY KEY,
+  room_id        TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  position       INTEGER NOT NULL,
+  name           TEXT NOT NULL,
+  kind           TEXT NOT NULL CHECK (kind IN ('storefront', 'carrier')),
+  base_url       TEXT NOT NULL,
+  api_key_cipher TEXT,
+  key_hint       TEXT,
+  updated_at     INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX systems_by_room ON connected_systems(room_id);
+
+-- What a playbook step does in a connected system. system_id is not a foreign
+-- key: a step keeps its action when the system is disconnected, and the
+-- action is skipped until a system with that id exists again.
+CREATE TABLE playbook_actions (
+  step_id   TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  system_id TEXT NOT NULL,
+  operation TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE playbook_action_fields (
+  step_id TEXT NOT NULL REFERENCES playbook_actions(step_id) ON DELETE CASCADE,
+  name    TEXT NOT NULL,
+  value   TEXT NOT NULL,
+  PRIMARY KEY (step_id, name)
+) STRICT;
 `,
 };

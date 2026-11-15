@@ -61,12 +61,12 @@ export function providerViews(db: Db, officeId: string): ProviderView[] {
 }
 
 /** Refuse addresses that are malformed or point at a machine's own metadata. */
-function checkedBaseUrl(input: string): string {
+export function checkedBaseUrl(input: string, whose = "the provider's"): string {
   let url: URL;
   try {
     url = new URL(input.trim());
   } catch {
-    throw new ProviderError("Enter the provider's address, starting with https://.");
+    throw new ProviderError(`Enter ${whose} address, starting with https:// or http://.`);
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new ProviderError("The address must start with https:// or http://.");

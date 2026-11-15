@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AdminOp } from "./admin";
 import type { Action } from "./engine";
+import type { SystemKind } from "./systems";
 import type { OfficeView, ProviderKind } from "./view";
 
 export type { FeedEntry } from "./view";
@@ -22,6 +23,11 @@ export type ProviderOp =
       removeKey?: boolean;
     }
   | { operation: "remove" | "test"; id: string };
+
+/** A change to a system connected to one of the office's rooms. */
+export type SystemOp =
+  | { operation: "save"; id?: string; name: string; kind: SystemKind; roomId: string; baseUrl: string; apiKey?: string }
+  | { operation: "remove"; id: string };
 
 export type OfficeOp = { operation: "create"; name: string } | { operation: "switch" | "remove"; officeId: string };
 
@@ -119,6 +125,19 @@ export function useOffice(initial: OfficeView) {
     [send, setNotice],
   );
 
+  const systemOp = useCallback((body: SystemOp) => send("/api/admin/systems", body), [send]);
+  /** What a connected system holds right now, or null when it gave no answer. */
+  const readSystem = useCallback(
+    async (id: string): Promise<string[] | null> => {
+      let records: string[] | null = null;
+      await send("/api/admin/systems", { operation: "read", id }, (data) => {
+        records = (data as { records?: string[] }).records ?? [];
+      });
+      return records;
+    },
+    [send],
+  );
+
   const tokenOperation = useCallback(
     (tokenId: string, operation: "reveal" | "revoke") =>
       send(`/api/tokens/${tokenId}`, { operation }, (data) => {
@@ -197,6 +216,8 @@ export function useOffice(initial: OfficeView) {
     adminOp,
     officeOp,
     providerOp,
+    systemOp,
+    readSystem,
     tokenOperation,
     signOut,
   };

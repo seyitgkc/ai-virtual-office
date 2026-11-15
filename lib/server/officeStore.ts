@@ -29,6 +29,7 @@ import {
   type TaskEvent,
 } from "../model";
 import type { EngineState } from "../engine";
+import type { ConnectedSystem } from "../systems";
 import { all, get, run, transaction, type Db } from "./db";
 
 const flag = (value: boolean): number => (value ? 1 : 0);
@@ -119,6 +120,13 @@ const deleteDecisionsWithPrefix = (db: Db, prefix: string): void =>
 // Writers
 // ---------------------------------------------------------------------------
 
+function writeRoomRecords(db: Db, room: Room): void {
+  run(db, "DELETE FROM room_records WHERE room_id = ?", room.id);
+  room.records.forEach((body, position) => {
+    run(db, "INSERT INTO room_records (room_id, position, body) VALUES (?, ?, ?)", room.id, position, body);
+  });
+}
+
 function writeFloorplan(db: Db, office: Office): void {
   const plan = office.floorplan;
   run(
@@ -146,6 +154,7 @@ function writeFloorplan(db: Db, office: Office): void {
     );
   });
   for (const room of plan.rooms) {
+    writeRoomRecords(db, room);
     room.doors.forEach((door, position) => {
       run(
         db,
@@ -280,7 +289,7 @@ export function writeParticipant(db: Db, officeId: string, p: Participant): void
     );
   }
 
-  // Deleting the steps removes their outputs, questions, assumptions and needs.
+  // Deleting the steps removes their outputs, questions, assumptions, needs and actions.
   run(db, "DELETE FROM playbook_steps WHERE participant_id = ?", p.id);
   p.playbook.forEach((step, position) => {
     run(
@@ -296,7 +305,19 @@ export function writeParticipant(db: Db, officeId: string, p: Participant): void
       step.when.requestedBy === "anyone" ? null : step.when.requestedBy,
       step.then.statusNote,
     );
-    const { output, question, assumption, need } = step.then;
+    const { output, question, assumption, need, action } = step.then;
+    if (action) {
+      run(
+        db,
+        "INSERT INTO playbook_actions (step_id, system_id, operation) VALUES (?, ?, ?)",
+        step.id,
+        action.systemId,
+        action.operation,
+      );
+      for (const [name, value] of Object.entries(action.fields)) {
+        run(db, "INSERT INTO playbook_action_fields (step_id, name, value) VALUES (?, ?, ?)", step.id, name, value);
+      }
+    }
     if (output) {
       run(db, "INSERT INTO playbook_outputs (step_id, label, body) VALUES (?, ?, ?)", step.id, output.label, output.body);
     }
@@ -739,6 +760,11 @@ function syncFloorplan(db: Db, before: Office, after: Office): void {
     );
   });
 
+  const earlier = new Map(before.floorplan.rooms.map((r) => [r.id, r.records]));
+  for (const room of plan.rooms) {
+    if (earlier.get(room.id) !== room.records) writeRoomRecords(db, room);
+  }
+
   run(db, "DELETE FROM doors WHERE room_id IN (SELECT id FROM rooms WHERE floorplan_id = ?)", plan.id);
   for (const room of plan.rooms) {
     room.doors.forEach((door, position) => {
@@ -927,6 +953,10 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     }>(db, "SELECT * FROM doors ORDER BY room_id, position"),
     (d) => d.room_id,
   );
+  const recordsByRoom = groupBy(
+    all<{ room_id: string; body: string }>(db, "SELECT room_id, body FROM room_records ORDER BY room_id, position"),
+    (r) => r.room_id,
+  );
   const rooms: Room[] = all<{
     id: string;
     name: string;
@@ -948,7 +978,15 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
       width: d.width,
     })),
     deskIds: desks.filter((d) => d.roomId === r.id).map((d) => d.id),
+    records: (recordsByRoom.get(r.id) ?? []).map((record) => record.body),
   }));
+  const roomIds = new Set(rooms.map((r) => r.id));
+  const systems: ConnectedSystem[] = all<{ id: string; name: string; kind: ConnectedSystem["kind"]; room_id: string }>(
+    db,
+    "SELECT id, name, kind, room_id FROM connected_systems ORDER BY position",
+  )
+    .filter((s) => roomIds.has(s.room_id))
+    .map((s) => ({ id: s.id, name: s.name, kind: s.kind, roomId: s.room_id }));
 
   const stageRooms = Object.fromEntries(
     all<{ stage: string; room_id: string }>(
@@ -1048,6 +1086,11 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
   const stepNeeds = byStep<{ step_id: string; room_id: string; scope: AccessScope; purpose: string }>(
     "playbook_needs",
   );
+  const stepActions = byStep<{ step_id: string; system_id: string; operation: string }>("playbook_actions");
+  const stepActionFields = groupBy(
+    all<{ step_id: string; name: string; value: string }>(db, "SELECT * FROM playbook_action_fields"),
+    (f) => f.step_id,
+  );
   const playbooks = groupBy(
     all<{
       id: string;
@@ -1065,6 +1108,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
       const question = stepQuestions.get(row.id);
       const assumption = stepAssumptions.get(row.id);
       const need = stepNeeds.get(row.id);
+      const action = stepActions.get(row.id);
       return {
         id: row.id,
         when: {
@@ -1087,6 +1131,13 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
             ? { assumed: assumption.assumed, because: assumption.because, confidence: assumption.confidence }
             : null,
           need: need ? { room: need.room_id, scope: need.scope, purpose: need.purpose } : null,
+          action: action
+            ? {
+                systemId: action.system_id,
+                operation: action.operation,
+                fields: Object.fromEntries((stepActionFields.get(row.id) ?? []).map((f) => [f.name, f.value])),
+              }
+            : null,
         },
       };
     });
@@ -1390,6 +1441,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
       rules,
       tasks,
       messages,
+      systems,
     },
     now: officeRow.clock_ms,
     seq: officeRow.id_sequence,

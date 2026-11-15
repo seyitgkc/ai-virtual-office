@@ -32,6 +32,7 @@ import {
   type Task,
   type TaskId,
 } from "./model";
+import { ROOM_RECORDS } from "./referenceData";
 
 // ---------------------------------------------------------------------------
 // Clock. Fixed so the demo is deterministic.
@@ -52,6 +53,13 @@ const at = (m: number): number => BASE + m * 60_000;
 //      x=0          x=15               x=30
 // ---------------------------------------------------------------------------
 
+/**
+ * The demo's two connected systems. They exist only where the server is told
+ * their addresses, so a playbook step that names one is skipped elsewhere.
+ */
+export const DEMO_STOREFRONT_ID = "sys-demo-storefront";
+export const DEMO_CARRIER_ID = "sys-demo-carrier";
+
 const rooms: Room[] = [
   {
     id: "reception",
@@ -64,6 +72,7 @@ const rooms: Room[] = [
       { id: "d-rec-ful", toRoomId: "fulfilment", wall: "north", along: 0.5, width: 1.4 },
     ],
     deskIds: ["desk-rec-1", "desk-rec-2"],
+    records: ROOM_RECORDS.reception,
   },
   {
     id: "planning",
@@ -77,6 +86,7 @@ const rooms: Room[] = [
       { id: "d-pla-ops", toRoomId: "operations", wall: "north", along: 0.75, width: 1.4 },
     ],
     deskIds: ["desk-pla-1"],
+    records: ROOM_RECORDS.planning,
   },
   {
     id: "finance",
@@ -88,6 +98,7 @@ const rooms: Room[] = [
       { id: "d-fin-ops", toRoomId: "operations", wall: "north", along: 0.5, width: 1.4 },
     ],
     deskIds: ["desk-fin-1"],
+    records: ROOM_RECORDS.finance,
   },
   {
     id: "fulfilment",
@@ -100,6 +111,7 @@ const rooms: Room[] = [
       { id: "d-ful-ops", toRoomId: "operations", wall: "east", along: 0.5, width: 1.4 },
     ],
     deskIds: ["desk-ful-1", "desk-ful-2"],
+    records: ROOM_RECORDS.fulfilment,
   },
   {
     id: "operations",
@@ -112,6 +124,7 @@ const rooms: Room[] = [
       { id: "d-ops-fin", toRoomId: "finance", wall: "south", along: 2 / 3, width: 1.4 },
     ],
     deskIds: ["desk-ops-1"],
+    records: ROOM_RECORDS.operations,
   },
 ];
 
@@ -261,6 +274,7 @@ export const participants: Participant[] = [
             confidence: "medium",
           },
           need: null,
+          action: null,
         },
       },
     ] satisfies PlaybookStep[],
@@ -292,6 +306,7 @@ export const participants: Participant[] = [
             confidence: "low",
           },
           need: null,
+          action: null,
         },
       },
     ] satisfies PlaybookStep[],
@@ -314,15 +329,20 @@ export const participants: Participant[] = [
         id: "pb-vera-execution",
         when: { stage: "execution", requestContains: "", requestedBy: "anyone" },
         then: {
-          statusNote: "Checked stock across branches; a transfer is required to fill the order.",
+          statusNote: "Checked stock across branches; Laval can fill the whole order.",
           output: null,
           question: null,
           assumption: {
-            assumed: "The dealer will accept a split-origin shipment",
-            because: "No single branch can fill the order and the dealer stated no preference.",
+            assumed: "The dealer will accept shipment from Laval",
+            because: "Richmond Hill alone cannot fill the order and the dealer stated no preference.",
             confidence: "medium",
           },
-          need: { room: "finance", scope: "read", purpose: "Dealer tier and landed cost, to price the transfer" },
+          need: { room: "finance", scope: "read", purpose: "Dealer tier and landed cost, to price the order" },
+          action: {
+            systemId: DEMO_STOREFRONT_ID,
+            operation: "place_order",
+            fields: { account: "NOR-0188", branch: "Laval", items: "GREE-MZ-12 x 6" },
+          },
         },
       },
     ] satisfies PlaybookStep[],
@@ -346,10 +366,15 @@ export const participants: Participant[] = [
         when: { stage: "execution", requestContains: "", requestedBy: "anyone" },
         then: {
           statusNote: "Assembling the quote from confirmed stock.",
-          output: { label: "Draft quote", body: "Six line items, split origin, pending tier pricing." },
+          output: { label: "Draft quote", body: "Six heads shipped from Laval, pending tier pricing." },
           question: null,
           assumption: null,
           need: { room: "finance", scope: "read", purpose: "Dealer tier pricing for account on file" },
+          action: {
+            systemId: DEMO_STOREFRONT_ID,
+            operation: "place_order",
+            fields: { account: "NOR-0188", branch: "Laval", items: "GREE-MZ-12 x 6" },
+          },
         },
       },
     ] satisfies PlaybookStep[],
@@ -377,6 +402,7 @@ export const participants: Participant[] = [
           question: null,
           assumption: null,
           need: null,
+          action: null,
         },
       },
     ] satisfies PlaybookStep[],
@@ -643,7 +669,7 @@ export const messages: Message[] = [
     audience: { to: "room", id: "fulfilment" },
     roomId: "fulfilment",
     at: at(27),
-    body: "Stock: 4 at Richmond Hill, 2 at Laval. Transfer would land 21 Nov.",
+    body: "Stock: 4 at Richmond Hill, 120 at Laval. Laval can ship all six by 21 Nov.",
     progress: 0.55,
   },
   {
@@ -654,8 +680,8 @@ export const messages: Message[] = [
     audience: { to: "room", id: "fulfilment" },
     roomId: "fulfilment",
     at: at(28),
-    body: "Assuming an inter-branch transfer is acceptable.",
-    assumed: "The dealer will accept a split-origin shipment",
+    body: "Assuming shipment from Laval is acceptable.",
+    assumed: "The dealer will accept shipment from Laval",
     because: "Richmond Hill alone cannot fill the order and the dealer stated no preference.",
     confidence: "medium",
     status: "open",
@@ -794,6 +820,7 @@ export const office: Office = {
   rules,
   tasks,
   messages,
+  systems: [],
 };
 
 /** Build the access context the resolver needs from an office snapshot. */

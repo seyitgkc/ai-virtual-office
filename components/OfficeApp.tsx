@@ -36,6 +36,8 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     adminOp,
     officeOp,
     providerOp,
+    systemOp,
+    readSystem,
     tokenOperation,
     signOut,
   } = useOffice(initial);
@@ -208,6 +210,8 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           dispatch={dispatch}
           officeOp={officeOp}
           providerOp={providerOp}
+          systemOp={systemOp}
+          readSystem={readSystem}
           onClose={() => setSettingsOpen(false)}
         />
       )}

@@ -13,6 +13,7 @@ import {
   type Participant,
   type PlaybookStep,
 } from "../lib/model";
+import { operationOf, SYSTEM_INFO, type SystemAction } from "../lib/systems";
 import type { ProviderOp } from "../lib/useOffice";
 import type { OfficeView, ProviderKind, ProviderView } from "../lib/view";
 import { KindBadge } from "./Panels";
@@ -439,10 +440,87 @@ function AgentEditor({
 const blankStep = (id: string): PlaybookStep => ({
   id,
   when: { stage: "any", requestContains: "", requestedBy: "anyone" },
-  then: { statusNote: "", output: null, question: null, assumption: null, need: null },
+  then: { statusNote: "", output: null, question: null, assumption: null, need: null, action: null },
 });
 
 /** One optional part of a step's outcome, switched on with a tick box. */
+const blankAction = (systemId: string, kind: keyof typeof SYSTEM_INFO): SystemAction => ({
+  systemId,
+  operation: SYSTEM_INFO[kind].operations[0].id,
+  fields: {},
+});
+
+/** The system, the operation and that operation's fields, for one playbook step. */
+function ActionFields({
+  action,
+  systems,
+  onChange,
+}: {
+  action: SystemAction;
+  systems: Office["systems"];
+  onChange: (action: SystemAction) => void;
+}) {
+  const system = systems.find((s) => s.id === action.systemId);
+  if (!system) {
+    return <p className="hint">The system this step used is no longer connected, so the step skips it.</p>;
+  }
+  const operation = operationOf(system.kind, action.operation) ?? SYSTEM_INFO[system.kind].operations[0];
+  return (
+    <>
+      <div className="step-fields">
+        <label>
+          System
+          <select
+            value={system.id}
+            onChange={(e) => {
+              const next = systems.find((s) => s.id === e.target.value);
+              if (next) onChange(blankAction(next.id, next.kind));
+            }}
+          >
+            {systems.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Do
+          <select
+            value={operation.id}
+            onChange={(e) => onChange({ systemId: system.id, operation: e.target.value, fields: {} })}
+          >
+            {SYSTEM_INFO[system.kind].operations.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="step-fields three">
+        {operation.fields.map((field) => (
+          <label key={field.name}>
+            {field.label}
+            <input
+              value={action.fields[field.name] ?? ""}
+              maxLength={200}
+              placeholder={field.hint}
+              onChange={(e) =>
+                onChange({ ...action, operation: operation.id, fields: { ...action.fields, [field.name]: e.target.value } })
+              }
+            />
+          </label>
+        ))}
+      </div>
+      <p className="hint">
+        The agent needs act access to the room the system is connected to. Without it the task halts and its
+        supervisor is asked.
+      </p>
+    </>
+  );
+}
+
 function Part({
   label,
   on,
@@ -483,6 +561,7 @@ function PlaybookEditor({
   const dirty = JSON.stringify(steps) !== JSON.stringify(agent.playbook);
   const people = office.participants.filter((p) => p.id !== agent.id);
   const rooms = office.floorplan.rooms;
+  const systems = office.systems;
 
   const change = (index: number, next: PlaybookStep) => setSteps(steps.map((s, i) => (i === index ? next : s)));
   const move = (index: number, by: -1 | 1) => {
@@ -747,6 +826,22 @@ function PlaybookEditor({
                 </div>
               )}
             </Part>
+
+            {(systems.length > 0 || then.action) && (
+              <Part
+                label="Do something in a connected system"
+                on={then.action !== null}
+                onToggle={(on) => setThen({ action: on && systems[0] ? blankAction(systems[0].id, systems[0].kind) : null })}
+              >
+                {then.action && (
+                  <ActionFields
+                    action={then.action}
+                    systems={systems}
+                    onChange={(action) => setThen({ action })}
+                  />
+                )}
+              </Part>
+            )}
           </fieldset>
         );
       })}

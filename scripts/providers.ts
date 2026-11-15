@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   const step = (when: Partial<PlaybookStep["when"]>, note: string, then: Partial<PlaybookStep["then"]> = {}): PlaybookStep => ({
     id: `pb-${note}`,
     when: { stage: "any", requestContains: "", requestedBy: "anyone", ...when },
-    then: { statusNote: note, output: null, question: null, assumption: null, need: null, ...then },
+    then: { statusNote: note, output: null, question: null, assumption: null, need: null, action: null, ...then },
   });
   expect("the captured step is at intake", input.stage, "intake");
   expect("a step with no conditions always applies", stepApplies(step({}, "any"), input), true);

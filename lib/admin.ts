@@ -28,6 +28,7 @@ import {
   type StageRooms,
   type Wall,
 } from "./model";
+import { checkedFields } from "./systems";
 
 export type ConfigurableStage = keyof StageRooms;
 export const CONFIGURABLE_STAGES: ConfigurableStage[] = ["intake", "planning", "execution", "review"];
@@ -82,6 +83,7 @@ export type AdminOp =
       side: Wall;
     }
   | { type: "UPDATE_ROOM"; roomId: string; name?: string; purpose?: string }
+  | { type: "SET_ROOM_RECORDS"; roomId: string; records: string[] }
   | { type: "REMOVE_ROOM"; roomId: string }
   | { type: "SET_STAGE_ROOM"; stage: ConfigurableStage; roomId: string };
 
@@ -138,6 +140,7 @@ export function permissionFor(op: AdminOp): Permission {
       return "manage_roles";
     case "ADD_ROOM":
     case "UPDATE_ROOM":
+    case "SET_ROOM_RECORDS":
     case "REMOVE_ROOM":
     case "SET_STAGE_ROOM":
       return "manage_rooms";
@@ -171,7 +174,11 @@ function cleanPlaybook(office: Office, steps: PlaybookStep[], newId: () => strin
     const requestedBy = step.when.requestedBy;
     if (requestedBy !== "anyone" && !people.has(requestedBy)) refuse(`${label}: that person is not in the office.`);
 
-    const { output, question, assumption, need } = step.then;
+    const { output, question, assumption, need, action } = step.then;
+    const system = action ? office.systems.find((s) => s.id === action.systemId) : undefined;
+    const fields = action && system ? checkedFields(system.kind, action.operation, action.fields) : null;
+    if (action && !system) refuse(`${label}: the connected system it uses does not exist.`);
+    if (action && !fields) refuse(`${label}: fill in every field of the action.`);
     if (question && question.to !== "requester" && !people.has(question.to)) {
       refuse(`${label}: the question is addressed to someone who is not in the office.`);
     }
@@ -205,10 +212,11 @@ function cleanPlaybook(office: Office, steps: PlaybookStep[], newId: () => strin
               }
             : null,
         need: need ? { room: need.room, scope: need.scope, purpose: short(need.purpose, 200) } : null,
+        action: action && fields ? { systemId: action.systemId, operation: action.operation, fields } : null,
       },
     };
     const t = cleaned.then;
-    if (!t.statusNote && !t.output && !t.question && !t.assumption && !t.need) {
+    if (!t.statusNote && !t.output && !t.question && !t.assumption && !t.need && !t.action) {
       refuse(`${label} does nothing yet. Fill in at least one part under Then.`);
     }
     return cleaned;
@@ -556,6 +564,7 @@ export function applyAdminOp(
           },
         ],
         deskIds: [],
+        records: [],
       };
       const rooms = floorplan.rooms.map((r) =>
         r.id === target.id
@@ -587,6 +596,17 @@ export function applyAdminOp(
       return {
         ...office,
         floorplan: { ...floorplan, rooms: floorplan.rooms.map((r) => (r.id === room.id ? next : r)) },
+      };
+    }
+
+    case "SET_ROOM_RECORDS": {
+      const room = findRoom(op.roomId);
+      const records = op.records.map((r) => r.trim().replace(/\s+/g, " ")).filter((r) => r.length > 0);
+      if (records.length > 40) refuse("A room can hold up to 40 records.");
+      if (records.some((r) => r.length > 300)) refuse("Keep each record under 300 characters.");
+      return {
+        ...office,
+        floorplan: { ...floorplan, rooms: floorplan.rooms.map((r) => (r.id === room.id ? { ...room, records } : r)) },
       };
     }
 
@@ -664,6 +684,7 @@ export function blankOffice(input: {
     bounds: { x: 0, z: 0, w: 14, d: 10 },
     doors: [{ id: `door-${suffix}-out`, toRoomId: null, wall: "south", along: 0.5, width: 1.6 }],
     deskIds: [deskId],
+    records: [],
   };
   return {
     id: `o-${suffix}`,
@@ -712,6 +733,7 @@ export function blankOffice(input: {
     rules: [],
     tasks: [],
     messages: [],
+    systems: [],
   };
 }
 
@@ -732,6 +754,8 @@ function parseSteps(input: unknown[]): PlaybookStep[] {
     const question = obj(then.question);
     const assumption = obj(then.assumption);
     const need = obj(then.need);
+    const action = obj(then.action);
+    const fields = obj(action?.fields) ?? {};
     return [
       {
         id: str(step.id, 60),
@@ -762,6 +786,17 @@ function parseSteps(input: unknown[]): PlaybookStep[] {
             : null,
           need: need
             ? { room: str(need.room, 60), scope: str(need.scope, 10) as AccessScope, purpose: str(need.purpose, 600) }
+            : null,
+          action: action
+            ? {
+                systemId: str(action.systemId, 60),
+                operation: str(action.operation, 40),
+                fields: Object.fromEntries(
+                  Object.entries(fields)
+                    .slice(0, 12)
+                    .map(([name, value]) => [name.slice(0, 40), str(value, 400)]),
+                ),
+              }
             : null,
         },
       },
@@ -875,6 +910,14 @@ export function parseAdminOp(input: unknown): AdminOp | null {
             roomId: o.roomId,
             ...(optionalText(o.name) !== undefined ? { name: o.name as string } : {}),
             ...(optionalText(o.purpose) !== undefined ? { purpose: o.purpose as string } : {}),
+          }
+        : null;
+    case "SET_ROOM_RECORDS":
+      return text(o.roomId, 60) && Array.isArray(o.records)
+        ? {
+            type: "SET_ROOM_RECORDS",
+            roomId: o.roomId,
+            records: o.records.filter((r): r is string => typeof r === "string").slice(0, 60),
           }
         : null;
     case "REMOVE_ROOM":

@@ -5,8 +5,9 @@
  * It implements the same `AgentRuntime` interface a playbook agent answers
  * through, so the engine does not know which one it is talking to. What the model is shown
  * is decided before the call, by the access model: the thread arrives already
- * limited to what this agent may read, and room records are included only for
- * rooms where the agent holds `read`.
+ * limited to what this agent may read, and a room's records and the live
+ * records of its connected systems are included only where the agent holds
+ * `read` on that room.
  *
  * The API key is entered once in Settings, stored encrypted, and used only
  * here on the server. It is never sent back to a browser.
@@ -21,7 +22,7 @@ import {
   type AgentStepResult,
 } from "../engine";
 import type { AccessScope, Message } from "../model";
-import { ROOM_RECORDS } from "../referenceData";
+import { SYSTEM_INFO } from "../systems";
 
 export { DEFAULT_AGENT_MODEL } from "../aiModels";
 
@@ -128,6 +129,13 @@ export const StepSchema = z.object({
       purpose: z.string(),
     }),
   ),
+  actions: z.array(
+    z.object({
+      system: z.string(),
+      operation: z.string(),
+      fields: z.array(z.object({ name: z.string(), value: z.string() })),
+    }),
+  ),
   output: z.object({ label: z.string(), body: z.string() }).nullable(),
 });
 
@@ -142,6 +150,7 @@ How to work:
 - If something you need is kept in a room you cannot read, add it to "needs" with that room's id, the scope "read" and a short purpose. Do not guess the value. Leave "needs" empty when you already have what you need.
 - If you can proceed but had to guess something, add it to "assumptions" with what you assumed, why, and how confident you are. Record every guess, even small ones, but never repeat an assumption that is already in the thread.
 - Ask a question only when you cannot do your step without the answer, and only when the thread does not already answer it. Mark it blocking in that case and offer two to four options when you can. Each option is a possible answer of at most eight words. Address the question to one person from the list of people, using their id.
+- Some rooms have a connected system, such as a storefront or a carrier. Its live records are shown with the records when you can read its room. To do something in a system, add an entry to "actions" with the system's id, one of its operations, and a value for every field of that operation, taken from the request, the thread or the records. Act only when your step calls for it and nothing is left to guess. If the thread shows the action was already done, do not ask for it again. If you may not act in that system, ask for the action anyway: your supervisor will be asked to allow it. Leave "actions" empty otherwise.
 - "statusNote" is one plain sentence saying what you did in this step.
 - Give "output" only when the step produced something a colleague will use, such as a plan, a check, a draft or a summary. Keep its label under eight words and its body under 120 words. Otherwise set it to null.
 - Write plain sentences. No headings, bullet lists or emphasis marks.`;
@@ -185,10 +194,26 @@ export function buildStepPrompt(input: AgentStepInput): string {
   }
   lines.push("");
 
+  if (surroundings.systems.length > 0) {
+    lines.push("Connected systems:");
+    for (const system of surroundings.systems) {
+      const operations = SYSTEM_INFO[system.kind].operations
+        .map((o) => `${o.id} (${o.fields.map((f) => `${f.name}, e.g. "${f.hint}"`).join("; ")})`)
+        .join(" | ");
+      lines.push(
+        `- ${system.id} (${system.name}, a ${SYSTEM_INFO[system.kind].label.toLowerCase()}) in the room "${system.roomId}". ` +
+          `${system.readable ? "You can read it." : "You cannot read it."} ` +
+          `${system.mayAct ? "You may act in it." : "You may not act in it."} Operations: ${operations}.`,
+      );
+    }
+    lines.push("");
+  }
+
   lines.push("Records you can read:");
-  const records = surroundings.rooms
-    .filter((r) => r.readable)
-    .flatMap((room) => (ROOM_RECORDS[room.id] ?? []).map((record) => `[${room.name}] ${record}`));
+  const records = [
+    ...surroundings.rooms.flatMap((room) => room.records.map((record) => `[${room.name}] ${record}`)),
+    ...(input.liveRecords ?? []),
+  ];
   if (records.length === 0) lines.push("(none: the rooms you can read hold no records)");
   lines.push(...records);
   lines.push("");
@@ -251,6 +276,18 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
     .slice(0, 2)
     .map((n) => ({ room: n.room, scope: n.scope as AccessScope, purpose: clip(n.purpose, 200) }));
 
+  // Whether the agent may act is the engine's decision. Here an action only
+  // has to name a system that exists.
+  const systemIds = new Set(input.surroundings.systems.map((s) => s.id));
+  const actions = raw.actions
+    .filter((a) => systemIds.has(a.system))
+    .slice(0, 2)
+    .map((a) => ({
+      systemId: a.system,
+      operation: a.operation.trim(),
+      fields: Object.fromEntries(a.fields.slice(0, 12).map((f) => [f.name.trim(), clip(f.value, 200)])),
+    }));
+
   const statusNote = clip(raw.statusNote, 300);
   const output =
     raw.output && raw.output.body.trim().length > 0
@@ -262,6 +299,7 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
     questions,
     assumptions,
     ...(needs.length > 0 ? { needs } : {}),
+    ...(actions.length > 0 ? { actions } : {}),
     ...(output ? { output } : {}),
   };
 }
@@ -269,7 +307,7 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
 export const JSON_INSTRUCTIONS = `
 
 Reply with one JSON object and nothing else. It must have exactly these fields:
-"statusNote" (string), "questions" (array of objects with "body", "toParticipantId", "blocking" and "options"), "assumptions" (array of objects with "assumed", "because" and "confidence" as "low", "medium" or "high"), "needs" (array of objects with "room", "scope" as "enter", "read" or "act", and "purpose"), and "output" (an object with "label" and "body", or null). Use empty arrays where there is nothing to report.`;
+"statusNote" (string), "questions" (array of objects with "body", "toParticipantId", "blocking" and "options"), "assumptions" (array of objects with "assumed", "because" and "confidence" as "low", "medium" or "high"), "needs" (array of objects with "room", "scope" as "enter", "read" or "act", and "purpose"), "actions" (array of objects with "system", "operation" and "fields", where "fields" is an array of objects with "name" and "value"), and "output" (an object with "label" and "body", or null). Use empty arrays where there is nothing to report.`;
 
 /** Pull the JSON object out of a reply that may be wrapped in a code fence. */
 export function parseReply(text: string): unknown {
@@ -277,7 +315,9 @@ export function parseReply(text: string): unknown {
   const body = (fenced ? fenced[1] : text).trim();
   const start = body.indexOf("{");
   const end = body.lastIndexOf("}");
-  return JSON.parse(start >= 0 && end > start ? body.slice(start, end + 1) : body);
+  const parsed: unknown = JSON.parse(start >= 0 && end > start ? body.slice(start, end + 1) : body);
+  // A reply with nothing to do in a connected system may leave the list out.
+  return parsed && typeof parsed === "object" && !("actions" in parsed) ? { ...parsed, actions: [] } : parsed;
 }
 
 export class ModelRuntime implements AgentRuntime {

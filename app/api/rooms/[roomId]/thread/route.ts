@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { contextOf } from "@/lib/policy";
-import { ROOM_RECORDS } from "@/lib/referenceData";
 import { checkAccessToken } from "@/lib/server/accessTokens";
 import { fail } from "@/lib/server/http";
 import { get } from "@/lib/server/db";
 import { officeDatabase } from "@/lib/server/officeService";
 import { loadEngineState } from "@/lib/server/officeStore";
+import { liveRecords } from "@/lib/server/systems";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +51,15 @@ export async function GET(
     room: { id: room.id, name: room.name },
     holder: check.token.participantId,
     limitedToTask: check.token.taskId,
-    records: ROOM_RECORDS[room.id] ?? [],
+    // The room's own records, then what its connected systems hold right now.
+    records: [
+      ...room.records,
+      ...(await liveRecords(
+        db,
+        state.office.id,
+        state.office.systems.filter((s) => s.roomId === room.id).map((s) => s.id),
+      )),
+    ],
     messages,
   });
 }

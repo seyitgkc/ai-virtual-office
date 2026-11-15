@@ -190,7 +190,13 @@ export function viewFor(
   ctx: AccessContext,
   viewer: Participant,
 ): { office: Office; hiddenMessages: Record<TaskId, number> } {
-  if (may(office, viewer, "see_everything")) return { office, hiddenMessages: {} };
+  // A room's records follow `read` on the room for everyone, whatever else
+  // their role lets them see.
+  const rooms = office.floorplan.rooms.map((room) =>
+    resolveAccess(viewer, room.id, "read", ctx).effect === "allow" ? room : { ...room, records: [] },
+  );
+  const floorplan = { ...office.floorplan, rooms };
+  if (may(office, viewer, "see_everything")) return { office: { ...office, floorplan }, hiddenMessages: {} };
 
   const hiddenMessages: Record<TaskId, number> = {};
   const messages: Message[] = [];
@@ -198,7 +204,7 @@ export function viewFor(
     if (canRead(message, viewer, ctx)) messages.push(message);
     else hiddenMessages[message.taskId] = (hiddenMessages[message.taskId] ?? 0) + 1;
   }
-  return { office: { ...office, messages }, hiddenMessages };
+  return { office: { ...office, messages, floorplan }, hiddenMessages };
 }
 
 /** May this viewer read what is said in a room? Used to filter the activity feed. */

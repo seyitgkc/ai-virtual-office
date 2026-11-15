@@ -32,6 +32,7 @@ const blank: Office = {
   rules,
   tasks: [],
   messages: [],
+  systems: [],
 };
 
 let state: EngineState = {

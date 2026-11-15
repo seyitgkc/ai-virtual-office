@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   expect("only people can be asked", vera.surroundings.people.every((p) => p.id === "p-dana" || p.id === "p-sam"), true);
 
   const prompt = buildStepPrompt(vera);
-  expect("prompt includes Fulfilment stock records", prompt.includes("Gree multi-zone head, 12k BTU: Richmond Hill 4"), true);
+  expect("prompt includes Fulfilment records", prompt.includes("Next inbound container at Laval"), true);
   expect("prompt leaves out Finance records", prompt.includes("dealer tier 2"), false);
   expect("prompt leaves out landed cost", prompt.includes("landed cost 790"), false);
   expect("prompt says Finance cannot be read", prompt.includes("finance (Finance)") && prompt.includes("You cannot read it."), true);
@@ -100,6 +100,7 @@ async function main(): Promise<void> {
         { room: "fulfilment", scope: "read", purpose: "already readable" },
         { room: "finance", scope: "read", purpose: "dealer tier" },
       ],
+      actions: [{ system: "sys-nowhere", operation: "place_order", fields: [] }],
       output: { label: "", body: "   " },
     },
     vera,
@@ -111,6 +112,7 @@ async function main(): Promise<void> {
   expect("long text is clipped", cleaned.assumptions[0].assumed.length, 200);
   expect("needs for unknown or already readable rooms are dropped", cleaned.needs?.map((n) => n.room).join(","), "finance");
   expect("an empty output is no output", cleaned.output, undefined);
+  expect("an action in a system that is not connected is dropped", cleaned.actions, undefined);
 
   const wordy = toStepResult(
     {
@@ -125,6 +127,7 @@ async function main(): Promise<void> {
       ],
       assumptions: [],
       needs: [],
+      actions: [],
       output: null,
     },
     vera,
@@ -136,7 +139,7 @@ async function main(): Promise<void> {
   console.log("\n-- the prompt is about the agent's own office --");
   expect("the prompt names the office", buildStepPrompt(vera).startsWith(`Office: ${initialState.office.name}.`), true);
   expect("the standing instructions name no line of business", /HVAC|distributor/i.test(SYSTEM_PROMPT), false);
-  const bare = buildStepPrompt({ ...vera, surroundings: { ...vera.surroundings, rooms: vera.surroundings.rooms.map((r) => ({ ...r, id: `other-${r.id}` })) } });
+  const bare = buildStepPrompt({ ...vera, surroundings: { ...vera.surroundings, rooms: vera.surroundings.rooms.map((r) => ({ ...r, records: [] })) } });
   expect("rooms with no records say so", bare.includes("(none: the rooms you can read hold no records)"), true);
 
   console.log("\n-- a halt at review ends in a decision --");

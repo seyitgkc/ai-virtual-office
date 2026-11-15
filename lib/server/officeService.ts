@@ -47,6 +47,18 @@ import {
   testStoredProvider,
   type ProviderInput,
 } from "./providers";
+import {
+  ensureDemoSystems,
+  liveRecords,
+  performInSystem,
+  readSystem,
+  removeSystem,
+  saveSystem,
+  SystemError,
+  systemRoom,
+  systemViews,
+  type SystemInput,
+} from "./systems";
 
 /** The seeded distributor. It exists only for password-free demo sign-in. */
 export const DEMO_OFFICE_ID = initialState.office.id;
@@ -171,6 +183,7 @@ export function officeDatabase(): Db {
     if (demo) {
       ensureDemoAccounts(db, demo.office);
       restoreDemoPlaybooks(db, demo.office);
+      ensureDemoSystems(db, demo.office);
     }
     syncAccessTokens(db);
   });
@@ -194,12 +207,18 @@ export function useAgentRuntime(runtime: AgentRuntime | undefined): void {
  * agent from its written steps, an AI agent through the provider it names.
  */
 function runtimeFor(db: Db, officeId: string): AgentRuntime {
-  if (overrides.__officeRuntime) return overrides.__officeRuntime;
+  const perform: AgentRuntime["perform"] = (call) => performInSystem(db, officeId, call);
+  const override = overrides.__officeRuntime;
+  if (override) return { step: (input) => override.step(input), perform: override.perform ?? perform };
   return {
-    step: async (input) =>
-      input.participant.agentType === "ai"
-        ? runtimeForAgent(db, officeId, input.participant).step(input)
-        : runPlaybook(input),
+    step: async (input) => {
+      if (input.participant.agentType !== "ai") return runPlaybook(input);
+      // An AI agent is shown what the systems it may read hold at this moment.
+      const readable = input.surroundings.systems.filter((s) => s.readable).map((s) => s.id);
+      const live = readable.length > 0 ? await liveRecords(db, officeId, readable) : [];
+      return runtimeForAgent(db, officeId, input.participant).step({ ...input, liveRecords: live });
+    },
+    perform,
   };
 }
 
@@ -296,6 +315,12 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
     // providers or choose one for an agent.
     providers: can("manage_providers") || can("manage_people") ? providerViews(db, office.id) : [],
     providersEditable: can("manage_providers") && session.hasPassword && !isDemoOffice(office.id),
+    // Addresses are for people who manage rooms, and only for systems in
+    // rooms they can read.
+    systems: can("manage_rooms")
+      ? systemViews(db, office.id).filter((s) => mayRead(ctx, viewer, s.roomId))
+      : [],
+    systemsEditable: can("manage_rooms") && session.hasPassword && !isDemoOffice(office.id),
     // Token details are for people who manage access and for the holder.
     accessTokens: listAccessTokens(db, office.id)
       .filter((t) => can("manage_access") || t.participantId === viewer.id)
@@ -495,6 +520,8 @@ function describeAdminOp(op: AdminOp, before: Office, after: Office, actor: Part
       return `${who} added the room ${op.name.trim()} next to ${quoted(before, op.attachTo)}`;
     case "UPDATE_ROOM":
       return `${who} updated the room ${quoted(after, op.roomId)}`;
+    case "SET_ROOM_RECORDS":
+      return `${who} changed the records kept in ${quoted(after, op.roomId)}`;
     case "REMOVE_ROOM":
       return `${who} removed the room ${quoted(before, op.roomId)}`;
     case "SET_STAGE_ROOM":
@@ -508,6 +535,9 @@ export function applyAdminOperation(session: Session, op: AdminOp): Promise<Offi
     const db = officeDatabase();
     const before = loadOffice(db, session);
     const actor = requirePermission(before, session, permissionFor(op));
+    if (op.type === "SET_ROOM_RECORDS" && !mayRead(contextOf(before.office, before.now), actor, op.roomId)) {
+      throw new OfficeError(403, "You cannot read that room, so you cannot change its records.");
+    }
 
     let office: Office;
     try {
@@ -629,6 +659,90 @@ export async function testProviderSettings(session: Session, providerId: string)
     // A provider's failure is reported as 424. A proxy in front of the server
     // replaces the body of a 5xx reply with its own page, which hides the reason.
     throw new OfficeError(424, error instanceof Error ? error.message : "The connection test failed.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Connected systems
+// ---------------------------------------------------------------------------
+
+/** The person and office for work on a room's connected systems, or a refusal. */
+function systemManager(db: Db, session: Session, roomId: string | null): { state: EngineState; actor: Participant } {
+  const state = loadOffice(db, session);
+  const actor = requirePermission(state, session, "manage_rooms");
+  if (roomId === null) throw new OfficeError(404, "That connected system does not exist in this office.");
+  if (!mayRead(contextOf(state.office, state.now), actor, roomId)) {
+    throw new OfficeError(403, "You cannot read that room, so you cannot manage what is connected to it.");
+  }
+  return { state, actor };
+}
+
+function systemEditor(db: Db, session: Session, roomId: string | null): { state: EngineState; actor: Participant } {
+  const found = systemManager(db, session, roomId);
+  if (isDemoOffice(found.state.office.id)) {
+    throw new OfficeError(403, "The demo office is shared, so its connected systems are fixed.");
+  }
+  if (!session.hasPassword) throw new OfficeError(403, "Sign in with a password account to connect a system.");
+  return found;
+}
+
+/** Connect a system to a room, or change one. The API key is stored encrypted. */
+export function saveSystemSettings(session: Session, input: SystemInput): Promise<OfficeView> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    const { state, actor } = systemEditor(db, session, input.roomId);
+    if (input.id) systemEditor(db, session, systemRoom(db, state.office.id, input.id));
+    try {
+      transaction(db, () => {
+        saveSystem(db, state.office, input);
+        const room = state.office.floorplan.rooms.find((r) => r.id === input.roomId)?.name ?? input.roomId;
+        recordAudit(db, {
+          officeId: state.office.id,
+          officeClock: state.now,
+          actorId: actor.id,
+          actionType: input.id ? "UPDATE_SYSTEM" : "ADD_SYSTEM",
+          subject: { ...NO_SUBJECT, roomId: input.roomId },
+          notes: [`${actor.displayName} ${input.id ? "changed" : "connected"} the system ${input.name.trim()} in ${room}`],
+        });
+      });
+    } catch (error) {
+      if (error instanceof SystemError) throw new OfficeError(400, error.message);
+      throw error;
+    }
+    return buildView(db, loadOffice(db, session), session);
+  });
+}
+
+/** Disconnect a system from its room. */
+export function removeSystemSettings(session: Session, systemId: string): Promise<OfficeView> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    const { state, actor } = systemEditor(db, session, systemRoom(db, session.officeId ?? "", systemId));
+    transaction(db, () => {
+      const removed = removeSystem(db, state.office.id, systemId);
+      recordAudit(db, {
+        officeId: state.office.id,
+        officeClock: state.now,
+        actorId: actor.id,
+        actionType: "REMOVE_SYSTEM",
+        subject: { ...NO_SUBJECT, roomId: removed.roomId },
+        notes: [`${actor.displayName} disconnected the system ${removed.name}`],
+      });
+    });
+    return buildView(db, loadOffice(db, session), session);
+  });
+}
+
+/** Read what a connected system holds right now, for someone who can read its room. */
+export async function readSystemRecords(session: Session, systemId: string): Promise<{ name: string; records: string[] }> {
+  const db = officeDatabase();
+  systemManager(db, session, systemRoom(db, session.officeId ?? "", systemId));
+  try {
+    return await readSystem(db, session.officeId ?? "", systemId);
+  } catch (error) {
+    if (error instanceof SystemError) throw new OfficeError(404, error.message);
+    // Reported as 424 for the same reason as a provider's failure.
+    throw new OfficeError(424, error instanceof Error ? error.message : "The system gave no answer.");
   }
 }
 

@@ -40,6 +40,7 @@ import {
   type TaskStatus,
   type WorkflowStage,
 } from "./model";
+import { checkedFields, operationOf, type ConnectedSystem, type SystemAction } from "./systems";
 
 // ---------------------------------------------------------------------------
 // Pipeline
@@ -95,10 +96,18 @@ export const nextStage = (stage: WorkflowStage): WorkflowStage | null => {
 export interface AgentSurroundings {
   /** The name of the office the agent works in. */
   officeName: string;
-  /** Every room, and whether this agent may read what is said and kept there. */
-  rooms: { id: RoomId; name: string; purpose: string; readable: boolean }[];
+  /**
+   * Every room, and whether this agent may read what is said and kept there.
+   * `records` is empty for a room the agent cannot read.
+   */
+  rooms: { id: RoomId; name: string; purpose: string; readable: boolean; records: string[] }[];
   /** People the agent can address a question to. */
   people: { id: ParticipantId; displayName: string; title: string }[];
+  /**
+   * Outside systems connected to rooms. `readable` and `mayAct` follow the
+   * agent's access to the system's room.
+   */
+  systems: (ConnectedSystem & { readable: boolean; mayAct: boolean })[];
 }
 
 export interface AgentStepInput {
@@ -112,6 +121,11 @@ export interface AgentStepInput {
    */
   priorMessages: Message[];
   surroundings: AgentSurroundings;
+  /**
+   * What the connected systems this agent may read hold right now, one line
+   * per record. Fetched by the server just before the step; absent elsewhere.
+   */
+  liveRecords?: string[];
 }
 
 export interface DraftQuestion {
@@ -147,7 +161,21 @@ export interface AgentStepResult {
   /** Agents declare every guess they had to make. Non-negotiable. */
   assumptions: DraftAssumption[];
   needs?: AccessNeed[];
+  /** Things to do in connected systems. Each needs `act` on the system's room. */
+  actions?: SystemAction[];
   output?: { label: string; body: string };
+}
+
+/** One operation to carry out in a connected system, on behalf of a task. */
+export interface SystemCall extends SystemAction {
+  system: ConnectedSystem;
+  taskId: TaskId;
+}
+
+/** What the system answered, in one sentence for the thread. */
+export interface SystemOutcome {
+  ok: boolean;
+  summary: string;
 }
 
 /**
@@ -156,6 +184,11 @@ export interface AgentStepResult {
  */
 export interface AgentRuntime {
   step(input: AgentStepInput): Promise<AgentStepResult>;
+  /**
+   * Carry out one operation in a connected system. The engine calls this only
+   * after the access model has allowed it. Absent where nothing is connected.
+   */
+  perform?(call: SystemCall): Promise<SystemOutcome>;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +323,28 @@ export async function reduce(
   const emitted: Message[] = [];
   const notes: string[] = [];
   let office = state.office;
+
+  // Once a halt for access is cleared, the agent that was halted takes its
+  // step again, now that it can see or do what it could not. Whatever it
+  // already said is not said twice. If it cannot answer, the task stays
+  // unblocked and a person can still move it on.
+  const resume = async (unblocked: { taskId: TaskId; participantId: ParticipantId }[]): Promise<void> => {
+    for (const { taskId, participantId } of unblocked) {
+      const task = office.tasks.find((t) => t.id === taskId);
+      const owner = office.participants.find((p) => p.id === task?.ownerId);
+      if (!task || !owner || owner.kind !== "agent" || owner.id !== participantId) continue;
+      try {
+        const turn = await runAgent(office, task, task.stage, owner, runtime, now, nextId, true);
+        office = turn.office;
+        emitted.push(...turn.emitted);
+        notes.push(...turn.notes);
+      } catch (error) {
+        notes.push(
+          `${owner.displayName} could not take the step on ${task.id} again: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  };
 
   const done = (): StepResult => ({
     state: { ...state, office, now, seq },
@@ -561,6 +616,7 @@ export async function reduce(
       const retried = retryBlocked(office, { ...state, office, now }, now, rule.id, rule.participantId);
       office = retried.office;
       notes.push(...retried.notes);
+      await resume(retried.unblocked);
       return done();
     }
 
@@ -583,6 +639,7 @@ export async function reduce(
       );
       office = afterRevoke.office;
       notes.push(...afterRevoke.notes);
+      await resume(afterRevoke.unblocked);
       return done();
     }
 
@@ -753,9 +810,10 @@ function retryBlocked(
   cause: string,
   /** Whose access just changed. Other people's blocks are re-tested quietly. */
   changedFor: ParticipantId,
-): { office: Office; notes: string[] } {
+): { office: Office; notes: string[]; unblocked: { taskId: TaskId; participantId: ParticipantId }[] } {
   const ctx = contextOf(state);
   const notes: string[] = [];
+  const unblocked: { taskId: TaskId; participantId: ParticipantId }[] = [];
   let next = office;
 
   for (const task of office.tasks) {
@@ -793,6 +851,7 @@ function retryBlocked(
         { at: now, summary: `Unblocked by ${cause}`, decision: verdict },
       ],
     });
+    unblocked.push({ taskId: task.id, participantId });
     notes.push(
       `${task.id} unblocked by ${cause}. ${
         openStatus(task.stage) === "in_review" ? "It is ready for a decision." : "Advance it to continue."
@@ -800,7 +859,7 @@ function retryBlocked(
     );
   }
 
-  return { office: next, notes };
+  return { office: next, notes, unblocked };
 }
 
 // ---------------------------------------------------------------------------
@@ -815,6 +874,8 @@ async function runAgent(
   runtime: AgentRuntime,
   now: number,
   nextId: (prefix: string) => string,
+  /** True when the agent takes a step again after a halt was cleared. */
+  resumed = false,
 ): Promise<{ office: Office; emitted: Message[]; notes: string[] }> {
   if (participant.kind !== "agent") {
     return { office, emitted: [], notes: [] };
@@ -829,17 +890,24 @@ async function runAgent(
   const prior = office.messages
     .filter((m) => m.taskId === task.id && canRead(m, participant, ctx))
     .sort((a, b) => a.at - b.at);
+  const mayRead = (room: RoomId): boolean => resolveAccess(participant, room, "read", ctx).effect === "allow";
   const surroundings: AgentSurroundings = {
     officeName: office.name,
     rooms: office.floorplan.rooms.map((room) => ({
       id: room.id,
       name: room.name,
       purpose: room.purpose,
-      readable: resolveAccess(participant, room.id, "read", ctx).effect === "allow",
+      readable: mayRead(room.id),
+      records: mayRead(room.id) ? room.records : [],
     })),
     people: office.participants
       .filter((p) => p.kind === "human")
       .map((p) => ({ id: p.id, displayName: p.displayName, title: p.title })),
+    systems: office.systems.map((system) => ({
+      ...system,
+      readable: resolveAccess(participant, system.roomId, "read", ctx).effect === "allow",
+      mayAct: resolveAccess(participant, system.roomId, "act", ctx).effect === "allow",
+    })),
   };
 
   const result = await runtime.step({
@@ -853,7 +921,19 @@ async function runAgent(
   const notes: string[] = [];
   let updated: Task = task;
 
-  if (result.statusNote) {
+  // On a step taken again, a status note or question the agent already put on
+  // this task is left out.
+  const said = new Set(
+    resumed
+      ? office.messages.flatMap((m) =>
+          m.taskId === task.id && m.fromId === participant.id && (m.kind === "status" || m.kind === "question")
+            ? [`${m.kind}:${m.body}`]
+            : [],
+        )
+      : [],
+  );
+
+  if (result.statusNote && !said.has(`status:${result.statusNote}`)) {
     const status: Message = {
       id: nextId("m"),
       kind: "status",
@@ -898,6 +978,7 @@ async function runAgent(
   }
 
   for (const draft of result.questions) {
+    if (said.has(`question:${draft.body}`)) continue;
     const question: Message = {
       id: nextId("m"),
       kind: "question",
@@ -926,7 +1007,24 @@ async function runAgent(
   // happens in: the agent works, records what it guessed, then hits the wall.
   let wallHit = false;
 
-  for (const need of result.needs ?? []) {
+  // An action names a system and an operation that system has. Anything else
+  // is dropped, as is an action with a field left empty.
+  const calls: SystemCall[] = (result.actions ?? []).flatMap((action) => {
+    const system = office.systems.find((s) => s.id === action.systemId);
+    const fields = system ? checkedFields(system.kind, action.operation, action.fields) : null;
+    return system && fields ? [{ ...action, fields, system, taskId: task.id }] : [];
+  });
+  // Acting in a system the agent may not act in is a need like any other, and
+  // halts the task the same way.
+  const actionNeeds: AccessNeed[] = calls
+    .filter((call) => resolveAccess(participant, call.system.roomId, "act", ctx).effect !== "allow")
+    .map((call) => ({
+      room: call.system.roomId,
+      scope: "act",
+      purpose: `${operationOf(call.system.kind, call.operation)?.label ?? call.operation} in ${call.system.name}`,
+    }));
+
+  for (const need of [...(result.needs ?? []), ...actionNeeds]) {
     const verdict = resolveAccess(participant, need.room, need.scope, ctx);
     if (verdict.effect === "allow") continue;
 
@@ -983,6 +1081,30 @@ async function runAgent(
     );
     wallHit = true;
     break;
+  }
+
+  // Nothing is done in an outside system while the step is halted for access.
+  // It is done when the halt is cleared and the agent takes the step again.
+  if (!wallHit) {
+    for (const call of calls) {
+      const outcome: SystemOutcome = runtime.perform
+        ? await runtime.perform(call)
+        : { ok: false, summary: "it is not reachable from here, so nothing was done" };
+      const done: Message = {
+        id: nextId("m"),
+        kind: "status",
+        taskId: task.id,
+        fromId: participant.id,
+        audience: { to: "room", id: call.system.roomId },
+        roomId: call.system.roomId,
+        at: now,
+        body: `${call.system.name}: ${outcome.summary}`,
+      };
+      emitted.push(done);
+      notes.push(
+        `${participant.displayName} ${outcome.ok ? "used" : "was refused by"} ${call.system.name}: ${outcome.summary}`,
+      );
+    }
   }
 
   // A playbook's output is written for a step that went through, so it only
