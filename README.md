@@ -136,8 +136,9 @@ screen:
   and only a human decision completes or rejects the task.
 
 Every permission change records who made it and why. A grant made for one task
-expires when that task closes, so an exception does not turn into standing
-access.
+counts only for work on that task and expires when the task closes, so an
+exception does not turn into standing access. An agent holding such a grant is
+not shown that room while it works on a different task, or in a conversation.
 
 ## User guide
 
@@ -711,7 +712,11 @@ messages, whichever kind of agent it is. If it needs them, it has to say so in
 
 A model's reply is validated against a schema and then cleaned: rooms, people
 and systems that do not exist are dropped, lists are capped and text is
-trimmed.
+trimmed. Before validation a reply that is nearly right is put into shape
+where its meaning is plain: a list left out or given as null is empty, and an
+output given as bare text gets a label. A reply that still cannot be read is
+asked for once more, and if the second one fails too the step is not taken and
+the message says what was wrong with it.
 
 A conversation at an agent's desk goes through a second filter. The agent is
 shown a room's records, a system's live records and a task's messages only
@@ -1273,7 +1278,8 @@ foreign keys, so an entry survives the task or rule it describes.
 
 **Functional**
 
-- The access resolver: precedence, conflict reporting, expiry by time or task.
+- The access resolver: precedence, conflict reporting, expiry by time or task,
+  and limiting a grant made for one task to work on that task.
 - The workflow engine: handoffs, halts on permission and on questions,
   retesting blocked tasks after a rule change.
 - Sign-in, sessions, sign-out, invites and password accounts.
@@ -1547,7 +1553,7 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, and how data is marked for a model | `npm run agents` | 79 of 79 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, and reading a reply that is nearly right | `npm run agents` | 96 of 96 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 55 of 55 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |

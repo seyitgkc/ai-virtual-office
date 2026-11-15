@@ -137,7 +137,9 @@ export function Scene({
   const labels = useMemo<LabelSpec[]>(() => {
     const roomLabels: LabelSpec[] = rooms.map((room) => ({
       id: `room:${room.id}`,
-      position: [roomCentre(room).cx, 0.06, room.bounds.z + 0.95],
+      // Along the near edge of the floor, where name tags above the desks
+      // do not cover it however full the room is.
+      position: [roomCentre(room).cx, 0.06, room.bounds.z + room.bounds.d - 0.75],
       hidden: walking,
       fullSizeAt: 46,
       node: (
