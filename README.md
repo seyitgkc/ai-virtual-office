@@ -9,10 +9,54 @@ the same access rules that govern the agents.
 
 **Live demo:** https://office.example.invalid
 
-![The office at load: Fulfilment is outlined in red because a quote is waiting on access to Finance](docs/office.jpg)
+![The office at load: five rooms along a hall, with Fulfilment outlined in red because a quote is waiting on access to Finance](docs/office.jpg)
+
+## In two minutes
+
+**What it is.** A browser-based 3D office where AI agents and people work
+side by side. Each has a desk, a role and a set of rooms they may enter, read
+and act in. A piece of work is filed as a request and moves from room to room:
+intake, planning, execution, review, completion. Each stage has an owner, a
+status and a visible handoff.
+
+**The idea.** The room is the permission boundary. An agent that needs
+something from a room it may not use has to stop and say so, and the stop has
+a place: the room turns red, and the screen names the rule that decided it. A
+supervisor does not read logs to find out why work is stuck. They look at the
+floor.
+
+**How a team uses it.** Someone files a request. Agents carry it forward and
+hand it on by themselves. A person is brought in at exactly four points: when
+an agent asks a question, when it needs access it does not hold, when it wants
+to do something in an outside system that needs approval, and at the final
+review. Everything else moves without a click.
+
+**What to try first.**
+
+1. Open the [live demo](https://office.example.invalid) and enter as Dana, the
+   operations manager. No password is needed.
+2. The dealer order **T-1001** is halted at the Finance door. Click **Grant
+   read on Finance, for this task only**.
+3. The agent asks whether it may place the order in the storefront. Click
+   **Approve**. A real order is placed in a sample storefront service, and
+   the task moves to review by itself.
+4. Click **Approve** to complete it.
+5. Click **Walk the office** to go through it on foot. Enter as Sam instead
+   to meet the doorways Sam may not pass.
+
+**What is real and what is not.** The access model, the workflow, sign-in,
+the database, the audit trail and the calls to the two sample services all
+run for real. The demo's agents follow written playbooks, and the screen says
+so. Real AI agents on a language model work too, in any office where a
+provider is connected, and have been run end to end on the deployed site. The
+business data is invented. The full list is under
+[What is functional, simulated and proposed](#what-is-functional-simulated-and-proposed).
+
+![On foot as Sam: the Finance doorway is closed by a red pane, because Sam's role may not enter that room](docs/walk.jpg)
 
 ## Contents
 
+- [In two minutes](#in-two-minutes)
 - [The problem](#the-problem)
 - [What it does](#what-it-does)
 - [Everyday use](#everyday-use)
@@ -20,7 +64,9 @@ the same access rules that govern the agents.
 - [Example workflows](#example-workflows)
 - [Architecture](#architecture)
 - [Database](#database)
+- [Design decisions](#design-decisions)
 - [Tech stack](#tech-stack)
+- [A production version](#a-production-version)
 - [What is functional, simulated and proposed](#what-is-functional-simulated-and-proposed)
 - [Security](#security)
 - [Limitations](#limitations)
@@ -137,6 +183,7 @@ way in →             H a l l                │
 | Fulfilment | Execution | Vera (inventory agent), Quill (quoting agent) | Stock is checked across branches, transfers are proposed, the quote is assembled. |
 | Finance | Review | Ledger (agent) | Dealer tier and credit standing are confirmed. A person approves or rejects. |
 | Operations | Supervision | Dana Reyes (operations manager) | Escalations land here. Dana has access to every room. |
+| Hall | none | nobody | The corridor every room opens onto. Everyone may walk it. |
 
 A dealer services rep files a request and the agents carry it forward. Orders
 that need nothing unusual go straight through to review. The supervisor's job
@@ -193,7 +240,9 @@ Each room's name is on a plate above its doorway, on the side you come to it
 from. A doorway into a room you may not enter is closed by a red, see-through
 pane that reads "Not Authorized", and it stops you: the same access rule that
 hides a room's messages from you keeps you out of the room on foot. Sign in to
-the demo as Sam to see it on Finance, Fulfilment and Operations.
+the demo as Sam to see it on Finance and Operations. Sam's role does not
+cover Fulfilment either, but Sam holds a temporary individual grant for it, so
+that doorway is open.
 
 Each desk's monitor shows its occupant's name and state: working, waiting for
 access, waiting on an answer, waiting for a decision, or nothing on the desk,
@@ -1358,18 +1407,50 @@ request acts on.
 The audit log is append-only. Its subject columns are plain text without
 foreign keys, so an entry survives the task or rule it describes.
 
+## Design decisions
+
+The choices that shaped the product, each with what it cost.
+
+| Decision | Why | What it costs |
+| --- | --- | --- |
+| Rooms are the permission boundary | A manager already understands "who is allowed in that room". Putting access on a floor plan makes a policy something you can point at. | Work has to be modelled as moving between rooms, which suits staged work better than free-form chat. |
+| A task halts only for a person-shaped reason | A question, missing access, an approval and the review are the four places where a person adds something an agent cannot. Halting anywhere else is noise. | Agents must settle everything else themselves, which took the notes between agents and the waiting loop to make work. |
+| The model is never the guard | A model is told its limits, and it is also never shown what it may not read, its reply is checked field by field, and an action is carried out only if the engine finds it allowed. | More code than trusting a prompt. It is why a planted instruction in a request cannot place an order by itself. |
+| The engine is a pure function | State and an action go in, a new state comes out. The whole workflow runs under Node without a browser, a server or a model, which is how 600 checks run in seconds. | Anything with a side effect (a model call, an outside system) has to be passed in from outside. |
+| One interface for every kind of agent | A playbook agent and an AI agent answer through the same `AgentRuntime`. The demo runs with no model and no key, and switching an agent to a real model is a change of setting. | The interface has to stay narrow: one step in, one structured result out. |
+| Every exception is scoped and explained | A grant can be for one task and expires with it. Every decision names the rule that made it. | The resolver carries precedence and expiry rules that a simple allow-list would not need. |
+| Simulated things say so | The brief asks for honesty about what is real. Each agent is labelled AI or Playbook, and each playbook output is marked. | Nothing, beyond the discipline of keeping the labels true. |
+| A 3D office, drawn as a cutaway | The walls are low from above so every room stays visible, and full height on foot. A halt has to be visible from anywhere. | Less realism than a closed building. |
+
 ## Tech stack
 
-- Next.js 16 (App Router) running as a Node server, with route handlers for
-  the API.
-- React 19 and TypeScript 7 in strict mode.
-- three.js through @react-three/fiber and @react-three/drei.
-- SQLite through Node's built-in `node:sqlite`. No native add-on to compile.
-- jose for JWT signing and verification. Node's scrypt for password hashing.
-- The Anthropic SDK for Anthropic providers, plain `fetch` for OpenAI
-  compatible ones, and zod to validate a model's reply.
-- tsx to run the check scripts under Node.
-- Docker for self-hosting.
+Each choice is here because it removed something to run or to explain.
+
+| Part | Choice | Why this one |
+| --- | --- | --- |
+| Framework | Next.js 16, App Router, as a Node server | One project holds the page, the API and the server logic, so the demo deploys as a single container. Route handlers are plain functions, which keeps the API easy to read. |
+| Language | TypeScript 7, strict | The access model and the engine are mostly types and pure functions. Strict types catch a wrong room id or a missing field before anything runs. |
+| 3D | three.js through @react-three/fiber and drei | The scene is declared as React components next to the panels that describe it, and it re-renders from the same state. No separate game loop to keep in step with the UI. |
+| Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (58 tables in third normal form), so moving to Postgres is a change of driver. |
+| Sign-in | jose for signed tokens, Node's scrypt for passwords | Small, standard and dependency-light. No outside identity service is needed for the demo to be public. |
+| AI providers | The Anthropic SDK, and plain `fetch` for anything that speaks the OpenAI chat interface | Two connection styles cover nearly every hosted and self-hosted model, so an office is not tied to one vendor. zod checks every reply before the engine sees it. |
+| Checks | tsx running plain scripts | No test framework to learn. Each script prints what it checks in a sentence, and the Docker image refuses to build unless all of them pass. |
+| Hosting | Docker, behind a reverse proxy | Runs on any host that runs containers, with no paid service. The deployed site is three small containers on one server. |
+
+## A production version
+
+Much of what the brief asks about for production is already built. This is
+what exists, and what a real deployment would add.
+
+| Area | In this repository | A production version would add |
+| --- | --- | --- |
+| Orchestration | The engine applies one action at a time. After each one the server works through what agents now have in front of them, in the background, in the same queue as people's actions. | A durable job queue, so work in flight survives a restart and several servers can share it. Today that queue lives in one server's memory. |
+| State updates | Every change goes through the server, is checked against the person's permissions, stored, and written to the audit log. Browsers re-read every five seconds, or every second and a half while agents work. | Updates pushed to the browser over a WebSocket or server-sent events, so a change shows the moment it happens. |
+| Persistence | SQLite, with migrations that bring an older database forward on start. | Postgres, for more than one server process, point-in-time backups and row-level locking. The schema carries over as it is. |
+| Real AI | Working today: several providers per office or per account, a model per agent, structured replies that are validated, a retry on an unreadable reply, and limits enforced outside the model. | Streaming, so a long step shows progress. Per-office spending limits and usage reports. Tools an agent can call during a step, in place of a fixed snapshot of each system. |
+| Outside systems | Two kinds of connector, read and write, behind the room's access rules, with per-action approval and repeat-safe requests. Tested against two sample services. | Connectors for named products such as Shopify or an accounting package, and retries with backoff when a system is down. |
+| Identity | Password accounts, sessions, invites and a public demo sign-in. | Single sign-on, password reset by email, and two-factor sign-in. |
+| Operations | A container that checks itself before it builds, a health check, an audit log. | Metrics, alerting, log shipping and a staging environment. |
 
 ## What is functional, simulated and proposed
 
