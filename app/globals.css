@@ -553,3 +553,52 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
   border-radius: 6px; padding: 6px 8px; width: 100%;
 }
 .answer-box .btn { align-self: flex-start; margin: 0; }
+
+/* ---- phones: one section at a time, chosen from a bar at the bottom ---- */
+.phone-nav { display: none; }
+@media (max-width: 720px) {
+  .phone-nav {
+    display: flex; position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+    height: calc(52px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom);
+    background: rgba(14, 16, 20, 0.97); border-top: 1px solid rgba(255,255,255,0.1);
+  }
+  .phone-nav button {
+    flex: 1; font: inherit; font-size: 12px; cursor: pointer;
+    color: rgba(232,230,225,0.6); background: none;
+    border: 0; border-top: 2px solid transparent;
+  }
+  .phone-nav button[aria-current="page"] { color: #e8e6e1; border-top-color: #6ea9d9; }
+
+  #left { top: 10px; left: 10px; right: 10px; bottom: 62px; width: auto; }
+  #left .panel, #left #tasks { display: none; }
+  .office[data-sheet="office"] #title { display: block; }
+  .office[data-sheet="work"] #left #tasks { display: flex; flex: 1 1 auto; }
+  .office[data-sheet="activity"] #feed { display: flex; flex: 1 1 auto; max-height: none; margin-top: 0; }
+  .office[data-sheet="activity"] #minimap { display: block; margin-top: 0; }
+  /* The title card stays small so the office shows beneath it. */
+  #title p, #title .legend, #title .sim { display: none; }
+
+  #inspector { display: none; top: 10px; left: 10px; right: 10px; width: auto; max-height: calc(100% - 72px); }
+  .office[data-sheet="detail"] #inspector { display: flex; }
+
+  .notice { left: 10px; right: 10px; bottom: 62px; transform: none; max-width: none; min-width: 0; }
+  .dialog-backdrop { padding: 10px; }
+  /* Settings fill the screen. Wide tables scroll sideways inside their own box. */
+  .dialog-backdrop:has(.settings) { display: block; padding: 0; }
+  .dialog.settings { width: 100%; min-width: 0; height: 100%; max-height: none; border: 0; border-radius: 0; }
+  .dialog { min-width: 0; max-width: 100%; }
+  .name-tag { font-size: 8.5px; padding: 2px 6px 2px 2px; gap: 3px; }
+  .name-tag .kind-badge { font-size: 7px; padding: 2px 4px; }
+  .settings-head { padding: 12px 14px 8px; }
+  .tabbar { padding: 0 8px; }
+  .settings-body { padding: 4px 14px 16px; }
+  .settings .form-grid { grid-template-columns: 1fr; }
+  .settings .form-inline { flex-wrap: wrap; }
+  .settings .row { grid-template-columns: 1fr; gap: 4px; }
+  .grid-table { min-width: 560px; }
+  .login-card { padding: 18px; }
+}
+/* Walking needs a keyboard. */
+@media (pointer: coarse) {
+  #title .btn.mode { display: none; }
+}

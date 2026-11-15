@@ -1199,7 +1199,9 @@ playbook.
   be moved or resized once it exists.
 - A person or agent who appears in tasks or messages cannot be removed until
   the work is cleared.
-- The layout targets desktop screens. Panels overlap on a phone.
+- On a phone the interface shows one section at a time, chosen from a bar at
+  the bottom, and walking is unavailable because it needs a keyboard. Settings
+  tables scroll sideways there.
 - The demo office shows a fixed demo clock that steps forward three minutes
   per action. Other offices use real time.
 

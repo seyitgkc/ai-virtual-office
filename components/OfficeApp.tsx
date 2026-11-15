@@ -11,6 +11,9 @@ import { Minimap } from "./Minimap";
 import { InviteDialog } from "./InviteDialog";
 import { Settings } from "./Settings";
 
+/** On a phone one section shows at a time. A wide screen shows them all. */
+type Sheet = "office" | "work" | "detail" | "activity";
+
 const Scene = dynamic(() => import("./Scene").then((m) => m.Scene), {
   ssr: false,
   loading: () => <div className="scene-loading">Loading office...</div>,
@@ -42,6 +45,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
   );
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
 
+  const [sheet, setSheet] = useState<Sheet>("office");
   const [inviting, setInviting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mode, setMode] = useState<"overview" | "walk">("overview");
@@ -65,6 +69,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     if (office.tasks.length > taskCount.current) {
       setSelectedTaskId(office.tasks[office.tasks.length - 1].id);
       setSelectedPersonId(null);
+      setSheet("detail");
     }
     taskCount.current = office.tasks.length;
   }, [office.tasks]);
@@ -82,7 +87,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
   const participant = office.participants.find((p) => p.id === selectedPersonId) ?? null;
 
   return (
-    <main className="office" data-pending={pending}>
+    <main className="office" data-pending={pending} data-sheet={sheet}>
       <Scene
         office={office}
         viewerId={viewer.id}
@@ -94,6 +99,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         onSelectParticipant={(id) => {
           setSelectedPersonId(id);
           setSelectedTaskId(null);
+          setSheet("detail");
         }}
         onSelectRoom={() => setSelectedPersonId(null)}
         roomHighlight={roomHighlight}
@@ -119,6 +125,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           onSelect={(id) => {
             setSelectedTaskId(id);
             setSelectedPersonId(null);
+            setSheet("detail");
           }}
           submitBlocked={mayFile.allowed ? null : mayFile.reason}
           isDemoOffice={view.isDemoOffice}
@@ -154,10 +161,32 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         dispatch={dispatch}
         onTokenOperation={tokenOperation}
         onClear={() => {
+          // Back to where the selection was made.
+          setSheet(selectedTaskId ? "work" : "office");
           setSelectedTaskId(null);
           setSelectedPersonId(null);
         }}
       />
+
+      <nav className="phone-nav" aria-label="Sections">
+        {(
+          [
+            { id: "office", label: "Office" },
+            { id: "work", label: `Work (${office.tasks.filter((t) => t.closedAt === null).length})` },
+            { id: "detail", label: "Details" },
+            { id: "activity", label: mode === "walk" ? "Map" : "Activity" },
+          ] as { id: Sheet; label: string }[]
+        ).map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            aria-current={sheet === s.id ? "page" : undefined}
+            onClick={() => setSheet(s.id)}
+          >
+            {s.label}
+          </button>
+        ))}
+      </nav>
 
       {notice && (
         <div className="notice" role="status" data-tone={noticeTone}>

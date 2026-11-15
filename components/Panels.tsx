@@ -402,7 +402,7 @@ export function Inspector({
       </div>
       <div className="panel-body">
         <div className="empty">
-          Pick a task on the left, or click someone in the office.
+          Pick a task from the work list, or click someone in the office.
         </div>
       </div>
     </div>
