@@ -45,8 +45,9 @@ function NamePlate({ room, door, wallHeight }: { room: Room; door: Door; wallHei
   const { cx, cz } = doorCentre(room, door);
   const out = OUTWARD[door.wall];
   const reach = (door.toRoomId === null ? 0 : INSET * 2) + WALL_THICK / 2 + 0.012;
-  const width = Math.min(door.width + 0.5, 2.1);
-  const height = Math.min(0.36, wallHeight - DOOR_HEIGHT - 0.06);
+  // No wider than the opening and a little shorter than what closes over it.
+  const width = Math.min(door.width - 0.1, 1.5);
+  const height = Math.min(0.28, wallHeight - DOOR_HEIGHT - 0.12);
   const texture = useCanvasTexture(512, Math.round((512 * height) / width), room.name, (c) => {
     const h = c.canvas.height;
     c.fillStyle = "#1c2027";
@@ -54,7 +55,7 @@ function NamePlate({ room, door, wallHeight }: { room: Room; door: Door; wallHei
     c.fillStyle = "#e8e6e1";
     c.textAlign = "center";
     c.textBaseline = "middle";
-    let size = Math.round(h * 0.56);
+    let size = Math.round(h * 0.6);
     c.font = `600 ${size}px ${SCENE_FONT}`;
     while (c.measureText(room.name).width > 470 && size > 14) {
       size -= 2;
@@ -79,7 +80,7 @@ function Barrier({ room, door }: { room: Room; door: Door }) {
   const out = OUTWARD[door.wall];
   const texture = useCanvasTexture(384, 560, "not-authorized", (c) => {
     c.clearRect(0, 0, 384, 560);
-    c.fillStyle = "rgba(214, 58, 44, 0.42)";
+    c.fillStyle = "rgba(214, 58, 44, 0.3)";
     c.fillRect(0, 0, 384, 560);
     c.strokeStyle = "rgba(255, 214, 208, 0.85)";
     c.lineWidth = 8;
