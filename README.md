@@ -192,7 +192,7 @@ checked on the server, stored, and written to the audit log.
 | Tab | Needs the permission | What you can do |
 | --- | --- | --- |
 | Offices | none | See every office your account has a seat in. Open another one. Add a new office. Remove one you manage. |
-| This office | Manage the office | Rename the office. Clear all work, or remove the office. |
+| This office | Manage the office | Rename the office. Clear all work, or remove the office. In the demo office: reset it to how it first loaded. |
 | Rooms | Manage rooms | Rename a room or change its purpose. Add a room against a wall of an existing one, with a door between them. Remove an empty room. Choose which room hosts each workflow stage. |
 | Records and systems | Manage rooms | Edit the records kept in each room you can read. See what a connected system holds right now. Connect a system to a room, change it, or disconnect it. |
 | People and agents | Manage people and agents | Add an AI agent or a playbook agent with a desk and a role. Choose an agent's provider and model, or write its playbook. Rename anyone, change their role, or move their desk. Remove someone who has no history. |
@@ -279,6 +279,12 @@ the roles from there. Demo access cannot add offices.
 ## Example workflows
 
 ### 1. A quote blocked at the Finance door
+
+If the demo has been used and T-1001 is no longer halted, open Settings, This
+office, and click **Reset the demo**. That puts back the seeded people, rules
+and three tasks for every visitor. The storefront is a separate service and
+keeps the order it already holds for T-1001, so after a reset the thread
+reports that order as already placed until the storefront's own daily reset.
 
 Enter as Dana. Task **T-1001** is selected: a dealer order for six multi-zone
 heads. It has already moved through Reception, Planning and Fulfilment,
@@ -747,7 +753,7 @@ last reason, until `r-02` is revoked.
 | `POST /api/admin` | the permission for that change | Apply one set-up change |
 | `POST /api/admin/providers` | Manage AI providers, password account | Add, change, remove or test an AI provider |
 | `POST /api/admin/systems` | Manage rooms, and read on the room | Read a connected system's live records. With a password account: connect, change or disconnect one |
-| `POST /api/offices` | signed in | Add an office, switch to another, or remove one |
+| `POST /api/offices` | signed in | Add an office, switch to another, or remove one. In the demo, with Manage the office: reset it |
 | `POST /api/invites` | Invite people | Create a person, a desk and an invite link |
 | `POST /api/invites/accept` | invite holder | Set email and password, sign in |
 | `POST /api/tokens/:id` | Manage access, or holder to reveal | Reveal or revoke a permission token |
@@ -1195,7 +1201,10 @@ foreign keys, so an entry survives the task or rule it describes.
   two sample services over HTTP with a stored key, reads their records live,
   and places and cancels orders and shipments in them. In the demo office, the
   agent working a dealer order places it in the storefront once its halt for
-  Finance is cleared, and the storefront's stock goes down.
+  Finance is cleared, and the storefront's stock goes down. This was run on
+  the deployed site: the grant on T-1001 produced order SO-1001 for six heads
+  from Laval, and the storefront's stock there went from 120 to 114.
+- Resetting the demo office to its seeded state, without signing anyone out.
 - Answering a question by picking one of the agent's choices or by typing an
   answer.
 - Several AI providers per office, each with an encrypted, write-only API key
@@ -1374,6 +1383,13 @@ over the stack's own network. An office other than the demo can connect to
 them too, at `http://storefront:8081` and `http://carrier:8082` with the value
 of `DEMO_SYSTEMS_KEY`. Back up the office by copying the volume.
 
+The deployed site runs the same three containers without compose, as three
+applications in one Dokploy project that build from this repository on every
+push to `main`. The office builds from `Dockerfile`. Each service builds from
+`services/Dockerfile` with the build argument `SERVICE` and has `PORT` and
+`API_KEY` in its environment. Neither service has a domain, so only the office
+reaches them, by their internal names on Dokploy's network.
+
 ### Plesk
 
 With the Docker extension: start the container on the server with the compose
@@ -1402,7 +1418,7 @@ sample services the same way.
 | Which playbook step applies, and an AI agent's calls to an OpenAI compatible service and to an Anthropic compatible one | `npm run providers` | 49 of 49 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
-| The two sample services, connecting a system, live records, and orders placed only with `act` on the room | `npm run systems` | 55 of 55 pass |
+| The two sample services, connecting a system, live records, orders placed only with `act` on the room, and resetting the demo | `npm run systems` | 65 of 65 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
