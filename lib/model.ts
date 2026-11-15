@@ -467,6 +467,11 @@ export interface QuestionMessage extends MessageBase {
   /** Offer concrete choices wherever possible. */
   options?: string[];
   answeredByMessageId?: MessageId;
+  /**
+   * Set when the question asks for approval to act in a connected system. The
+   * action is carried out only if the answer is the Approve option.
+   */
+  heldAction?: SystemAction;
 }
 
 export interface AnswerMessage extends MessageBase {

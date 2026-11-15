@@ -139,8 +139,15 @@ async function main(): Promise<void> {
   expect("nothing was ordered while it was halted", (await api(`${shopUrl}/v1/orders`)).data.orders.filter((o: { status: string }) => o.status === "placed").length, 0);
   await service.applyAction(await dana(), { type: "REVOKE_RULE", ruleId: "r-02", revokedBy: "" });
   demo = await service.applyAction(await dana(), { type: "GRANT_ACCESS", participantId: (await taskNow()).ownerId!, room: "finance", scopes: ["read"], effect: "allow", reason: "Dealer tier for this order", grantedBy: "", expiresOnTaskId: taskId });
-  expect("clearing the halt lets the agent take the step again", (await taskNow()).status, "in_progress");
-  expect("which places the order in the storefront", (await thread()).some((m) => m.kind === "status" && /^Storefront: placed order SO-\d+ for account NOR-0188 from Laval: 6 x GREE-MZ-12/.test(m.body)), true);
+  expect("clearing the halt lets the agent take the step again, which now waits for approval", (await taskNow()).status, "blocked_question");
+  const ask = (await thread()).find((m) => m.kind === "question" && m.heldAction);
+  expect("the agent asks the manager whether it may place the order", ask?.body, "May I place an order in Storefront? Account: NOR-0188. Ship-from branch: Laval. Items: GREE-MZ-12 x 6.");
+  expect("with the action held on the question", `${ask?.kind === "question" && ask.heldAction?.operation} ${ask?.audience.to === "participant" ? ask.audience.id : ""}`, "place_order p-dana");
+  expect("nothing is ordered while approval is pending", (await api(`${shopUrl}/v1/orders`)).data.orders.filter((o: { status: string }) => o.status === "placed").length, 0);
+  expect("someone who was not asked and does not manage access cannot approve", await refusal(async () => service.applyAction(await sam(), { type: "ANSWER_QUESTION", questionId: ask!.id, answeredById: "", body: "Approve", chosenOption: "Approve" })), 403);
+  await service.applyAction(await dana(), { type: "ANSWER_QUESTION", questionId: ask!.id, answeredById: "", body: "Approve", chosenOption: "Approve" });
+  expect("approval unblocks the task", (await taskNow()).status, "in_progress");
+  expect("and places the order in the storefront", (await thread()).some((m) => m.kind === "status" && /^Storefront: placed order SO-\d+ for account NOR-0188 from Laval: 6 x GREE-MZ-12/.test(m.body)), true);
   expect("the storefront holds it", (await api(`${shopUrl}/v1/orders`)).data.orders[0].account, "NOR-0188");
   expect("and Laval is down by six", await stock("GREE-MZ-12", "Laval"), 114);
   expect("the status note is not repeated", (await thread()).filter((m) => m.kind === "status" && m.body.startsWith("Checked stock")).length, 1);
@@ -246,6 +253,24 @@ async function main(): Promise<void> {
   expect("and whoever asked for the work gets a note about it", refusalNote?.audience.to === "participant" && refusalNote.audience.id === view.viewer.participantId && refusalNote.body.includes("did not do what"), true);
   expect("which is unread in their inbox", view.unread.notes.join(), refusalNote?.id);
   expect("until they open it", service.markOpened(await owner(), { noteId: refusalNote!.id }).unread.notes.length, 0);
+
+  console.log("\n-- a system whose actions need approval --");
+  view = await service.saveSystemSettings(await owner(), { id: shopId, name: "Shop", kind: "storefront", roomId: warehouse, baseUrl: shopUrl, needsApproval: true });
+  expect("the setting is stored, and the key is kept without being sent again", `${view.systems[0].needsApproval} ${view.systems[0].hasKey}`, "true true");
+  view = await service.applyAdminOperation(await owner(), playbook({ account: "ACME-1", branch: "Laval", items: "ECOBEE-T x 5" }));
+  const thermostats = await stock("ECOBEE-T", "Laval");
+  view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Thermostats", detail: "Five thermostats.", requestedById: "" });
+  const held = view.office.messages.filter((m) => m.kind === "question" && m.heldAction).at(-1)!;
+  expect("an agent that may act still has to ask first", view.office.tasks.at(-1)!.status, "blocked_question");
+  expect("and nothing reaches the storefront", await stock("ECOBEE-T", "Laval"), thermostats);
+  view = await service.applyAction(await owner(), { type: "ANSWER_QUESTION", questionId: held.id, answeredById: "", body: "Not this week.", chosenOption: "Decline" });
+  expect("declining unblocks the task without ordering", `${view.office.tasks.at(-1)!.status} ${await stock("ECOBEE-T", "Laval")}`, `in_progress ${thermostats}`);
+  expect("and the thread says who declined", view.office.messages.at(-1)!.body, "Shop: not done, because Owner did not approve it.");
+  view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Thermostats again", detail: "Five thermostats.", requestedById: "" });
+  const heldAgain = view.office.messages.filter((m) => m.kind === "question" && m.heldAction).at(-1)!;
+  view = await service.applyAction(await owner(), { type: "ANSWER_QUESTION", questionId: heldAgain.id, answeredById: "", body: "Go ahead, as long as it is five.", });
+  expect("an answer typed in place of the Approve choice does not count as approval", await stock("ECOBEE-T", "Laval"), thermostats);
+  view = await service.saveSystemSettings(await owner(), { id: shopId, name: "Shop", kind: "storefront", roomId: warehouse, baseUrl: shopUrl, needsApproval: false });
 
   shop.close();
   shop.closeAllConnections();

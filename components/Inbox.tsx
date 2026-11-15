@@ -25,7 +25,12 @@ export function waitingFor(office: Office, viewer: Participant, mayDecide: boole
     const thread = office.messages.filter((m) => m.taskId === task.id);
     for (const m of thread) {
       if (m.kind === "question" && mine(m) && task.openQuestionIds.includes(m.id)) {
-        items.push({ id: m.id, task, label: `Question from ${name(m.fromId)}`, body: m.body });
+        items.push({
+          id: m.id,
+          task,
+          label: m.heldAction ? `${name(m.fromId)} asks for approval` : `Question from ${name(m.fromId)}`,
+          body: m.body,
+        });
       }
     }
     if (task.status === "blocked_permission") {

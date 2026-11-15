@@ -26,7 +26,16 @@ export type ProviderOp =
 
 /** A change to a system connected to one of the office's rooms. */
 export type SystemOp =
-  | { operation: "save"; id?: string; name: string; kind: SystemKind; roomId: string; baseUrl: string; apiKey?: string }
+  | {
+      operation: "save";
+      id?: string;
+      name: string;
+      kind: SystemKind;
+      roomId: string;
+      baseUrl: string;
+      apiKey?: string;
+      needsApproval?: boolean;
+    }
   | { operation: "remove"; id: string };
 
 export type OfficeOp =

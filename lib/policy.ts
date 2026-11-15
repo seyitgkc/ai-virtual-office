@@ -69,6 +69,13 @@ export function authorize(
       const question = office.messages.find((m) => m.id === action.questionId);
       if (!question) return no("You cannot see that question.");
       if (question.audience.to === "participant" && question.audience.id === actor.id) return yes;
+      // Approving an action in a connected system is for the person asked and
+      // for people who manage access, not for anyone working in the room.
+      if (question.kind === "question" && question.heldAction) {
+        return may(office, actor, "manage_access")
+          ? yes
+          : no("Only the person asked, or someone who manages access, can approve that.");
+      }
       return mayActIn(office, ctx, actor, question.roomId);
     }
 

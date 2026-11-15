@@ -24,6 +24,7 @@ interface SystemRow {
   base_url: string;
   api_key_cipher: string | null;
   key_hint: string | null;
+  needs_approval: number;
 }
 
 /** Thrown for input a person can correct. The message is shown to them. */
@@ -52,6 +53,7 @@ export function systemViews(db: Db, officeId: string): SystemView[] {
       kind: r.kind,
       roomId: r.room_id,
       baseUrl: r.base_url,
+      needsApproval: r.needs_approval === 1,
       hasKey: key !== null,
       keyHint: key !== null ? r.key_hint : null,
       keyUnreadable: r.api_key_cipher !== null && key === null,
@@ -66,6 +68,8 @@ export interface SystemInput {
   roomId: string;
   baseUrl: string;
   apiKey?: string;
+  /** Hold each action an agent takes here until a person approves it. */
+  needsApproval?: boolean;
 }
 
 /** Connect a system to a room, or change one when `id` is given. */
@@ -97,7 +101,8 @@ export function saveSystem(db: Db, office: Office, input: SystemInput): void {
     run(
       db,
       `UPDATE connected_systems
-          SET name = ?, kind = ?, room_id = ?, base_url = ?, api_key_cipher = ?, key_hint = ?, updated_at = ?
+          SET name = ?, kind = ?, room_id = ?, base_url = ?, api_key_cipher = ?, key_hint = ?, updated_at = ?,
+              needs_approval = ?
         WHERE id = ?`,
       name,
       input.kind,
@@ -106,6 +111,7 @@ export function saveSystem(db: Db, office: Office, input: SystemInput): void {
       cipher,
       hint,
       Date.now(),
+      (input.needsApproval ?? existing.needs_approval === 1) ? 1 : 0,
       existing.id,
     );
     return;
@@ -113,8 +119,9 @@ export function saveSystem(db: Db, office: Office, input: SystemInput): void {
   const next = get<{ next: number }>(db, "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM connected_systems");
   run(
     db,
-    `INSERT INTO connected_systems (id, room_id, position, name, kind, base_url, api_key_cipher, key_hint, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO connected_systems
+       (id, room_id, position, name, kind, base_url, api_key_cipher, key_hint, updated_at, needs_approval)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     `sys-${randomUUID().slice(0, 8)}`,
     input.roomId,
     next?.next ?? 0,
@@ -124,6 +131,7 @@ export function saveSystem(db: Db, office: Office, input: SystemInput): void {
     cipher,
     hint,
     Date.now(),
+    input.needsApproval ? 1 : 0,
   );
 }
 
@@ -363,9 +371,11 @@ export async function performInSystem(db: Db, officeId: string, action: SystemCa
  */
 export function ensureDemoSystems(db: Db, demo: Office): void {
   const key = process.env.DEMO_SYSTEMS_KEY?.trim() ?? "";
-  const wanted: { id: string; name: string; kind: SystemKind; roomId: string; url: string }[] = [
-    { id: DEMO_STOREFRONT_ID, name: "Storefront", kind: "storefront", roomId: "fulfilment", url: process.env.DEMO_STOREFRONT_URL?.trim() ?? "" },
-    { id: DEMO_CARRIER_ID, name: "Freight carrier", kind: "carrier", roomId: "planning", url: process.env.DEMO_CARRIER_URL?.trim() ?? "" },
+  // An order in the demo's storefront waits for a person's approval, so the
+  // demo shows that gate as well as the one on access.
+  const wanted: { id: string; name: string; kind: SystemKind; roomId: string; url: string; approval: number }[] = [
+    { id: DEMO_STOREFRONT_ID, name: "Storefront", kind: "storefront", roomId: "fulfilment", url: process.env.DEMO_STOREFRONT_URL?.trim() ?? "", approval: 1 },
+    { id: DEMO_CARRIER_ID, name: "Freight carrier", kind: "carrier", roomId: "planning", url: process.env.DEMO_CARRIER_URL?.trim() ?? "", approval: 0 },
   ];
   for (const system of wanted) {
     const usable = system.url !== "" && key.length >= 8 && demo.floorplan.rooms.some((r) => r.id === system.roomId);
@@ -376,11 +386,13 @@ export function ensureDemoSystems(db: Db, demo: Office): void {
     const position = get<{ next: number }>(db, "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM connected_systems");
     run(
       db,
-      `INSERT INTO connected_systems (id, room_id, position, name, kind, base_url, api_key_cipher, key_hint, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO connected_systems
+         (id, room_id, position, name, kind, base_url, api_key_cipher, key_hint, updated_at, needs_approval)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          room_id = excluded.room_id, base_url = excluded.base_url,
-         api_key_cipher = excluded.api_key_cipher, key_hint = excluded.key_hint, updated_at = excluded.updated_at`,
+         api_key_cipher = excluded.api_key_cipher, key_hint = excluded.key_hint, updated_at = excluded.updated_at,
+         needs_approval = excluded.needs_approval`,
       system.id,
       system.roomId,
       position?.next ?? 0,
@@ -390,6 +402,7 @@ export function ensureDemoSystems(db: Db, demo: Office): void {
       seal(key),
       key.slice(-4),
       Date.now(),
+      system.approval,
     );
   }
 

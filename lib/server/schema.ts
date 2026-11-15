@@ -15,7 +15,7 @@
  *    and grants are evaluated in sequence and threads are read in sequence.
  */
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export const SCHEMA = /* sql */ `
 CREATE TABLE schema_meta (
@@ -93,7 +93,9 @@ CREATE TABLE connected_systems (
   base_url       TEXT NOT NULL,
   api_key_cipher TEXT,
   key_hint       TEXT,
-  updated_at     INTEGER NOT NULL
+  updated_at     INTEGER NOT NULL,
+  -- 1 when each action an agent takes here waits for a person's approval.
+  needs_approval INTEGER NOT NULL DEFAULT 0 CHECK (needs_approval IN (0, 1))
 ) STRICT;
 
 CREATE INDEX systems_by_room ON connected_systems(room_id);
@@ -359,6 +361,20 @@ CREATE TABLE message_question_options (
   position   INTEGER NOT NULL,
   label      TEXT NOT NULL,
   PRIMARY KEY (message_id, position)
+) STRICT;
+
+-- The action a question asks approval for. Present only on such questions.
+CREATE TABLE message_held_actions (
+  message_id TEXT PRIMARY KEY REFERENCES message_questions(message_id) ON DELETE CASCADE,
+  system_id  TEXT NOT NULL,
+  operation  TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE message_held_action_fields (
+  message_id TEXT NOT NULL REFERENCES message_held_actions(message_id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  value      TEXT NOT NULL,
+  PRIMARY KEY (message_id, name)
 ) STRICT;
 
 CREATE TABLE message_answers (
@@ -884,6 +900,24 @@ CREATE TABLE playbook_notes (
   step_id           TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
   to_participant_id TEXT REFERENCES participants(id) ON DELETE CASCADE,
   body              TEXT NOT NULL
+) STRICT;
+`,
+  // Version 8 added approval for actions in a connected system.
+  7: /* sql */ `
+ALTER TABLE connected_systems ADD COLUMN needs_approval INTEGER NOT NULL DEFAULT 0 CHECK (needs_approval IN (0, 1));
+
+-- The action a question asks approval for. Present only on such questions.
+CREATE TABLE message_held_actions (
+  message_id TEXT PRIMARY KEY REFERENCES message_questions(message_id) ON DELETE CASCADE,
+  system_id  TEXT NOT NULL,
+  operation  TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE message_held_action_fields (
+  message_id TEXT NOT NULL REFERENCES message_held_actions(message_id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  value      TEXT NOT NULL,
+  PRIMARY KEY (message_id, name)
 ) STRICT;
 `,
 };

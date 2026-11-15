@@ -27,6 +27,7 @@ export async function POST(request: Request) {
           roomId: text(body.roomId),
           baseUrl: text(body.baseUrl),
           ...(typeof body.apiKey === "string" ? { apiKey: body.apiKey } : {}),
+          ...(typeof body.needsApproval === "boolean" ? { needsApproval: body.needsApproval } : {}),
         });
       }
       case "remove":

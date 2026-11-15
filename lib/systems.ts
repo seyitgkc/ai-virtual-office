@@ -15,7 +15,16 @@ export interface ConnectedSystem {
   name: string;
   kind: SystemKind;
   roomId: RoomId;
+  /**
+   * When set, an agent that is allowed to act here still has each action
+   * held until a person approves it.
+   */
+  needsApproval: boolean;
 }
+
+/** The two answers offered when an agent asks to act in a system. */
+export const APPROVE = "Approve";
+export const DECLINE = "Decline";
 
 export interface SystemOperation {
   id: string;

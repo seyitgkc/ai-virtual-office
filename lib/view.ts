@@ -50,6 +50,8 @@ export interface SystemView {
   kind: SystemKind;
   roomId: string;
   baseUrl: string;
+  /** Each action an agent takes here waits for a person's approval. */
+  needsApproval: boolean;
   hasKey: boolean;
   keyHint: string | null;
   /** A key is stored but can no longer be decrypted, so it must be re-entered. */

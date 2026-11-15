@@ -378,7 +378,7 @@ export const participants: Participant[] = [
           },
           note: {
             to: "p-ledger",
-            body: "The order is placed from Laval at list price. Tier pricing for the account still has to be applied before the quote goes out.",
+            body: "This order ships from Laval at list price. Tier pricing for the account still has to be applied before the quote goes out.",
           },
         },
       },

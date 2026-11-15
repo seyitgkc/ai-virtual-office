@@ -586,6 +586,18 @@ function writeMessage(db: Db, officeId: string, m: Message): void {
           label,
         );
       });
+      if (m.heldAction) {
+        run(
+          db,
+          "INSERT INTO message_held_actions (message_id, system_id, operation) VALUES (?, ?, ?)",
+          m.id,
+          m.heldAction.systemId,
+          m.heldAction.operation,
+        );
+        for (const [name, value] of Object.entries(m.heldAction.fields)) {
+          run(db, "INSERT INTO message_held_action_fields (message_id, name, value) VALUES (?, ?, ?)", m.id, name, value);
+        }
+      }
       break;
     case "answer":
       run(
@@ -991,12 +1003,15 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     records: (recordsByRoom.get(r.id) ?? []).map((record) => record.body),
   }));
   const roomIds = new Set(rooms.map((r) => r.id));
-  const systems: ConnectedSystem[] = all<{ id: string; name: string; kind: ConnectedSystem["kind"]; room_id: string }>(
-    db,
-    "SELECT id, name, kind, room_id FROM connected_systems ORDER BY position",
-  )
+  const systems: ConnectedSystem[] = all<{
+    id: string;
+    name: string;
+    kind: ConnectedSystem["kind"];
+    room_id: string;
+    needs_approval: number;
+  }>(db, "SELECT id, name, kind, room_id, needs_approval FROM connected_systems ORDER BY position")
     .filter((s) => roomIds.has(s.room_id))
-    .map((s) => ({ id: s.id, name: s.name, kind: s.kind, roomId: s.room_id }));
+    .map((s) => ({ id: s.id, name: s.name, kind: s.kind, roomId: s.room_id, needsApproval: s.needs_approval === 1 }));
 
   const stageRooms = Object.fromEntries(
     all<{ stage: string; room_id: string }>(
@@ -1294,6 +1309,15 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     blocking: number;
     answered_by_message_id: string | null;
   }>("message_questions");
+  const heldActions = new Map(
+    all<{ message_id: string; system_id: string; operation: string }>(db, "SELECT * FROM message_held_actions").map(
+      (h) => [h.message_id, h],
+    ),
+  );
+  const heldFields = groupBy(
+    all<{ message_id: string; name: string; value: string }>(db, "SELECT * FROM message_held_action_fields"),
+    (f) => f.message_id,
+  );
   const options = groupBy(
     all<{ message_id: string; label: string }>(
       db,
@@ -1381,6 +1405,15 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
           ...(labels ? { options: labels.map((o) => o.label) } : {}),
           ...(q.answered_by_message_id !== null
             ? { answeredByMessageId: q.answered_by_message_id }
+            : {}),
+          ...(heldActions.has(m.id)
+            ? {
+                heldAction: {
+                  systemId: heldActions.get(m.id)!.system_id,
+                  operation: heldActions.get(m.id)!.operation,
+                  fields: Object.fromEntries((heldFields.get(m.id) ?? []).map((f) => [f.name, f.value])),
+                },
+              }
             : {}),
         };
       }

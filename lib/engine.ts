@@ -40,7 +40,14 @@ import {
   type TaskStatus,
   type WorkflowStage,
 } from "./model";
-import { checkedFields, operationOf, type ConnectedSystem, type SystemAction } from "./systems";
+import {
+  APPROVE,
+  checkedFields,
+  DECLINE,
+  operationOf,
+  type ConnectedSystem,
+  type SystemAction,
+} from "./systems";
 
 // ---------------------------------------------------------------------------
 // Pipeline
@@ -601,6 +608,57 @@ export async function reduce(
         `${task.id}: question answered` +
           (stillOpen.length === 0 ? ", unblocked" : `, ${stillOpen.length} still open`),
       );
+
+      // The question was a request to act in a connected system. Approval
+      // carries the action out, provided the agent may still act there.
+      const held = question.heldAction;
+      const asker = office.participants.find((p) => p.id === question.fromId);
+      const system = held ? office.systems.find((s) => s.id === held.systemId) : undefined;
+      if (held && asker && asker.kind === "agent") {
+        const say = (body: string): void => {
+          const said: Message = {
+            id: nextId("m"),
+            kind: "status",
+            taskId: task.id,
+            fromId: asker.id,
+            audience: { to: "room", id: task.roomId },
+            roomId: task.roomId,
+            at: now,
+            body,
+          };
+          emitted.push(said);
+          office = { ...office, messages: [...office.messages, said] };
+        };
+        const approver = findParticipant(office, action.answeredById).displayName;
+        if (action.chosenOption !== APPROVE) {
+          say(`${system?.name ?? "The system"}: not done, because ${approver} did not approve it.`);
+          notes.push(`${approver} did not approve ${asker.displayName}'s action on ${task.id}`);
+        } else if (!system) {
+          say("The system is no longer connected, so the approved action was not carried out.");
+        } else if (resolveAccess(asker, system.roomId, "act", contextOf({ ...state, office, now })).effect !== "allow") {
+          say(`${system.name}: not done. ${asker.displayName} may no longer act in ${roomName(office, system.roomId)}.`);
+        } else {
+          const outcome: SystemOutcome = runtime.perform
+            ? await runtime.perform({ ...held, system, taskId: task.id })
+            : { ok: false, summary: "it is not reachable from here, so nothing was done" };
+          say(`${system.name}: ${outcome.summary}`);
+          notes.push(`${approver} approved, and ${asker.displayName} ${outcome.ok ? "used" : "was refused by"} ${system.name}: ${outcome.summary}`);
+          // An AI agent takes the step once more, with the outcome in front of it.
+          const current = findTask(office, task.id);
+          if (asker.agentType === "ai" && current.ownerId === asker.id && current.status !== "blocked_question") {
+            try {
+              const turn = await runAgent(office, current, current.stage, asker, runtime, now, nextId, true, true);
+              office = turn.office;
+              emitted.push(...turn.emitted);
+              notes.push(...turn.notes);
+            } catch (error) {
+              notes.push(
+                `${asker.displayName} could not follow up on ${task.id}: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+        }
+      }
       return done();
     }
 
@@ -1129,6 +1187,39 @@ async function runAgent(
   let acted = false;
   if (!wallHit) {
     for (const call of calls) {
+      // Where a system needs approval, being allowed to act is not enough: the
+      // action is put to a person as a question and waits for their answer.
+      if (call.system.needsApproval) {
+        const operation = operationOf(call.system.kind, call.operation);
+        const details = (operation?.fields ?? []).map((f) => `${f.label}: ${call.fields[f.name]}`).join(". ");
+        const body = `May I ${(operation?.label ?? call.operation).toLowerCase()} in ${call.system.name}? ${details}.`;
+        if (said.has(`question:${body}`) || emitted.some((m) => m.kind === "question" && m.body === body)) continue;
+        const approver =
+          office.participants.find((p) => p.kind === "human" && roleMay(office.roles[p.roleId], "manage_access")) ??
+          office.participants.find((p) => p.kind === "human");
+        if (!approver) continue;
+        const ask: Message = {
+          id: nextId("m"),
+          kind: "question",
+          taskId: task.id,
+          fromId: participant.id,
+          audience: { to: "participant", id: approver.id },
+          roomId: task.roomId,
+          at: now,
+          body,
+          blocking: true,
+          options: [APPROVE, DECLINE],
+          heldAction: { systemId: call.systemId, operation: call.operation, fields: call.fields },
+        };
+        emitted.push(ask);
+        updated = {
+          ...updated,
+          openQuestionIds: [...updated.openQuestionIds, ask.id],
+          status: "blocked_question",
+        };
+        notes.push(`${participant.displayName} is waiting for approval to act in ${call.system.name}`);
+        continue;
+      }
       acted = true;
       const outcome: SystemOutcome = runtime.perform
         ? await runtime.perform(call)
