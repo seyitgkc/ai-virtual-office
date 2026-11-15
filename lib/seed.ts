@@ -44,13 +44,6 @@ const at = (m: number): number => BASE + m * 60_000;
 
 // ---------------------------------------------------------------------------
 // Floorplan
-//
-//   z=0 ┌──────────┬──────────┬──────────┐
-//       │ Reception│ Planning │ Finance  │
-//   z=8 ├──────────┴───┬──────┴──────────┤
-//       │  Fulfilment  │   Operations    │
-//  z=16 └──────────────┴─────────────────┘
-//      x=0          x=15               x=30
 // ---------------------------------------------------------------------------
 
 /**
@@ -60,17 +53,38 @@ const at = (m: number): number => BASE + m * 60_000;
 export const DEMO_STOREFRONT_ID = "sys-demo-storefront";
 export const DEMO_CARRIER_ID = "sys-demo-carrier";
 
+// The plan: a hall runs the length of the office and every room opens onto it.
+//
+//   z=0   ┌───────────┬───────────┬───────────┐
+//         │ Reception │ Planning  │  Finance  │
+//   z=8   ├─────┬─────┴─────┬─────┴─────┬─────┤
+//  way in →          H a l l                  │
+//  z=11.2 ├────────┬────────┴───────┬─────────┤
+//         │   Fulfilment    │    Operations   │
+//  z=19.2 └─────────────────┴─────────────────┘
+//        x=0               x=15             x=30
+
+/** Where the hall begins and how deep it is. */
+const HALL_Z = 8;
+const HALL_DEPTH = 3.2;
+const FAR_Z = HALL_Z + HALL_DEPTH;
+const PLAN_WIDTH = 30;
+/** A door on the hall's own wall, lined up with the room door at world x. */
+const hallDoor = (id: string, toRoomId: string, wall: "north" | "south", x: number) => ({
+  id,
+  toRoomId,
+  wall,
+  along: x / PLAN_WIDTH,
+  width: 1.4,
+});
+
 const rooms: Room[] = [
   {
     id: "reception",
     name: "Reception",
     purpose: "Dealer requests arrive and are triaged",
     bounds: { x: 0, z: 0, w: 10, d: 8 },
-    doors: [
-      { id: "d-rec-out", toRoomId: null, wall: "south", along: 0.5, width: 1.6 },
-      { id: "d-rec-pla", toRoomId: "planning", wall: "east", along: 0.5, width: 1.4 },
-      { id: "d-rec-ful", toRoomId: "fulfilment", wall: "north", along: 0.5, width: 1.4 },
-    ],
+    doors: [{ id: "d-rec-hall", toRoomId: "hall", wall: "north", along: 0.5, width: 1.4 }],
     deskIds: ["desk-rec-1", "desk-rec-2"],
     records: ROOM_RECORDS.reception,
   },
@@ -79,12 +93,7 @@ const rooms: Room[] = [
     name: "Planning",
     purpose: "Requests are broken into work and routed",
     bounds: { x: 10, z: 0, w: 10, d: 8 },
-    doors: [
-      { id: "d-pla-rec", toRoomId: "reception", wall: "west", along: 0.5, width: 1.4 },
-      { id: "d-pla-fin", toRoomId: "finance", wall: "east", along: 0.5, width: 1.4 },
-      { id: "d-pla-ful", toRoomId: "fulfilment", wall: "north", along: 0.25, width: 1.4 },
-      { id: "d-pla-ops", toRoomId: "operations", wall: "north", along: 0.75, width: 1.4 },
-    ],
+    doors: [{ id: "d-pla-hall", toRoomId: "hall", wall: "north", along: 0.5, width: 1.4 }],
     deskIds: ["desk-pla-1"],
     records: ROOM_RECORDS.planning,
   },
@@ -93,10 +102,7 @@ const rooms: Room[] = [
     name: "Finance",
     purpose: "Dealer pricing, credit terms and approval",
     bounds: { x: 20, z: 0, w: 10, d: 8 },
-    doors: [
-      { id: "d-fin-pla", toRoomId: "planning", wall: "west", along: 0.5, width: 1.4 },
-      { id: "d-fin-ops", toRoomId: "operations", wall: "north", along: 0.5, width: 1.4 },
-    ],
+    doors: [{ id: "d-fin-hall", toRoomId: "hall", wall: "north", along: 0.5, width: 1.4 }],
     deskIds: ["desk-fin-1"],
     records: ROOM_RECORDS.finance,
   },
@@ -104,12 +110,8 @@ const rooms: Room[] = [
     id: "fulfilment",
     name: "Fulfilment",
     purpose: "Stock across branches, transfers and quoting",
-    bounds: { x: 0, z: 8, w: 15, d: 8 },
-    doors: [
-      { id: "d-ful-rec", toRoomId: "reception", wall: "south", along: 1 / 3, width: 1.4 },
-      { id: "d-ful-pla", toRoomId: "planning", wall: "south", along: 5 / 6, width: 1.4 },
-      { id: "d-ful-ops", toRoomId: "operations", wall: "east", along: 0.5, width: 1.4 },
-    ],
+    bounds: { x: 0, z: FAR_Z, w: 15, d: 8 },
+    doors: [{ id: "d-ful-hall", toRoomId: "hall", wall: "south", along: 0.5, width: 1.4 }],
     deskIds: ["desk-ful-1", "desk-ful-2"],
     records: ROOM_RECORDS.fulfilment,
   },
@@ -117,14 +119,26 @@ const rooms: Room[] = [
     id: "operations",
     name: "Operations",
     purpose: "Human supervision, escalations and overrides",
-    bounds: { x: 15, z: 8, w: 15, d: 8 },
-    doors: [
-      { id: "d-ops-ful", toRoomId: "fulfilment", wall: "west", along: 0.5, width: 1.4 },
-      { id: "d-ops-pla", toRoomId: "planning", wall: "south", along: 1 / 6, width: 1.4 },
-      { id: "d-ops-fin", toRoomId: "finance", wall: "south", along: 2 / 3, width: 1.4 },
-    ],
+    bounds: { x: 15, z: FAR_Z, w: 15, d: 8 },
+    doors: [{ id: "d-ops-hall", toRoomId: "hall", wall: "south", along: 0.5, width: 1.4 }],
     deskIds: ["desk-ops-1"],
     records: ROOM_RECORDS.operations,
+  },
+  {
+    id: "hall",
+    name: "Hall",
+    purpose: "The corridor every room opens onto",
+    bounds: { x: 0, z: HALL_Z, w: PLAN_WIDTH, d: HALL_DEPTH },
+    doors: [
+      { id: "d-hall-out", toRoomId: null, wall: "west", along: 0.5, width: 1.6 },
+      hallDoor("d-hall-rec", "reception", "south", 5),
+      hallDoor("d-hall-pla", "planning", "south", 15),
+      hallDoor("d-hall-fin", "finance", "south", 25),
+      hallDoor("d-hall-ful", "fulfilment", "north", 7.5),
+      hallDoor("d-hall-ops", "operations", "north", 22.5),
+    ],
+    deskIds: [],
+    records: [],
   },
 ];
 
@@ -133,16 +147,16 @@ const desks: Desk[] = [
   { id: "desk-rec-2", roomId: "reception", position: { x: 7, z: 3 }, facing: 0, occupantId: "p-sam" },
   { id: "desk-pla-1", roomId: "planning", position: { x: 15, z: 4 }, facing: 0, occupantId: "p-atlas" },
   { id: "desk-fin-1", roomId: "finance", position: { x: 25, z: 4 }, facing: 0, occupantId: "p-ledger" },
-  { id: "desk-ful-1", roomId: "fulfilment", position: { x: 4, z: 12 }, facing: Math.PI, occupantId: "p-vera" },
-  { id: "desk-ful-2", roomId: "fulfilment", position: { x: 11, z: 12 }, facing: Math.PI, occupantId: "p-quill" },
-  { id: "desk-ops-1", roomId: "operations", position: { x: 22, z: 12 }, facing: Math.PI, occupantId: "p-dana" },
+  { id: "desk-ful-1", roomId: "fulfilment", position: { x: 4, z: FAR_Z + 4 }, facing: Math.PI, occupantId: "p-vera" },
+  { id: "desk-ful-2", roomId: "fulfilment", position: { x: 11, z: FAR_Z + 4 }, facing: Math.PI, occupantId: "p-quill" },
+  { id: "desk-ops-1", roomId: "operations", position: { x: 22, z: FAR_Z + 4 }, facing: Math.PI, occupantId: "p-dana" },
 ];
 
 export const floorplan: Floorplan = {
   id: "fp-distributor",
   name: "Single-branch distributor",
   description:
-    "Five-room layout for an HVAC distributor: intake, planning, fulfilment, finance, and a supervision office.",
+    "Five rooms along a hall, for an HVAC distributor: intake, planning, fulfilment, finance, and a supervision office.",
   rooms,
   desks,
 };
@@ -165,6 +179,7 @@ export const roles: Record<RoleId, Role> = {
     name: "Intake",
     description: "Receives dealer requests, triages, hands off to Planning.",
     grants: [
+      { room: "hall", scopes: ["enter"], effect: "allow" },
       { room: "reception", scopes: ALL_SCOPES, effect: "allow" },
       { room: "planning", scopes: ["enter", "read"], effect: "allow" },
     ],
@@ -175,6 +190,7 @@ export const roles: Record<RoleId, Role> = {
     name: "Planner",
     description: "Breaks requests into work and routes them.",
     grants: [
+      { room: "hall", scopes: ["enter"], effect: "allow" },
       { room: "planning", scopes: ALL_SCOPES, effect: "allow" },
       { room: "reception", scopes: ["enter", "read"], effect: "allow" },
       { room: "fulfilment", scopes: ["enter", "read"], effect: "allow" },
@@ -187,6 +203,7 @@ export const roles: Record<RoleId, Role> = {
     description:
       "Stock, transfers and quoting. Explicitly denied Finance because pricing authority sits elsewhere.",
     grants: [
+      { room: "hall", scopes: ["enter"], effect: "allow" },
       { room: "fulfilment", scopes: ALL_SCOPES, effect: "allow" },
       { room: "planning", scopes: ["enter", "read"], effect: "allow" },
       { room: "finance", scopes: ALL_SCOPES, effect: "deny" },
@@ -198,6 +215,7 @@ export const roles: Record<RoleId, Role> = {
     name: "Finance",
     description: "Dealer tier pricing, credit checks, approval.",
     grants: [
+      { room: "hall", scopes: ["enter"], effect: "allow" },
       { room: "finance", scopes: ALL_SCOPES, effect: "allow" },
       { room: "planning", scopes: ["enter", "read"], effect: "allow" },
     ],

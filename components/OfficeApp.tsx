@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useOffice } from "../lib/useOffice";
+import { resolveAccess } from "../lib/model";
 import { authorize, contextOf } from "../lib/policy";
 import { entryPose } from "../lib/geometry";
 import type { OfficeView } from "../lib/view";
@@ -107,6 +108,17 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     if (unreadFromSelected > 0 && selectedPersonId) void markOpened({ otherId: selectedPersonId });
   }, [unreadFromSelected, selectedPersonId, markOpened]);
 
+  // Rooms the signed-in person may not walk into. Their doorways are barred.
+  const closedRooms = useMemo(
+    () =>
+      new Set(
+        office.floorplan.rooms
+          .filter((room) => resolveAccess(viewer, room.id, "enter", ctx).effect !== "allow")
+          .map((room) => room.id),
+      ),
+    [office.floorplan.rooms, viewer, ctx],
+  );
+
   const task = office.tasks.find((t) => t.id === selectedTaskId) ?? null;
   const participant = office.participants.find((p) => p.id === selectedPersonId) ?? null;
 
@@ -126,6 +138,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           setSheet("detail");
         }}
         onSelectRoom={() => setSelectedPersonId(null)}
+        closedRooms={closedRooms}
         onFaceParticipant={setFacedId}
         onInteract={(id) => {
           setSelectedPersonId(id);

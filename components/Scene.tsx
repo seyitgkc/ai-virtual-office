@@ -70,6 +70,7 @@ export function Scene({
   selectedId,
   onSelectParticipant,
   onSelectRoom,
+  closedRooms,
   onFaceParticipant,
   onInteract,
   roomHighlight,
@@ -87,6 +88,8 @@ export function Scene({
   selectedId: string | null;
   onSelectParticipant: (id: string) => void;
   onSelectRoom: (id: string) => void;
+  /** Rooms the signed-in person may not enter. */
+  closedRooms: ReadonlySet<string>;
   /** While walking: who the walker is close to and facing, or null. */
   onFaceParticipant: (id: string | null) => void;
   /** While walking: the walker pressed the key to talk to whoever they face. */
@@ -188,6 +191,7 @@ export function Scene({
           pose={walkPose}
           onRoomChange={onWalkRoomChange}
           seats={seats}
+          closedRooms={closedRooms}
           onFace={onFaceParticipant}
           onInteract={onInteract}
         />
@@ -228,6 +232,7 @@ export function Scene({
           room={room}
           highlight={roomHighlight(room.id)}
           walking={walking}
+          barred={closedRooms.has(room.id)}
           onSelect={() => onSelectRoom(room.id)}
         />
       ))}

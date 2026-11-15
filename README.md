@@ -115,8 +115,20 @@ pricing, and a finance approval before a quote goes out.
 
 ## Everyday use
 
-The seeded office has five rooms: one for each of the four working stages of a
-dealer order, and an operations office for the supervisor.
+The seeded office has five rooms along a hall: one for each of the four working
+stages of a dealer order, and an operations office for the supervisor. Every
+room opens onto the hall and onto nothing else, and the way in from outside is
+at one end of it. Every role may walk the hall. No work happens there.
+
+```
+        ┌───────────┬───────────┬───────────┐
+        │ Reception │ Planning  │  Finance  │
+        ├─────┬─────┴─────┬─────┴─────┬─────┤
+way in →             H a l l                │
+        ├────────┬────────┴───────┬─────────┤
+        │   Fulfilment    │    Operations   │
+        └─────────────────┴─────────────────┘
+```
 
 | Room | Stage | Who sits there | What happens |
 | --- | --- | --- | --- |
@@ -174,7 +186,14 @@ drawn low so every room stays visible from any angle.
 **Walking.** *Walk the office* puts you at the front door at eye level. Move
 with W A S D or the arrow keys, hold Shift to move faster, drag to look around
 and click someone to inspect them. A map in the corner shows where you are.
-Escape returns to the overview.
+Escape returns to the overview. The view rises, falls and sways a little with
+each stride, and holds still for anyone whose system asks for reduced motion.
+
+Each room's name is on a plate above its doorway, on the side you come to it
+from. A doorway into a room you may not enter is closed by a red, see-through
+pane that reads "Not Authorized", and it stops you: the same access rule that
+hides a room's messages from you keeps you out of the room on foot. Sign in to
+the demo as Sam to see it on Finance, Fulfilment and Operations.
 
 Each desk's monitor shows its occupant's name and state: working, waiting for
 access, waiting on an answer, waiting for a decision, or nothing on the desk,
@@ -1651,7 +1670,7 @@ sample services the same way.
 
 | What | Command | Result |
 | --- | --- | --- |
-| Access precedence, expiry, read gating, walking through doors, desk placement | `npm run check` | 34 of 34 pass |
+| Access precedence, expiry, read gating, walking the hall and through doors, doorways closed to someone who may not enter, desk placement | `npm run check` | 36 of 36 pass |
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |

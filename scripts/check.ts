@@ -82,27 +82,38 @@ console.log("\n-- walking the plan --");
 
   const start = entryPose(rooms);
   expect("visitor starts outside", roomAt(rooms, start.x, start.z), null);
-  const inside = walk(start, 0, 0.05, 70);
-  expect("front door leads into Reception", roomAt(rooms, inside.x, inside.z)?.id, "reception");
+  const inside = walk(start, 0.05, 0, 70);
+  expect("the way in leads into the hall", roomAt(rooms, inside.x, inside.z)?.id, "hall");
 
-  // Straight at the solid wall between Reception and Planning, away from its door.
+  // Straight at the solid wall between Reception and Planning: rooms open onto the hall only.
   const atWall = walk({ x: 8, z: 1.5 }, 0.05, 0, 100);
   expect("a wall stops the walker", roomAt(rooms, atWall.x, atWall.z)?.id, "reception");
+  const alongHall = walk({ x: 1, z: 9.6 }, 0.05, 0, 560);
+  expect("the hall runs the length of the office", alongHall.x > 29, true);
 
-  // Every interior door pair lines up well enough to walk through.
-  const crossings: Array<[string, { x: number; z: number }, number, number, string]> = [
-    ["Reception to Planning", { x: 8.5, z: 4 }, 0.05, 0, "planning"],
-    ["Planning to Finance", { x: 18.5, z: 4 }, 0.05, 0, "finance"],
-    ["Reception to Fulfilment", { x: 5, z: 6.5 }, 0, 0.05, "fulfilment"],
-    ["Planning to Fulfilment", { x: 12.5, z: 6.5 }, 0, 0.05, "fulfilment"],
-    ["Planning to Operations", { x: 17.5, z: 6.5 }, 0, 0.05, "operations"],
-    ["Finance to Operations", { x: 25, z: 6.5 }, 0, 0.05, "operations"],
-    ["Fulfilment to Operations", { x: 13.5, z: 12 }, 0.05, 0, "operations"],
+  // Every room's door lines up with the hall's well enough to walk through.
+  const crossings: Array<[string, { x: number; z: number }, number, string]> = [
+    ["Hall to Reception", { x: 5, z: 9.5 }, -0.05, "reception"],
+    ["Hall to Planning", { x: 15, z: 9.5 }, -0.05, "planning"],
+    ["Hall to Finance", { x: 25, z: 9.5 }, -0.05, "finance"],
+    ["Hall to Fulfilment", { x: 7.5, z: 9.7 }, 0.05, "fulfilment"],
+    ["Hall to Operations", { x: 22.5, z: 9.7 }, 0.05, "operations"],
+    ["Reception back to the hall", { x: 5, z: 6.5 }, 0.05, "hall"],
   ];
-  for (const [label, from, dx, dz, wanted] of crossings) {
-    const end = walk(from, dx, dz, 60);
+  for (const [label, from, dz, wanted] of crossings) {
+    const end = walk(from, 0, dz, 60);
     expect(label, roomAt(rooms, end.x, end.z)?.id, wanted);
   }
+
+  // A room the walker may not enter has its doorway shut, and only that one.
+  const shut = obstacles(office.floorplan, new Set(["finance"]));
+  const tryDoor = (from: { x: number; z: number }) => {
+    let at = from;
+    for (let i = 0; i < 60; i++) at = stepWalker(at, 0, -0.05, shut, 0.3, bounds);
+    return roomAt(rooms, at.x, at.z)?.id;
+  };
+  expect("a doorway into a room one may not enter stops the walker", tryDoor({ x: 25, z: 9.5 }), "hall");
+  expect("the other doorways stay open", tryDoor({ x: 15, z: 9.5 }), "planning");
 }
 
 console.log("\n-- room for one more desk --");

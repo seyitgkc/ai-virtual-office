@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   view = service.getView(await owner());
   const agents = view.office.participants.filter((p) => p.kind === "agent");
   expect("the person is switched to it", view.office.id, made.officeId);
-  expect("it has the distributor's five rooms", view.office.floorplan.rooms.map((r) => r.name).join(), "Reception,Planning,Finance,Fulfilment,Operations");
+  expect("it has the distributor's five rooms along a hall", view.office.floorplan.rooms.map((r) => r.name).join(), "Reception,Planning,Finance,Fulfilment,Operations,Hall");
   expect("five AI agents, all on the chosen provider", `${agents.length} ${agents.every((a) => a.agentType === "ai" && a.providerId === mine.id)}`, "5 true");
   expect("and the person as its only human, holding every permission", `${view.office.participants.filter((p) => p.kind === "human").length} ${view.viewer.displayName} ${view.viewer.permissions.length}`, "1 Alex Kim 11");
   expect("its rooms carry the distributor's records", view.office.floorplan.rooms.find((r) => r.name === "Finance")!.records.length > 0, true);

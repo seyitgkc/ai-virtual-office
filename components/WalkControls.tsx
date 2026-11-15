@@ -14,8 +14,13 @@ import {
 
 const EYE_HEIGHT = 1.5;
 const BODY_RADIUS = 0.3;
-const WALK_SPEED = 3.4;
-const RUN_SPEED = 6.5;
+const WALK_SPEED = 4.8;
+const RUN_SPEED = 8.4;
+/** Head movement while walking: metres travelled per step, and how far the view rises and sways. */
+const STRIDE = 1.5;
+const BOB_HEIGHT = 0.05;
+const BOB_SWAY = 0.028;
+const BOB_ROLL = 0.006;
 const TURN_SPEED = 1.9;
 const LOOK_SENSITIVITY = 0.0042;
 const MAX_PITCH = 1.15;
@@ -60,10 +65,13 @@ export function WalkControls({
   pose,
   onRoomChange,
   seats,
+  closedRooms,
   onFace,
   onInteract,
 }: {
   floorplan: Floorplan;
+  /** Rooms this person may not enter. Their doorways are shut to the walker. */
+  closedRooms: ReadonlySet<string>;
   pose: RefObject<WalkPose>;
   onRoomChange: (roomId: string | null) => void;
   /** Everyone seated in the office, other than the walker. */
@@ -84,7 +92,15 @@ export function WalkControls({
   // Nobody is faced once the walk ends.
   useEffect(() => () => onFace(null), [onFace]);
 
-  const all = useMemo(() => obstacles(floorplan), [floorplan]);
+  const all = useMemo(() => obstacles(floorplan, closedRooms), [floorplan, closedRooms]);
+  // How far the walker has gone, which drives the rise and fall of the view,
+  // and how much of that movement is showing: it eases in and out of a stride.
+  const travelled = useRef(0);
+  const bob = useRef(0);
+  const stillness = useMemo(
+    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    [],
+  );
   const bounds = useMemo(() => {
     const ext = planExtent(floorplan.rooms);
     return {
@@ -202,6 +218,7 @@ export function WalkControls({
       (held.has("KeyS") || held.has("ArrowDown") ? 1 : 0);
     const strafe = (held.has("KeyD") ? 1 : 0) - (held.has("KeyA") ? 1 : 0);
 
+    let moved = 0;
     if (forward !== 0 || strafe !== 0) {
       const running = held.has("ShiftLeft") || held.has("ShiftRight");
       const distance = ((running ? RUN_SPEED : WALK_SPEED) * dt) / Math.hypot(forward, strafe);
@@ -211,12 +228,21 @@ export function WalkControls({
       const dx = (-sin * forward + cos * strafe) * distance;
       const dz = (-cos * forward - sin * strafe) * distance;
       const next = stepWalker(p, dx, dz, all, BODY_RADIUS, bounds);
+      moved = Math.hypot(next.x - p.x, next.z - p.z);
       p.x = next.x;
       p.z = next.z;
     }
 
-    camera.position.set(p.x, EYE_HEIGHT, p.z);
-    camera.rotation.set(pitch.current, p.yaw, 0);
+    // The view rises and falls twice per stride and sways once, as a head
+    // does. It fades out when the walker stops or is held by a wall.
+    travelled.current += moved;
+    const target = moved > 0.0005 && !stillness ? 1 : 0;
+    bob.current += (target - bob.current) * Math.min(1, dt * 9);
+    const phase = (travelled.current / STRIDE) * Math.PI * 2;
+    const lift = Math.sin(phase * 2) * BOB_HEIGHT * bob.current;
+    const sway = Math.sin(phase) * BOB_SWAY * bob.current;
+    camera.position.set(p.x + Math.cos(p.yaw) * sway, EYE_HEIGHT + lift, p.z - Math.sin(p.yaw) * sway);
+    camera.rotation.set(pitch.current, p.yaw, Math.sin(phase) * BOB_ROLL * bob.current);
 
     const room = roomAt(floorplan.rooms, p.x, p.z)?.id ?? null;
     if (room !== lastRoom.current) {

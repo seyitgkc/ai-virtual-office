@@ -194,9 +194,20 @@ export function seatPosition(desk: Desk): { x: number; z: number } {
   };
 }
 
-/** Every wall segment, desk and seated occupant in the plan. */
-export function obstacles(floorplan: Floorplan): Obstacle[] {
+/**
+ * Every wall segment, desk and seated occupant in the plan. The doorways of
+ * the rooms in `closed` are shut as well, for a walker who may not enter them.
+ */
+export function obstacles(floorplan: Floorplan, closed: ReadonlySet<string> = new Set()): Obstacle[] {
   const out: Obstacle[] = [];
+  for (const room of floorplan.rooms) {
+    if (!closed.has(room.id)) continue;
+    for (const door of room.doors) {
+      const { cx, cz } = doorCentre(room, door);
+      const alongX = isHorizontal(door.wall);
+      out.push({ cx, cz, lx: alongX ? door.width : WALL_THICK, lz: alongX ? WALL_THICK : door.width });
+    }
+  }
   for (const room of floorplan.rooms) {
     for (const s of wallSegments(room)) {
       out.push({ cx: s.cx, cz: s.cz, lx: s.lx, lz: s.lz });
