@@ -30,7 +30,7 @@ export interface ProviderView {
   id: string;
   name: string;
   kind: ProviderKind;
-  /** The service address, for OpenAI-compatible providers. */
+  /** The service address. Null for an Anthropic provider at Anthropic itself. */
   baseUrl: string | null;
   defaultModel: string;
   hasKey: boolean;

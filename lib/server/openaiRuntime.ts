@@ -7,7 +7,14 @@
  * not depend on the provider.
  */
 import type { AgentRuntime, AgentStepInput, AgentStepResult } from "../engine";
-import { buildStepPrompt, StepSchema, SYSTEM_PROMPT, toStepResult } from "./modelRuntime";
+import {
+  buildStepPrompt,
+  JSON_INSTRUCTIONS,
+  parseReply,
+  StepSchema,
+  SYSTEM_PROMPT,
+  toStepResult,
+} from "./modelRuntime";
 
 const TIMEOUT_MS = 120_000;
 
@@ -72,11 +79,6 @@ const STEP_JSON_SCHEMA = {
   },
 } as const;
 
-const JSON_INSTRUCTIONS = `
-
-Reply with one JSON object and nothing else. It must have exactly these fields:
-"statusNote" (string), "questions" (array of objects with "body", "toParticipantId", "blocking" and "options"), "assumptions" (array of objects with "assumed", "because" and "confidence" as "low", "medium" or "high"), "needs" (array of objects with "room", "scope" as "enter", "read" or "act", and "purpose"), and "output" (an object with "label" and "body", or null). Use empty arrays where there is nothing to report.`;
-
 const RESPONSE_FORMATS = [
   { type: "json_schema", json_schema: { name: "agent_step", strict: true, schema: STEP_JSON_SCHEMA } },
   { type: "json_object" },
@@ -93,15 +95,6 @@ function describeStatus(status: number, who: string): Error {
   if (status === 404) return new Error(`${who}: the provider does not know that model or address.`);
   if (status === 429) return new Error(`${who}: rate limited by the provider. Try again in a moment.`);
   return new Error(`${who}: the provider returned an error (${status}).`);
-}
-
-/** Pull the JSON object out of a reply that may be wrapped in a code fence. */
-function parseReply(text: string): unknown {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = (fenced ? fenced[1] : text).trim();
-  const start = body.indexOf("{");
-  const end = body.lastIndexOf("}");
-  return JSON.parse(start >= 0 && end > start ? body.slice(start, end + 1) : body);
 }
 
 export class OpenAiCompatibleRuntime implements AgentRuntime {

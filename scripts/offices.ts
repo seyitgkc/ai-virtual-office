@@ -130,6 +130,12 @@ async function main(): Promise<void> {
   view = await service.saveProviderSettings(await owner.read(), { ...anthropic, apiKey: fakeKey });
   view = await service.saveProviderSettings(await owner.read(), { name: "Gateway", kind: "openai_compatible", baseUrl: "https://llm.example.test/v1/", defaultModel: "gpt-4.1-mini", apiKey: otherKey });
   view = await service.saveProviderSettings(await owner.read(), { name: "Local", kind: "openai_compatible", baseUrl: "http://127.0.0.1:1/v1", defaultModel: "llama3" });
+  expect("an Anthropic provider at Anthropic itself needs a Claude model id", await refusal(async () => service.saveProviderSettings(await owner.read(), { ...anthropic, defaultModel: "house-model", apiKey: fakeKey })), 400);
+  view = await service.saveProviderSettings(await owner.read(), { name: "Relay", kind: "anthropic", baseUrl: "https://relay.example.test/anthropic/", defaultModel: "house-model", apiKey: otherKey });
+  const relay = view.providers.find((p) => p.name === "Relay")!;
+  expect("an Anthropic provider can sit at its own address with its own model ids", `${relay.kind}|${relay.baseUrl}|${relay.defaultModel}`, "anthropic|https://relay.example.test/anthropic|house-model");
+  expect("its address is checked like any other", await refusal(async () => service.saveProviderSettings(await owner.read(), { name: "Bad", kind: "anthropic", baseUrl: "http://169.254.169.254/", defaultModel: "house-model", apiKey: otherKey })), 400);
+  view = await service.removeProviderSettings(await owner.read(), relay.id);
   expect("an office can hold several providers", view.providers.map((p) => p.name).join(), "Claude,Gateway,Local");
   const [claude, gateway, local] = view.providers;
   expect("of both kinds", `${claude.kind}/${gateway.kind}`, "anthropic/openai_compatible");

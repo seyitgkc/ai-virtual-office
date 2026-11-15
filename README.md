@@ -233,7 +233,9 @@ changeable afterwards:
 
 **AI providers.** An office can hold several. A provider is either Anthropic or
 OpenAI compatible, which covers any service with the OpenAI chat completions
-interface, including a model served on your own machine. *Test* checks the key
+interface, including a model served on your own machine. An Anthropic provider
+takes an optional address, for a gateway or another service that offers the
+Anthropic Messages interface under its own model ids. *Test* checks the key
 and the model with the provider without generating anything. A key is
 encrypted before it is stored and is never sent back to the page: afterwards
 the table shows only its last four characters. The shared demo office cannot
@@ -590,7 +592,9 @@ an outcome made of the same five parts as `AgentStepResult`. `lib/playbook.ts`
 finds the first step that applies and returns its outcome. No model is called.
 
 An AI agent's step is one model call. Both provider types are given the same
-prompt and must return the same five fields. For an OpenAI compatible service
+prompt and must return the same five fields. An Anthropic provider at its own
+address is sent a plain Messages request with the reply format described in
+the instructions, because such a service may not enforce one. For an OpenAI compatible service
 the reply format is requested as a JSON schema first, then as plain JSON mode,
 then with no format at all, because services differ in what they accept. An AI
 agent with no working provider stops the action with a message that says which
@@ -1161,7 +1165,7 @@ playbook.
   under a key derived from the server's signing key, and never sent back to a
   browser. It is not written to the audit log. If the signing key changes,
   stored keys become unreadable and must be entered again.
-- An OpenAI compatible provider's address is fetched by the server. Only http
+- A provider's address is fetched by the server. Only http
   and https addresses are accepted, addresses carrying a user name or password
   are refused, and so are link-local addresses, where cloud machines keep
   their metadata service. An address on the server's own network is allowed on
@@ -1278,9 +1282,9 @@ database and starts a stand-in model service on a local port.
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
 | What an agent is shown, cleaning of a model's reply, and halts at review that end in a decision | `npm run agents` | 33 of 33 pass |
-| Which playbook step applies, and an AI agent's call to an OpenAI compatible service | `npm run providers` | 33 of 33 pass |
+| Which playbook step applies, and an AI agent's calls to an OpenAI compatible service and to an Anthropic compatible one | `npm run providers` | 49 of 49 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
-| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 81 of 81 pass |
+| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 

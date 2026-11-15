@@ -1,7 +1,7 @@
 /**
  * Checks how a playbook agent picks its step, and how an AI agent talks to an
- * OpenAI compatible service. The service is a stand-in started on this
- * machine, so nothing leaves it. Run: npx tsx scripts/providers.ts
+ * OpenAI compatible service and to an Anthropic compatible one. The services
+ * are stand-ins started on this machine, so nothing leaves it. Run: npx tsx scripts/providers.ts
  */
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -9,6 +9,7 @@ import { reduce, type AgentRuntime, type AgentStepInput, type AgentStepResult } 
 import { initialState } from "../lib/initialState";
 import type { PlaybookStep } from "../lib/model";
 import { runPlaybook, stepApplies } from "../lib/playbook";
+import { ModelRuntime, testProvider } from "../lib/server/modelRuntime";
 import { OpenAiCompatibleRuntime, testOpenAiCompatible } from "../lib/server/openaiRuntime";
 
 let failures = 0;
@@ -152,6 +153,75 @@ async function main(): Promise<void> {
   expect("during a step too", (await errorOf(() => runtime.step(input)))?.includes("rejected the API key"), true);
   await new Promise((resolve) => server.close(resolve));
   expect("a service that is down is reported as unreachable", (await errorOf(() => testOpenAiCompatible(baseUrl, null, "big-model")))?.includes("could not be reached"), true);
+
+  console.log("\n-- an Anthropic compatible service at its own address --");
+  const calls: { path: string; key: string | undefined; model?: string; maxTokens?: number; system?: string }[] = [];
+  let listsModels = false;
+  let claudeMode: "ok" | "fenced" | "garbage" | "locked" = "ok";
+  const gateway = createServer(async (request, response) => {
+    const send = (status: number, data: unknown) => {
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify(data));
+    };
+    const key = request.headers["x-api-key"] as string | undefined;
+    const fault = (status: number, type: string) => send(status, { type: "error", error: { type, message: type } });
+    if (claudeMode === "locked") return fault(401, "authentication_error");
+    if (request.method === "GET") {
+      calls.push({ path: request.url ?? "", key });
+      return listsModels
+        ? send(200, { id: "house-model", type: "model", display_name: "House Model", created_at: "2026-01-01T00:00:00Z" })
+        : fault(404, "not_found_error");
+    }
+    const sent = JSON.parse(await body(request)) as { model: string; max_tokens: number; system?: string };
+    calls.push({ path: request.url ?? "", key, model: sent.model, maxTokens: sent.max_tokens, system: sent.system });
+    if (sent.model !== "house-model") return fault(404, "not_found_error");
+    const text =
+      claudeMode === "garbage"
+        ? "Happy to help!"
+        : claudeMode === "fenced"
+          ? "```json\n" + JSON.stringify(answer) + "\n```"
+          : JSON.stringify(answer);
+    send(200, {
+      id: "msg_stand_in",
+      type: "message",
+      role: "assistant",
+      model: sent.model,
+      content: [{ type: "text", text }],
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+  });
+  await new Promise<void>((resolve) => gateway.listen(0, "127.0.0.1", resolve));
+  const gatewayUrl = `http://127.0.0.1:${(gateway.address() as AddressInfo).port}`;
+  const claudeLike = new ModelRuntime({ apiKey: "test-key-for-the-gateway", model: "house-model", baseUrl: `${gatewayUrl}/v1/` });
+
+  result = await claudeLike.step(input);
+  expect("the reply becomes the agent's step", result.statusNote, "Checked the request");
+  expect("with its output", result.output?.body, "Two heads returned.");
+  expect("the Messages address is used, with one /v1 even when the address ends in it", calls[0].path, "/v1/messages");
+  expect("the key is sent as an x-api-key header", calls[0].key, "test-key-for-the-gateway");
+  expect("the provider's own model id is asked for", calls[0].model, "house-model");
+  expect("the reply format is described in the instructions", calls[0].system?.includes("Reply with one JSON object"), true);
+  claudeMode = "fenced";
+  expect("a reply wrapped in a code fence is read", (await claudeLike.step(input)).statusNote, "Checked the request");
+  claudeMode = "garbage";
+  expect("a reply in the wrong shape stops the step", (await errorOf(() => claudeLike.step(input)))?.includes("wrong shape"), true);
+
+  claudeMode = "ok";
+  calls.length = 0;
+  expect("with no model list, the test asks for a single token", await testProvider("test-key-for-the-gateway", "house-model", gatewayUrl), "house-model");
+  expect("after trying the model list first", calls.map((c) => c.path).join(), "/v1/models/house-model,/v1/messages");
+  expect("and never asks for more than one token", calls[1].maxTokens, 1);
+  expect("an unknown model fails the test", (await errorOf(() => testProvider("test-key-for-the-gateway", "ghost-model", gatewayUrl)))?.includes("does not know that model"), true);
+  listsModels = true;
+  calls.length = 0;
+  expect("where the service lists its models, the test reads the list", await testProvider("test-key-for-the-gateway", "house-model", gatewayUrl), "House Model");
+  expect("and generates nothing", calls.length, 1);
+  claudeMode = "locked";
+  expect("a rejected key is reported as such", (await errorOf(() => testProvider("wrong", "house-model", gatewayUrl)))?.includes("rejected the API key"), true);
+  await new Promise((resolve) => gateway.close(resolve));
+  expect("a service that is down is reported as unreachable", (await errorOf(() => testProvider("k", "house-model", gatewayUrl)))?.includes("could not be reached"), true);
 
   console.log(`\n${failures === 0 ? "all provider checks passed" : failures + " FAILED"}\n`);
   process.exit(failures === 0 ? 0 : 1);

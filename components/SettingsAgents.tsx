@@ -891,7 +891,9 @@ export function ProvidersTab({
           </table>
         </div>
         <p className="hint">
-          Testing checks the key and the model with the provider. Nothing is generated, so it costs nothing.
+          Testing checks the key and the model with the provider. Nothing is generated, so it costs nothing. The one
+          exception is an Anthropic provider at its own address that keeps no list of models, which is sent a request
+          for a single token.
         </p>
       </Section>
 
@@ -935,27 +937,33 @@ export function ProvidersTab({
               <option value="openai_compatible">{KIND_LABEL.openai_compatible}</option>
             </select>
           </label>
-          {form.kind === "openai_compatible" && (
-            <label className="wide">
-              Address
-              <input
-                type="url"
-                value={form.baseUrl}
-                disabled={locked}
-                placeholder="https://api.openai.com/v1"
-                onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
-                required
-              />
-            </label>
-          )}
+          <label className="wide">
+            {form.kind === "anthropic" ? "Address (optional)" : "Address"}
+            <input
+              type="url"
+              value={form.baseUrl}
+              disabled={locked}
+              placeholder={
+                form.kind === "anthropic"
+                  ? "Leave empty for Anthropic itself, or enter a compatible service's address"
+                  : "https://api.openai.com/v1"
+              }
+              onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
+              required={form.kind === "openai_compatible"}
+            />
+          </label>
           <label>
             Default model
             <input
-              list={form.kind === "anthropic" ? "suggested-models" : undefined}
+              list={form.kind === "anthropic" && !form.baseUrl.trim() ? "suggested-models" : undefined}
               value={form.defaultModel}
               maxLength={100}
               disabled={locked}
-              placeholder={form.kind === "anthropic" ? SUGGESTED_MODELS[0] : "The model id the provider expects"}
+              placeholder={
+                form.kind === "anthropic" && !form.baseUrl.trim()
+                  ? SUGGESTED_MODELS[0]
+                  : "The model id the provider expects"
+              }
               onChange={(e) => setForm({ ...form, defaultModel: e.target.value })}
               required
             />
@@ -1015,7 +1023,8 @@ export function ProvidersTab({
         <p className="hint">
           A key is encrypted before it is stored, used only on the server when an agent takes a step, and never sent
           back to this page. An OpenAI compatible provider is any service that offers the OpenAI chat completions
-          interface, including a model running on your own machine.
+          interface, including a model running on your own machine. An Anthropic provider with an address is a gateway
+          or another service that offers the Anthropic Messages interface.
         </p>
         <p className="hint">
           An AI agent is shown only the messages and room records it is allowed to read. One model call is made each

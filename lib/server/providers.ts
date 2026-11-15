@@ -66,7 +66,7 @@ function checkedBaseUrl(input: string): string {
   try {
     url = new URL(input.trim());
   } catch {
-    throw new ProviderError("Enter the provider's address, such as https://api.openai.com/v1.");
+    throw new ProviderError("Enter the provider's address, starting with https://.");
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new ProviderError("The address must start with https:// or http://.");
@@ -97,13 +97,17 @@ export function saveProvider(db: Db, officeId: string, input: ProviderInput): st
   const name = input.name.trim();
   if (name.length < 2 || name.length > 40) throw new ProviderError("Give the provider a name (2 to 40 characters).");
   if (input.kind !== "anthropic" && input.kind !== "openai_compatible") throw new ProviderError("Choose a provider type.");
+  // An Anthropic provider may sit at its own address: a gateway or another
+  // service that speaks the same interface. Its model ids are its own.
+  const baseUrl =
+    input.kind === "openai_compatible" || input.baseUrl?.trim() ? checkedBaseUrl(input.baseUrl ?? "") : null;
   const model = input.defaultModel.trim();
-  if (input.kind === "anthropic" ? !validModelId(model) : !/^[\w.:/@-]{1,100}$/.test(model)) {
+  const official = input.kind === "anthropic" && baseUrl === null;
+  if (official ? !validModelId(model) : !/^[\w.:/@-]{1,100}$/.test(model)) {
     throw new ProviderError(
-      input.kind === "anthropic" ? "Enter a model id such as claude-opus-5-5." : "Enter the model id the provider expects.",
+      official ? "Enter a model id such as claude-opus-5-5." : "Enter the model id the provider expects.",
     );
   }
-  const baseUrl = input.kind === "openai_compatible" ? checkedBaseUrl(input.baseUrl ?? "") : null;
 
   const typed = input.apiKey?.trim();
   if (typed && (typed.length < 8 || typed.length > 400 || /\s/.test(typed))) {
@@ -168,7 +172,7 @@ export async function testStoredProvider(db: Db, officeId: string, id: string): 
   const key = unseal(r.api_key_cipher);
   if (r.kind === "anthropic") {
     if (!key) throw new ProviderError("No readable API key is stored for this provider.");
-    return testProvider(key, r.default_model);
+    return testProvider(key, r.default_model, r.base_url);
   }
   return testOpenAiCompatible(r.base_url ?? "", key, r.default_model);
 }
@@ -197,7 +201,7 @@ export function runtimeForAgent(db: Db, officeId: string, agent: Participant): A
 
   const runtime: AgentRuntime =
     r.kind === "anthropic"
-      ? new ModelRuntime({ apiKey: key!, model })
+      ? new ModelRuntime({ apiKey: key!, model, baseUrl: r.base_url })
       : new OpenAiCompatibleRuntime({ baseUrl: r.base_url ?? "", apiKey: key, model });
   cache.set(`${r.id}:${model}`, { stamp, runtime });
   return runtime;

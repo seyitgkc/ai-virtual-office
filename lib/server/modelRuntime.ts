@@ -1,5 +1,6 @@
 /**
- * An AI agent's runtime for Anthropic models.
+ * An AI agent's runtime for Anthropic models, and for services at another
+ * address that speak the Anthropic Messages interface.
  *
  * It implements the same `AgentRuntime` interface a playbook agent answers
  * through, so the engine does not know which one it is talking to. What the model is shown
@@ -35,10 +36,23 @@ const WITH_FALLBACK = new Set([
 
 export const validModelId = (model: string): boolean => /^claude-[a-z0-9.-]{3,60}$/.test(model);
 
-const clientFor = (apiKey: string): Anthropic =>
+/**
+ * A client for Anthropic itself, or for a compatible service at `baseUrl`.
+ * The SDK adds the /v1 part of each path, so one typed at the end is dropped.
+ */
+const clientFor = (apiKey: string, baseUrl?: string | null): Anthropic =>
   // A step should not hang the office for minutes, so the timeout is short
   // and retries are few.
-  new Anthropic({ apiKey, timeout: 120_000, maxRetries: 1 });
+  new Anthropic({
+    apiKey,
+    timeout: 120_000,
+    maxRetries: 1,
+    // The address comes from the provider's settings and from nowhere else,
+    // so a variable in the server's environment cannot redirect it.
+    baseURL: baseUrl ? baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, "") : "https://api.anthropic.com",
+    // Compatible services differ in which header they read the key from.
+    ...(baseUrl ? { defaultHeaders: { "x-api-key": apiKey } } : {}),
+  });
 
 /** Turn a provider error into a sentence a person can act on. */
 function explain(error: unknown, who: string): Error {
@@ -67,12 +81,26 @@ function explain(error: unknown, who: string): Error {
  * Check that a key works and that the provider knows the model, without
  * generating anything. Returns the model's display name.
  */
-export async function testProvider(apiKey: string, model: string): Promise<string> {
+export async function testProvider(apiKey: string, model: string, baseUrl?: string | null): Promise<string> {
+  const who = "Connection test failed";
+  const client = clientFor(apiKey, baseUrl);
   try {
-    const info = await clientFor(apiKey).models.retrieve(model);
-    return info.display_name;
+    const info = await client.models.retrieve(model);
+    return info.display_name || model;
   } catch (error) {
-    throw explain(error, "Connection test failed");
+    const rejected =
+      error instanceof Anthropic.AuthenticationError ||
+      error instanceof Anthropic.PermissionDeniedError ||
+      error instanceof Anthropic.APIConnectionError;
+    if (!baseUrl || rejected || !(error instanceof Anthropic.APIError)) throw explain(error, who);
+  }
+  // A compatible service may not list its models. Ask it for a single token
+  // instead, which shows that the address, the key and the model all work.
+  try {
+    await client.messages.create({ model, max_tokens: 1, messages: [{ role: "user", content: "Hi" }] });
+    return model;
+  } catch (error) {
+    throw explain(error, who);
   }
 }
 
@@ -238,16 +266,68 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
   };
 }
 
+export const JSON_INSTRUCTIONS = `
+
+Reply with one JSON object and nothing else. It must have exactly these fields:
+"statusNote" (string), "questions" (array of objects with "body", "toParticipantId", "blocking" and "options"), "assumptions" (array of objects with "assumed", "because" and "confidence" as "low", "medium" or "high"), "needs" (array of objects with "room", "scope" as "enter", "read" or "act", and "purpose"), and "output" (an object with "label" and "body", or null). Use empty arrays where there is nothing to report.`;
+
+/** Pull the JSON object out of a reply that may be wrapped in a code fence. */
+export function parseReply(text: string): unknown {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const body = (fenced ? fenced[1] : text).trim();
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  return JSON.parse(start >= 0 && end > start ? body.slice(start, end + 1) : body);
+}
+
 export class ModelRuntime implements AgentRuntime {
   readonly model: string;
   private readonly client: Anthropic;
+  /** True for a compatible service at its own address. */
+  private readonly custom: boolean;
 
-  constructor(options: { apiKey: string; model: string }) {
+  constructor(options: { apiKey: string; model: string; baseUrl?: string | null }) {
     this.model = options.model;
-    this.client = clientFor(options.apiKey);
+    this.custom = Boolean(options.baseUrl);
+    this.client = clientFor(options.apiKey, options.baseUrl);
+  }
+
+  /**
+   * A step through a compatible service. Such a service may not enforce a
+   * reply format, so the format is described in the instructions and the
+   * reply is checked here.
+   */
+  private async plainStep(input: AgentStepInput): Promise<AgentStepResult> {
+    const who = input.participant.displayName;
+    let response;
+    try {
+      response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 4096,
+        system: SYSTEM_PROMPT + JSON_INSTRUCTIONS,
+        messages: [{ role: "user", content: buildStepPrompt(input) }],
+      });
+    } catch (error) {
+      throw explain(error, `${who} could not answer`);
+    }
+    if (response.stop_reason === "refusal") {
+      throw new Error(`${who} declined this request, so the step was not taken.`);
+    }
+    const text = response.content.map((block) => (block.type === "text" ? block.text : "")).join("");
+    let parsed;
+    try {
+      parsed = StepSchema.safeParse(parseReply(text));
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || !parsed.success) {
+      throw new Error(`${who} gave an answer in the wrong shape, so the step was not taken.`);
+    }
+    return toStepResult(parsed.data, input);
   }
 
   async step(input: AgentStepInput): Promise<AgentStepResult> {
+    if (this.custom) return this.plainStep(input);
     const who = input.participant.displayName;
     let response;
     try {
