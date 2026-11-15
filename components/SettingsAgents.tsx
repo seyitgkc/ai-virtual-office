@@ -440,7 +440,7 @@ function AgentEditor({
 const blankStep = (id: string): PlaybookStep => ({
   id,
   when: { stage: "any", requestContains: "", requestedBy: "anyone" },
-  then: { statusNote: "", output: null, question: null, assumption: null, need: null, action: null },
+  then: { statusNote: "", output: null, question: null, assumption: null, need: null, action: null, note: null },
 });
 
 /** One optional part of a step's outcome, switched on with a tick box. */
@@ -821,6 +821,38 @@ function PlaybookEditor({
                       value={then.need.purpose}
                       maxLength={200}
                       onChange={(e) => setThen({ need: { ...then.need!, purpose: e.target.value } })}
+                    />
+                  </label>
+                </div>
+              )}
+            </Part>
+
+            <Part
+              label="Leave a note for someone"
+              on={then.note !== null}
+              onToggle={(on) => setThen({ note: on ? { to: "requester", body: "" } : null })}
+            >
+              {then.note && (
+                <div className="step-fields">
+                  <label>
+                    For
+                    <select value={then.note.to} onChange={(e) => setThen({ note: { ...then.note!, to: e.target.value } })}>
+                      <option value="requester">Whoever filed the request</option>
+                      {office.participants
+                        .filter((p) => p.id !== agent.id)
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.displayName}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    What they should know
+                    <input
+                      value={then.note.body}
+                      maxLength={400}
+                      onChange={(e) => setThen({ note: { ...then.note!, body: e.target.value } })}
                     />
                   </label>
                 </div>

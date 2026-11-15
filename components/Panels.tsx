@@ -19,7 +19,7 @@ import {
 import { eligibleOwners, nextStage, roomForStage, stageSpec, type Action } from "../lib/engine";
 import { authorize } from "../lib/policy";
 import { deskState } from "../lib/agentState";
-import type { ChatLine, FeedEntry, OfficeView, TokenView } from "../lib/view";
+import type { DirectLine, FeedEntry, OfficeView, TokenView } from "../lib/view";
 
 const STATUS: Record<TaskStatus, { label: string; accent: string }> = {
   requested: { label: "requested", accent: "#8a93a0" },
@@ -66,6 +66,8 @@ export function TitleCard({
   onSignOut,
   onSettings,
   onInvite,
+  inboxCount,
+  onInbox,
 }: {
   mode: "overview" | "walk";
   onToggleMode: () => void;
@@ -77,6 +79,9 @@ export function TitleCard({
   onSignOut: () => void;
   onSettings: () => void;
   onInvite: () => void;
+  /** How many things in the inbox are waiting or unopened. */
+  inboxCount: number;
+  onInbox: () => void;
 }) {
   if (mode === "walk") {
     return (
@@ -99,6 +104,9 @@ export function TitleCard({
         </div>
         <button className="btn mode" onClick={onToggleMode}>
           Back to overview
+        </button>
+        <button className="btn mode" onClick={onInbox} data-count={inboxCount > 0}>
+          Inbox{inboxCount > 0 ? ` (${inboxCount})` : ""}
         </button>
       </div>
     );
@@ -145,6 +153,9 @@ export function TitleCard({
           <span>{viewer.title}</span>
         </div>
         <div className="who-actions">
+          <button className="btn" onClick={onInbox} data-count={inboxCount > 0}>
+            Inbox{inboxCount > 0 ? ` (${inboxCount})` : ""}
+          </button>
           {viewer.permissions.includes("invite_people") && (
             <button className="btn" onClick={onInvite}>
               Invite
@@ -354,7 +365,7 @@ export function Inspector({
   hiddenMessages,
   tokens,
   accounts,
-  chats,
+  directs,
   onTalk,
   talkFocus,
   pending,
@@ -371,9 +382,9 @@ export function Inspector({
   hiddenMessages: OfficeView["hiddenMessages"];
   tokens: TokenView[];
   accounts: OfficeView["accounts"];
-  /** What the viewer and the office's agents have said to each other. */
-  chats: ChatLine[];
-  onTalk: (agentId: string, body: string) => Promise<boolean>;
+  /** The viewer's direct conversations. */
+  directs: DirectLine[];
+  onTalk: (toId: string, body: string) => Promise<boolean>;
   /** Changes each time the message box should take the keyboard. */
   talkFocus: number;
   pending: boolean;
@@ -403,7 +414,7 @@ export function Inspector({
         viewer={viewer}
         tokens={tokens.filter((t) => t.participantId === participant.id)}
         account={accounts.find((a) => a.participantId === participant.id) ?? null}
-        chat={chats.filter((line) => line.agentId === participant.id)}
+        chat={directs.filter((line) => line.withId === participant.id)}
         onTalk={(body) => onTalk(participant.id, body)}
         talkFocus={talkFocus}
         pending={pending}
@@ -829,7 +840,9 @@ function ThreadLine({
     <div className={`note ${cls}`}>
       <div className="meta">
         {time(message.at)} · {message.fromId === "system" ? "system" : name(message.fromId)} ·{" "}
-        {message.kind}
+        {message.kind === "note" && message.audience.to === "participant"
+          ? `note for ${name(message.audience.id)}`
+          : message.kind}
         {message.kind === "output" && message.simulated && (
           <span style={{ color: "#e0a23f" }}>from a playbook</span>
         )}
@@ -841,18 +854,21 @@ function ThreadLine({
 
 // ---------------------------------------------------------------------------
 
-/** A conversation with an agent at its desk. It changes nothing in the office. */
+/**
+ * A direct conversation with one person or agent. With an agent it happens at
+ * the agent's desk and the agent answers at once. It changes nothing else.
+ */
 function TalkBox({
-  agent,
+  other,
   lines,
   cannotEnter,
   pending,
   focus,
   onSend,
 }: {
-  agent: Participant;
-  lines: ChatLine[];
-  /** The room the viewer may not enter, when that is what stops them. */
+  other: Participant;
+  lines: DirectLine[];
+  /** The room the viewer may not enter, when that stops them talking to an agent. */
   cannotEnter: string | null;
   pending: boolean;
   focus: number;
@@ -862,6 +878,7 @@ function TalkBox({
   const box = useRef<HTMLTextAreaElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const ready = text.trim().length > 0 && !pending;
+  const isAgent = other.kind === "agent";
 
   useEffect(() => {
     if (focus > 0) box.current?.focus();
@@ -879,24 +896,26 @@ function TalkBox({
 
   return (
     <div className="sec">
-      <h3>Talk to {agent.displayName}</h3>
-      {cannotEnter ? (
+      <h3>{isAgent ? `Talk to ${other.displayName}` : `Message ${other.displayName}`}</h3>
+      {isAgent && cannotEnter ? (
         <div className="empty">
-          You cannot enter {cannotEnter}, so you cannot talk to {agent.displayName} at their desk.
+          You cannot enter {cannotEnter}, so you cannot talk to {other.displayName} at their desk.
         </div>
       ) : (
         <>
           {lines.length === 0 ? (
             <div className="empty">
-              {agent.agentType === "ai"
-                ? `Ask ${agent.displayName} about its work or what it can see. It answers from what you may both read, and changes nothing.`
-                : `${agent.displayName} follows a playbook. Ask and it reports where its work stands.`}
+              {!isAgent
+                ? `Write to ${other.displayName}. Only the two of you can read it.`
+                : other.agentType === "ai"
+                  ? `Ask ${other.displayName} about its work or what it can see. It answers from what you may both read, and changes nothing.`
+                  : `${other.displayName} follows a playbook. Ask and it reports where its work stands.`}
             </div>
           ) : (
             <div className="talk-thread">
               {lines.map((line) => (
-                <div key={line.id} className="talk-line" data-from={line.fromAgent ? "agent" : "you"}>
-                  <span className="who">{line.fromAgent ? agent.displayName : "You"}</span>
+                <div key={line.id} className="talk-line" data-from={line.fromMe ? "you" : "other"}>
+                  <span className="who">{line.fromMe ? "You" : other.displayName}</span>
                   {line.body}
                 </div>
               ))}
@@ -912,8 +931,8 @@ function TalkBox({
           >
             <textarea
               ref={box}
-              aria-label={`Message to ${agent.displayName}`}
-              placeholder={`Say something to ${agent.displayName}`}
+              aria-label={`Message to ${other.displayName}`}
+              placeholder={isAgent ? `Say something to ${other.displayName}` : `Write to ${other.displayName}`}
               rows={2}
               maxLength={600}
               value={text}
@@ -955,7 +974,7 @@ function ParticipantInspector({
   viewer: Participant;
   tokens: TokenView[];
   account: OfficeView["accounts"][number] | null;
-  chat: ChatLine[];
+  chat: DirectLine[];
   onTalk: (body: string) => Promise<boolean>;
   talkFocus: number;
   pending: boolean;
@@ -1039,10 +1058,10 @@ function ParticipantInspector({
           <div style={{ fontSize: 11.5, opacity: 0.75, marginTop: 4 }}>{desk.detail}</div>
         </div>
 
-        {participant.kind === "agent" && (
+        {participant.id !== viewer.id && (
           <TalkBox
             key={participant.id}
-            agent={participant}
+            other={participant}
             lines={chat}
             cannotEnter={cannotEnter}
             pending={pending}

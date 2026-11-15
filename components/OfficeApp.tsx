@@ -8,6 +8,7 @@ import { entryPose } from "../lib/geometry";
 import type { OfficeView } from "../lib/view";
 import { Feed, Inspector, TaskList, TitleCard } from "./Panels";
 import { Minimap } from "./Minimap";
+import { Inbox, inboxCount } from "./Inbox";
 import { InviteDialog } from "./InviteDialog";
 import { Settings } from "./Settings";
 
@@ -39,6 +40,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     systemOp,
     readSystem,
     talk,
+    markOpened,
     tokenOperation,
     signOut,
   } = useOffice(initial);
@@ -50,6 +52,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
 
   const [sheet, setSheet] = useState<Sheet>("office");
   const [inviting, setInviting] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mode, setMode] = useState<"overview" | "walk">("overview");
   const [walkRoomId, setWalkRoomId] = useState<string | null>(null);
@@ -98,6 +101,12 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     requestedById: viewer.id,
   });
 
+  // A conversation counts as opened while its panel is on screen.
+  const unreadFromSelected = selectedPersonId && !selectedTaskId ? (view.unread.directs[selectedPersonId] ?? 0) : 0;
+  useEffect(() => {
+    if (unreadFromSelected > 0 && selectedPersonId) void markOpened({ otherId: selectedPersonId });
+  }, [unreadFromSelected, selectedPersonId, markOpened]);
+
   const task = office.tasks.find((t) => t.id === selectedTaskId) ?? null;
   const participant = office.participants.find((p) => p.id === selectedPersonId) ?? null;
 
@@ -140,6 +149,8 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           onSignOut={signOut}
           onSettings={() => setSettingsOpen(true)}
           onInvite={() => setInviting(true)}
+          inboxCount={inboxCount(view, viewer)}
+          onInbox={() => setInboxOpen(true)}
         />
         <TaskList
           tasks={office.tasks}
@@ -180,7 +191,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         hiddenMessages={view.hiddenMessages}
         tokens={view.accessTokens}
         accounts={view.accounts}
-        chats={view.chats}
+        directs={view.directs}
         onTalk={talk}
         talkFocus={talkFocus}
         pending={pending}
@@ -216,7 +227,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
 
       {faced && faced.id !== selectedPersonId && (
         <div className="interact-hint" role="status">
-          Press <kbd>F</kbd> to {faced.kind === "agent" ? "talk to" : "look at"} {faced.displayName}
+          Press <kbd>F</kbd> to talk to {faced.displayName}
         </div>
       )}
 
@@ -231,6 +242,27 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
       {pending && <div className="working">Working...</div>}
       {inviting && (
         <InviteDialog office={office} ownPermissions={view.viewer.permissions} onClose={() => setInviting(false)} />
+      )}
+      {inboxOpen && (
+        <Inbox
+          view={view}
+          viewer={viewer}
+          onOpenTask={(taskId, noteId) => {
+            setSelectedTaskId(taskId);
+            setSelectedPersonId(null);
+            setSheet("detail");
+            setInboxOpen(false);
+            if (noteId && view.unread.notes.includes(noteId)) void markOpened({ noteId });
+          }}
+          onOpenPerson={(id) => {
+            setSelectedPersonId(id);
+            setSelectedTaskId(null);
+            setSheet("detail");
+            setInboxOpen(false);
+            setTalkFocus((n) => n + 1);
+          }}
+          onClose={() => setInboxOpen(false)}
+        />
       )}
       {settingsOpen && (
         <Settings
