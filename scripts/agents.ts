@@ -356,6 +356,28 @@ async function main(): Promise<void> {
   expect("the instructions keep an agent to its stage", SYSTEM_PROMPT.includes("Do the part that belongs to your stage and stop there"), true);
   expect("and send it to a colleague before asking for a room", SYSTEM_PROMPT.includes("leave a note for the agent who works there"), true);
 
+  console.log("\n-- a need for a room where a colleague works --");
+  const wanting = async (asker: "ai" | "playbook", colleague: "ai" | "playbook") => {
+    const office = {
+      ...initialState.office,
+      participants: initialState.office.participants.map((p) =>
+        p.id === "p-iris" ? { ...p, agentType: asker } : p.id === "p-ledger" ? { ...p, agentType: colleague } : p,
+      ),
+    };
+    const result = await reduce(
+      { ...initialState, office },
+      { type: "SUBMIT_REQUEST", title: "Credit check", detail: "Is NOR-0188 in good standing?", requestedById: "p-sam" },
+      { step: async () => ({ statusNote: "Logged.", questions: [], assumptions: [], needs: [{ room: "finance", scope: "read" as const, purpose: "Credit standing for NOR-0188." }] }) },
+    );
+    return { task: result.state.office.tasks.at(-1)!, notes: result.emitted.filter((m) => m.kind === "note"), wake: result.wake };
+  };
+  const passed = await wanting("ai", "ai");
+  expect("an AI agent that wants a room where an AI colleague works is not halted", passed.task.status, "in_progress");
+  expect("what it wants goes to that colleague as a note", passed.notes[0]?.body, "I cannot read Finance, where you work. I need this from it: Credit standing for NOR-0188. Can you check it and answer with a note?");
+  expect("addressed to the agent in that room, who is woken to look at it", `${passed.notes[0]?.audience.to === "participant" ? passed.notes[0].audience.id : ""} ${passed.wake[0]?.kind}`, "p-ledger attend");
+  expect("with nobody there who can answer, the task halts for a person", (await wanting("ai", "playbook")).task.status, "blocked_permission");
+  expect("a playbook's written need always halts", (await wanting("playbook", "ai")).task.status, "blocked_permission");
+
   console.log("\n-- notes from an agent --");
   let seenByNext: AgentStepInput | null = null;
   const noted = await reduce(

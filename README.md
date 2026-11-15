@@ -753,9 +753,18 @@ with the room that hosts each, says what each stage is for, marks the agent's
 own, and names the room every other agent works in. The agent is told to do
 its stage's part and stop, to build on what earlier stages wrote, and to leave
 a note for the agent in another room when it needs a fact or a check from
-there. It asks for access to a room only when its own step cannot be done
-without it. Without this, a large office showed every agent trying to do the
-whole request and halting at each room in turn.
+there. Without this, a large office showed every agent trying to do the whole
+request and halting at each room in turn.
+
+Wording alone did not stop that, so the engine carries the rule as well. When
+an AI agent says it needs to read a room, and another AI agent works in that
+room and may read it, the task does not halt. The need is passed to that
+colleague as a note. The colleague looks, answers with a note, and the first
+agent takes its step again with the answer. Nothing the first agent may not
+read is shown to it: it gets the colleague's answer, written by an agent that
+is allowed to read the room. A task still halts for a person when nobody in
+that room can answer, when the need is to enter or act, and whenever a
+playbook says so, because a playbook's need was written by a person.
 
 **Between clicks.** An agent does not only act at the moment a person clicks.
 After every action the engine names the agents that now have something in
@@ -1630,7 +1639,7 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, and reading a reply that is nearly right | `npm run agents` | 101 of 101 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, and a need passed to a colleague | `npm run agents` | 106 of 106 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 55 of 55 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |

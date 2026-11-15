@@ -1243,7 +1243,31 @@ async function runAgent(
       purpose: `${operationOf(call.system.kind, call.operation)?.label ?? call.operation} in ${call.system.name}`,
     }));
 
-  for (const need of [...(result.needs ?? []), ...actionNeeds]) {
+  // An AI agent that wants to read a room where another AI agent works does
+  // not halt for it. What it wants is passed to that colleague as a note, the
+  // colleague answers, and the agent takes its step again with the answer. A
+  // playbook's need is written by a person and always halts, and so does any
+  // need to enter or act.
+  const colleagueIn = (roomId: RoomId): Participant | undefined =>
+    office.participants.find(
+      (p) =>
+        p.agentType === "ai" &&
+        p.id !== participant.id &&
+        roomOf(office, p) === roomId &&
+        resolveAccess(p, roomId, "read", ctx).effect === "allow",
+    );
+  const passedOn: { to: Participant; need: AccessNeed }[] = [];
+  const haltingNeeds: AccessNeed[] = [];
+  for (const need of result.needs ?? []) {
+    const colleague = participant.agentType === "ai" && need.scope === "read" ? colleagueIn(need.room) : undefined;
+    if (colleague && resolveAccess(participant, need.room, "read", ctx).effect !== "allow") {
+      passedOn.push({ to: colleague, need });
+    } else {
+      haltingNeeds.push(need);
+    }
+  }
+
+  for (const need of [...haltingNeeds, ...actionNeeds]) {
     const verdict = resolveAccess(participant, need.room, need.scope, ctx);
     if (verdict.effect === "allow") continue;
 
@@ -1396,6 +1420,12 @@ async function runAgent(
   // Notes come after anything done in a system, so a note that speaks of an
   // order follows the order in the thread.
   for (const draft of (result.notes ?? []).slice(0, 2)) tell(draft.toParticipantId, draft.body);
+  for (const { to, need } of passedOn.slice(0, 2)) {
+    tell(
+      to.id,
+      `I cannot read ${roomName(office, need.room)}, where you work. I need this from it: ${need.purpose.trim().replace(/[.\s]+$/, "")}. Can you check it and answer with a note?`,
+    );
+  }
 
   // A playbook's output is written for a step that went through, so it only
   // lands when the step did. An AI agent's output was written knowing what it
