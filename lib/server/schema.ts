@@ -15,7 +15,7 @@
  *    and grants are evaluated in sequence and threads are read in sequence.
  */
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export const SCHEMA = /* sql */ `
 CREATE TABLE schema_meta (
@@ -32,17 +32,21 @@ CREATE TABLE offices (
   clock_ms           INTEGER NOT NULL,
   clock_step_minutes INTEGER NOT NULL,
   id_sequence        INTEGER NOT NULL,
-  id_scope           TEXT NOT NULL DEFAULT ''
+  id_scope           TEXT NOT NULL DEFAULT '',
+  -- 1 when agents hand a finished step on to the next stage by themselves.
+  auto_handoff       INTEGER NOT NULL DEFAULT 0 CHECK (auto_handoff IN (0, 1))
 ) STRICT;
 
 CREATE UNIQUE INDEX offices_by_scope ON offices(id_scope);
 
--- The AI providers an office has connected. An office may have several. The
--- API key is stored encrypted and is never sent back to a browser; key_hint
--- keeps its last characters for display.
+-- AI providers. One belongs either to an office, or to an account, whose
+-- owner can use it in every office they manage providers in. The API key is
+-- stored encrypted and is never sent back to a browser; key_hint keeps its
+-- last characters for display.
 CREATE TABLE ai_providers (
   id             TEXT PRIMARY KEY,
-  office_id      TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  office_id      TEXT REFERENCES offices(id) ON DELETE CASCADE,
+  owner_user_id  TEXT REFERENCES users(id) ON DELETE CASCADE,
   position       INTEGER NOT NULL,
   name           TEXT NOT NULL,
   kind           TEXT NOT NULL CHECK (kind IN ('anthropic', 'openai_compatible')),
@@ -50,7 +54,8 @@ CREATE TABLE ai_providers (
   default_model  TEXT NOT NULL,
   api_key_cipher TEXT,
   key_hint       TEXT,
-  updated_at     INTEGER NOT NULL
+  updated_at     INTEGER NOT NULL,
+  CHECK ((office_id IS NULL) <> (owner_user_id IS NULL))
 ) STRICT;
 
 CREATE TABLE floorplans (
@@ -141,7 +146,8 @@ CREATE TABLE roles (
 CREATE TABLE role_permissions (
   role_id    TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
   permission TEXT NOT NULL CHECK (permission IN ('manage_access', 'reassign_work', 'decide_reviews', 'see_everything', 'invite_people',
-                 'manage_people', 'manage_rooms', 'manage_roles', 'manage_providers', 'manage_office')),
+                 'manage_people', 'manage_rooms', 'manage_roles', 'manage_providers', 'use_shared_providers',
+                 'manage_office')),
   PRIMARY KEY (role_id, permission)
 ) STRICT;
 
@@ -919,5 +925,47 @@ CREATE TABLE message_held_action_fields (
   value      TEXT NOT NULL,
   PRIMARY KEY (message_id, name)
 ) STRICT;
+`,
+  // Version 9 added the hand-on setting, a permission, and providers that belong to an account.
+  8: /* sql */ `
+ALTER TABLE offices ADD COLUMN auto_handoff INTEGER NOT NULL DEFAULT 0 CHECK (auto_handoff IN (0, 1));
+UPDATE offices SET auto_handoff = 1 WHERE id = 'office-distributor-demo';
+
+-- A permission is added, which means rebuilding the table to change its check.
+CREATE TABLE role_permissions_new (
+  role_id    TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  permission TEXT NOT NULL CHECK (permission IN ('manage_access', 'reassign_work', 'decide_reviews', 'see_everything', 'invite_people',
+                 'manage_people', 'manage_rooms', 'manage_roles', 'manage_providers', 'use_shared_providers',
+                 'manage_office')),
+  PRIMARY KEY (role_id, permission)
+) STRICT;
+INSERT INTO role_permissions_new SELECT * FROM role_permissions;
+DROP TABLE role_permissions;
+ALTER TABLE role_permissions_new RENAME TO role_permissions;
+-- Whoever could manage providers could already give any of them to an agent.
+INSERT INTO role_permissions (role_id, permission)
+SELECT role_id, 'use_shared_providers' FROM role_permissions WHERE permission = 'manage_providers';
+
+-- A provider may now belong to an account in place of an office.
+CREATE TABLE ai_providers_new (
+  id             TEXT PRIMARY KEY,
+  office_id      TEXT REFERENCES offices(id) ON DELETE CASCADE,
+  owner_user_id  TEXT REFERENCES users(id) ON DELETE CASCADE,
+  position       INTEGER NOT NULL,
+  name           TEXT NOT NULL,
+  kind           TEXT NOT NULL CHECK (kind IN ('anthropic', 'openai_compatible')),
+  base_url       TEXT,
+  default_model  TEXT NOT NULL,
+  api_key_cipher TEXT,
+  key_hint       TEXT,
+  updated_at     INTEGER NOT NULL,
+  CHECK ((office_id IS NULL) <> (owner_user_id IS NULL))
+) STRICT;
+INSERT INTO ai_providers_new
+  (id, office_id, owner_user_id, position, name, kind, base_url, default_model, api_key_cipher, key_hint, updated_at)
+SELECT id, office_id, NULL, position, name, kind, base_url, default_model, api_key_cipher, key_hint, updated_at
+  FROM ai_providers;
+DROP TABLE ai_providers;
+ALTER TABLE ai_providers_new RENAME TO ai_providers;
 `,
 };

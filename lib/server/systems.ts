@@ -453,4 +453,38 @@ export function ensureDemoSystems(db: Db, demo: Office): void {
   }
 }
 
+/**
+ * Connect an office to the two sample services named in the server's
+ * environment. Does nothing where they are not named. Orders in the
+ * storefront wait for approval, as in the demo.
+ */
+export function connectSampleServices(db: Db, suffix: string, rooms: { storefront: string; carrier: string }): void {
+  const key = process.env.DEMO_SYSTEMS_KEY?.trim() ?? "";
+  if (key.length < 8) return;
+  const wanted: [string, string, SystemKind, string, string, number][] = [
+    [`sys-${suffix}-storefront`, "Storefront", "storefront", rooms.storefront, process.env.DEMO_STOREFRONT_URL?.trim() ?? "", 1],
+    [`sys-${suffix}-carrier`, "Freight carrier", "carrier", rooms.carrier, process.env.DEMO_CARRIER_URL?.trim() ?? "", 0],
+  ];
+  for (const [id, name, kind, roomId, url, approval] of wanted) {
+    if (!url) continue;
+    const position = get<{ next: number }>(db, "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM connected_systems");
+    run(
+      db,
+      `INSERT INTO connected_systems
+         (id, room_id, position, name, kind, base_url, api_key_cipher, key_hint, updated_at, needs_approval)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      roomId,
+      position?.next ?? 0,
+      name,
+      kind,
+      url.replace(/\/+$/, ""),
+      seal(key),
+      key.slice(-4),
+      Date.now(),
+      approval,
+    );
+  }
+}
+
 export const systemKindLabel = (kind: SystemKind): string => SYSTEM_INFO[kind].label;

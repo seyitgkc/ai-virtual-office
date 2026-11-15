@@ -8,7 +8,7 @@
     "start": "next start",
     "check": "tsx scripts/check.ts",
     "scenario": "tsx scripts/scenario.ts",
-    "verify": "tsc --noEmit --incremental false && tsx scripts/check.ts && tsx scripts/scenario.ts && tsx scripts/store.ts && tsx scripts/auth.ts && tsx scripts/agents.ts && tsx scripts/providers.ts && tsx scripts/admin.ts && tsx scripts/offices.ts && tsx scripts/systems.ts",
+    "verify": "tsc --noEmit --incremental false && tsx scripts/check.ts && tsx scripts/scenario.ts && tsx scripts/store.ts && tsx scripts/auth.ts && tsx scripts/agents.ts && tsx scripts/providers.ts && tsx scripts/admin.ts && tsx scripts/offices.ts && tsx scripts/systems.ts && tsx scripts/loop.ts",
     "store": "tsx scripts/store.ts",
     "auth": "tsx scripts/auth.ts",
     "agents": "tsx scripts/agents.ts",
@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit --incremental false",
     "offices": "tsx scripts/offices.ts",
     "systems": "tsx scripts/systems.ts",
+    "loop": "tsx scripts/loop.ts",
     "services": "tsx scripts/services.ts"
   },
   "dependencies": {

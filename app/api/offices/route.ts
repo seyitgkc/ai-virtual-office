@@ -1,7 +1,14 @@
 import { readJson, withSession } from "@/lib/server/http";
-import { createOffice, OfficeError, removeOffice, resetDemoOffice, switchOffice } from "@/lib/server/officeService";
+import {
+  createOffice,
+  createSampleOffice,
+  OfficeError,
+  removeOffice,
+  resetDemoOffice,
+  switchOffice,
+} from "@/lib/server/officeService";
 
-/** Add an office, switch to another of your offices, remove one, or reset the demo office. */
+/** Add an empty or a sample office, switch to another of your offices, remove one, or reset the demo office. */
 export async function POST(request: Request) {
   return withSession(request, async (session) => {
     const body = await readJson(request);
@@ -9,6 +16,8 @@ export async function POST(request: Request) {
     switch (body?.operation) {
       case "create":
         return createOffice(session, typeof body.name === "string" ? body.name : "");
+      case "create_sample":
+        return createSampleOffice(session, typeof body.providerId === "string" ? body.providerId : "");
       case "switch":
         switchOffice(session, officeId);
         return { ok: true };

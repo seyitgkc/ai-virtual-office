@@ -826,6 +826,7 @@ export const office: Office = {
   tasks,
   messages,
   systems: [],
+  autoHandoff: true,
 };
 
 /** Build the access context the resolver needs from an office snapshot. */

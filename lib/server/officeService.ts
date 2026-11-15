@@ -8,7 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { AdminError, applyAdminOp, blankOffice, permissionFor, type AdminOp } from "../admin";
-import { reduce, type Action, type AgentRuntime, type EngineState } from "../engine";
+import { nextStage, reduce, stageSpec, type Action, type AgentRuntime, type EngineState, type Wake } from "../engine";
 import { initialState } from "../initialState";
 import { statusReply } from "../agentState";
 import {
@@ -48,6 +48,7 @@ import {
 } from "./officeStore";
 import {
   ProviderError,
+  accountProviderViews,
   providerIds,
   providerViews,
   removeProvider,
@@ -55,6 +56,7 @@ import {
   saveProvider,
   testStoredProvider,
   type ProviderInput,
+  type ProviderOwner,
 } from "./providers";
 import { dataMarker } from "./modelRuntime";
 import {
@@ -67,7 +69,9 @@ import {
   recordDirect,
   unreadDirects,
 } from "./chat";
+import { sampleOffice, sampleSystemRooms } from "../sampleOffice";
 import {
+  connectSampleServices,
   ensureDemoSystems,
   liveRecords,
   performInSystem,
@@ -329,11 +333,17 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
       active: seat.officeId === office.id,
     })),
     isDemoOffice: isDemoOffice(office.id),
+    agentsAtWork: agentsAtWork(office.id),
     feed: feedFor(db, state, viewer),
     hiddenMessages,
     // Keys never leave the server. The list is for people who connect
     // providers or choose one for an agent.
-    providers: can("manage_providers") || can("manage_people") ? providerViews(db, office.id) : [],
+    providers:
+      can("manage_providers") || can("manage_people")
+        ? providerViews(db, office.id, session.userId, can("use_shared_providers"))
+        : [],
+    ownProviders: session.hasPassword ? accountProviderViews(db, session.userId) : [],
+    ownProvidersEditable: session.hasPassword,
     providersEditable: can("manage_providers") && session.hasPassword && !isDemoOffice(office.id),
     directs: directLines(db, viewer.id),
     unread: {
@@ -501,8 +511,162 @@ export function applyAction(session: Session, requested: Action): Promise<Office
         notes: result.notes,
       });
     });
+    carryOn(before.office.id, result.wake, changedTasks(before.office, result.state.office));
     return buildView(db, result.state, session);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Agents carrying work forward
+//
+// An agent does not only act at the moment a person clicks. After each action
+// the office looks at what agents now have in front of them: an answer to a
+// question, a note from a colleague, a finished step that can go to the next
+// stage. That work runs in the background, one step at a time, in the same
+// queue as people's actions, so a click returns at once and the office is
+// never changed by two things at the same moment.
+//
+// It is bounded. A run takes a limited number of steps, every halt stays a
+// halt, and a step that fails is logged and left for a person.
+// ---------------------------------------------------------------------------
+
+/** One thing an agent does without a person asking: a wake, or handing a task on. */
+type Pending = Wake | { kind: "advance"; taskId: string };
+
+const STEPS_PER_RUN = 12;
+
+const loop = globalThis as unknown as {
+  __officeLoop?: { paused: boolean; runs: Map<string, Promise<void>> };
+};
+const loopState = (): { paused: boolean; runs: Map<string, Promise<void>> } =>
+  (loop.__officeLoop ??= { paused: process.env.OFFICE_AGENTS_PAUSED === "1", runs: new Map() });
+
+/** For tests: stop agents carrying work forward, or let them again. */
+export function pauseAgents(paused: boolean): void {
+  loopState().paused = paused;
+}
+
+/** Resolves once no agent is working in the background. */
+export async function agentsIdle(): Promise<void> {
+  for (;;) {
+    const runs = [...loopState().runs.values()];
+    if (runs.length === 0) return;
+    await Promise.allSettled(runs);
+  }
+}
+
+/** Whether agents are working in the background in this office right now. */
+const agentsAtWork = (officeId: string): boolean => loopState().runs.has(officeId);
+
+/** Ids of tasks an action created or changed. */
+function changedTasks(before: Office, after: Office): string[] {
+  const earlier = new Map(before.tasks.map((t) => [t.id, t]));
+  return after.tasks.filter((t) => earlier.get(t.id) !== t).map((t) => t.id);
+}
+
+/** A task that its agent has finished with at this stage and can pass on. */
+function readyToHandOn(office: Office, taskIds: Set<string>, skip: Set<string>): string | null {
+  if (!office.autoHandoff) return null;
+  for (const task of office.tasks) {
+    if (!taskIds.has(task.id) || skip.has(task.id)) continue;
+    if (task.closedAt !== null || task.status !== "in_progress") continue;
+    if (stageSpec(task.stage).humanGate || nextStage(task.stage) === null) continue;
+    if (office.participants.find((p) => p.id === task.ownerId)?.kind === "agent") return task.id;
+  }
+  return null;
+}
+
+/** Start, or add to, the background run for an office. */
+function carryOn(officeId: string, wakes: Wake[], taskIds: string[]): void {
+  const state = loopState();
+  if (state.paused || (wakes.length === 0 && taskIds.length === 0)) return;
+  const earlier = state.runs.get(officeId) ?? Promise.resolve();
+  const run: Promise<void> = earlier
+    .then(() => runPending(officeId, wakes, new Set(taskIds)))
+    .catch((error) => console.error("An agent run failed.", error))
+    .finally(() => {
+      if (state.runs.get(officeId) === run) state.runs.delete(officeId);
+    });
+  state.runs.set(officeId, run);
+}
+
+async function runPending(officeId: string, wakes: Wake[], taskIds: Set<string>): Promise<void> {
+  const waiting: Pending[] = [...wakes];
+  const stuck = new Set<string>();
+  for (let step = 0; step < STEPS_PER_RUN; step++) {
+    // Each step takes its own turn in the queue, so people's actions fit in between.
+    const more = await inTurn(async () => {
+      const db = officeDatabase();
+      const loaded = loadEngineState(db, officeId);
+      if (!loaded) return null;
+      const before = loaded.clockStepMinutes === 0 ? { ...loaded, now: Date.now() } : loaded;
+      const handOn = waiting.length === 0 ? readyToHandOn(before.office, taskIds, stuck) : null;
+      const next: Pending | undefined = waiting.shift() ?? (handOn ? { kind: "advance", taskId: handOn } : undefined);
+      if (!next) return null;
+      return takeStep(db, before, next, stuck);
+    });
+    if (more === null) return;
+    waiting.push(...more.wake);
+    for (const id of more.taskIds) taskIds.add(id);
+  }
+}
+
+/** Apply one background step and store it. A failure is logged for people to see. */
+async function takeStep(
+  db: Db,
+  before: EngineState,
+  next: Pending,
+  stuck: Set<string>,
+): Promise<{ wake: Wake[]; taskIds: string[] }> {
+  const task = before.office.tasks.find((t) => t.id === next.taskId);
+  const agentId = next.kind === "advance" ? task?.ownerId : next.participantId;
+  const agent = before.office.participants.find((p) => p.id === agentId && p.kind === "agent");
+  if (!task || !agent) return { wake: [], taskIds: [] };
+  const action: Action =
+    next.kind === "advance"
+      ? { type: "ADVANCE", taskId: task.id }
+      : next.kind === "resume"
+        ? { type: "AGENT_RESUME", taskId: task.id }
+        : { type: "AGENT_ATTEND", taskId: task.id, participantId: agent.id, noteId: next.noteId };
+  const subject: AuditSubject = { ...NO_SUBJECT, taskId: task.id, subjectParticipantId: agent.id, roomId: task.roomId };
+
+  let result;
+  try {
+    result = await reduce(before, action, runtimeFor(db, before.office.id));
+  } catch (error) {
+    // The task is left where it is, and is not tried again in this run.
+    stuck.add(task.id);
+    recordAudit(db, {
+      officeId: before.office.id,
+      officeClock: before.now,
+      actorId: agent.id,
+      actionType: action.type,
+      subject,
+      notes: [
+        `${agent.displayName} could not carry ${task.id} forward: ${error instanceof Error ? error.message : String(error)}`,
+      ],
+    });
+    return { wake: [], taskIds: [] };
+  }
+  const moved = result.state.office.tasks.find((t) => t.id === task.id);
+  // A handoff that went nowhere, for want of anyone to take it, is not repeated.
+  if (next.kind === "advance" && moved?.stage === task.stage) stuck.add(task.id);
+  // After taking its step again, the task may be handed on, but not taken again.
+  if (next.kind === "resume" && moved?.status !== "in_progress") stuck.add(task.id);
+
+  transaction(db, () => {
+    saveEngineState(db, before, result.state);
+    syncAccessTokens(db);
+    recordAudit(db, {
+      officeId: before.office.id,
+      officeClock: result.state.now,
+      actorId: agent.id,
+      actionType: action.type,
+      subject,
+      notes: result.notes,
+    });
+  });
+  return { wake: result.wake, taskIds: changedTasks(before.office, result.state.office) };
 }
 
 // ---------------------------------------------------------------------------
@@ -519,6 +683,8 @@ const quoted = (office: Office, id: string): string =>
 function describeAdminOp(op: AdminOp, before: Office, after: Office, actor: Participant): string {
   const who = actor.displayName;
   switch (op.type) {
+    case "SET_AUTO_HANDOFF":
+      return `${who} set agents to ${op.on ? "hand work on by themselves" : "wait for a person to move work on"}`;
     case "RENAME_OFFICE":
       return `${who} renamed the office to ${after.name}`;
     case "CLEAR_WORK":
@@ -574,7 +740,12 @@ export function applyAdminOperation(session: Session, op: AdminOp): Promise<Offi
         op,
         actor.id,
         () => randomUUID().slice(0, 8),
-        providerIds(db, before.office.id),
+        // Providers this person may hand out, plus any an agent already runs
+        // on, so an unrelated edit to that agent is not refused.
+        new Set([
+          ...providerIds(db, before.office.id, session.userId, may(before.office, actor, "use_shared_providers")),
+          ...before.office.participants.flatMap((p) => (p.providerId ? [p.providerId] : [])),
+        ]),
       );
     } catch (error) {
       if (error instanceof AdminError) throw new OfficeError(409, error.message);
@@ -609,7 +780,10 @@ export function applyAdminOperation(session: Session, op: AdminOp): Promise<Offi
   });
 }
 
-/** The person and office for a change to AI providers, or a refusal. */
+/** Where a provider is kept: in the office being viewed, or in the signed-in account. */
+export type ProviderScope = "office" | "account";
+
+/** The person and office for a change to the office's AI providers, or a refusal. */
 function providerEditor(db: Db, session: Session): { state: EngineState; actor: Participant } {
   const state = loadOffice(db, session);
   const actor = requirePermission(state, session, "manage_providers");
@@ -620,28 +794,46 @@ function providerEditor(db: Db, session: Session): { state: EngineState; actor: 
   return { state, actor };
 }
 
+/** Whose providers a change is about. An account's own need no office permission. */
+function providerOwner(db: Db, session: Session, scope: ProviderScope): { owner: ProviderOwner; state: EngineState; actor: Participant } {
+  if (scope === "office") {
+    const found = providerEditor(db, session);
+    return { ...found, owner: { officeId: found.state.office.id } };
+  }
+  if (!session.hasPassword) throw new OfficeError(403, "Sign in with a password account to keep AI providers of your own.");
+  const state = loadOffice(db, session);
+  return { state, actor: viewerOf(state.office, session), owner: { userId: session.userId } };
+}
+
 /**
- * Add an AI provider to the office, or change one. The API key is stored
- * encrypted and is never returned or written to the log.
+ * Add an AI provider, or change one, in the office or in the signed-in
+ * account. The API key is stored encrypted and is never returned or logged.
  */
-export function saveProviderSettings(session: Session, input: ProviderInput): Promise<OfficeView> {
+export function saveProviderSettings(
+  session: Session,
+  input: ProviderInput,
+  scope: ProviderScope = "office",
+): Promise<OfficeView> {
   return inTurn(async () => {
     const db = officeDatabase();
-    const { state, actor } = providerEditor(db, session);
+    const { state, actor, owner } = providerOwner(db, session, scope);
     try {
       transaction(db, () => {
-        saveProvider(db, state.office.id, input);
+        saveProvider(db, owner, input);
         const keyNote = input.removeKey ? " and removed its API key" : input.apiKey?.trim() ? " and stored its API key" : "";
-        recordAudit(db, {
-          officeId: state.office.id,
-          officeClock: state.now,
-          actorId: actor.id,
-          actionType: input.id ? "UPDATE_AI_PROVIDER" : "ADD_AI_PROVIDER",
-          subject: NO_SUBJECT,
-          notes: [
-            `${actor.displayName} ${input.id ? "changed" : "added"} the AI provider ${input.name.trim()} (${input.defaultModel.trim()})${keyNote}`,
-          ],
-        });
+        // A change to someone's own providers is theirs alone and is not office news.
+        if (scope === "office") {
+          recordAudit(db, {
+            officeId: state.office.id,
+            officeClock: state.now,
+            actorId: actor.id,
+            actionType: input.id ? "UPDATE_AI_PROVIDER" : "ADD_AI_PROVIDER",
+            subject: NO_SUBJECT,
+            notes: [
+              `${actor.displayName} ${input.id ? "changed" : "added"} the AI provider ${input.name.trim()} (${input.defaultModel.trim()})${keyNote}`,
+            ],
+          });
+        }
       });
     } catch (error) {
       if (error instanceof ProviderError) throw new OfficeError(400, error.message);
@@ -652,21 +844,27 @@ export function saveProviderSettings(session: Session, input: ProviderInput): Pr
 }
 
 /** Remove an AI provider. Agents that used it are left without one. */
-export function removeProviderSettings(session: Session, providerId: string): Promise<OfficeView> {
+export function removeProviderSettings(
+  session: Session,
+  providerId: string,
+  scope: ProviderScope = "office",
+): Promise<OfficeView> {
   return inTurn(async () => {
     const db = officeDatabase();
-    const { state, actor } = providerEditor(db, session);
+    const { state, actor, owner } = providerOwner(db, session, scope);
     try {
       transaction(db, () => {
-        const name = removeProvider(db, state.office.id, providerId);
-        recordAudit(db, {
-          officeId: state.office.id,
-          officeClock: state.now,
-          actorId: actor.id,
-          actionType: "REMOVE_AI_PROVIDER",
-          subject: NO_SUBJECT,
-          notes: [`${actor.displayName} removed the AI provider ${name}`],
-        });
+        const name = removeProvider(db, owner, providerId);
+        if (scope === "office") {
+          recordAudit(db, {
+            officeId: state.office.id,
+            officeClock: state.now,
+            actorId: actor.id,
+            actionType: "REMOVE_AI_PROVIDER",
+            subject: NO_SUBJECT,
+            notes: [`${actor.displayName} removed the AI provider ${name}`],
+          });
+        }
       });
     } catch (error) {
       if (error instanceof ProviderError) throw new OfficeError(404, error.message);
@@ -677,11 +875,15 @@ export function removeProviderSettings(session: Session, providerId: string): Pr
 }
 
 /** Check a stored provider with the service itself. Nothing is generated. */
-export async function testProviderSettings(session: Session, providerId: string): Promise<{ ok: true; model: string }> {
+export async function testProviderSettings(
+  session: Session,
+  providerId: string,
+  scope: ProviderScope = "office",
+): Promise<{ ok: true; model: string }> {
   const db = officeDatabase();
-  providerEditor(db, session);
+  const { owner } = providerOwner(db, session, scope);
   try {
-    return { ok: true, model: await testStoredProvider(db, session.officeId ?? "", providerId) };
+    return { ok: true, model: await testStoredProvider(db, owner, providerId) };
   } catch (error) {
     if (error instanceof ProviderError) throw new OfficeError(400, error.message);
     // A provider's failure is reported as 424. A proxy in front of the server
@@ -908,6 +1110,51 @@ export function createOffice(session: Session, name: string): Promise<{ officeId
     }
     switchSeat(db, session, created.officeId);
     return { officeId: created.officeId };
+  });
+}
+
+/**
+ * Create a sample office for the signed-in account and switch to it: the
+ * distributor from the demo, staffed by AI agents on one of the account's own
+ * providers, with this person as its manager. It is theirs alone, unlike the
+ * shared demo, so real model calls are spent only by people they let in.
+ */
+export function createSampleOffice(session: Session, providerId: string): Promise<{ officeId: string }> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    if (!session.hasPassword) {
+      throw new OfficeError(403, "Demo access cannot add offices. Sign in with a password account.");
+    }
+    if (seatsOf(db, session.userId).length >= MAX_OFFICES_PER_ACCOUNT) {
+      throw new OfficeError(409, `An account can hold up to ${MAX_OFFICES_PER_ACCOUNT} offices.`);
+    }
+    const provider = accountProviderViews(db, session.userId).find((p) => p.id === providerId);
+    if (!provider) throw new OfficeError(400, "Choose one of your own AI providers for the agents to run on.");
+    if (!provider.usable) throw new OfficeError(400, `${provider.name} has no readable API key. Enter it again first.`);
+
+    const suffix = randomUUID().slice(0, 8);
+    const office = sampleOffice({
+      suffix,
+      name: "Sample distributor",
+      manager: { displayName: session.displayName },
+      providerId,
+    });
+    const managerId = office.participants.find((p) => p.kind === "human")!.id;
+    transaction(db, () => {
+      writeWholeOffice(db, { office, now: Date.now(), seq: 0, clockStepMinutes: 0, idScope: freshIdScope(db) });
+      addMembership(db, session.userId, managerId);
+      connectSampleServices(db, suffix, sampleSystemRooms(suffix));
+      recordAudit(db, {
+        officeId: office.id,
+        officeClock: Date.now(),
+        actorId: managerId,
+        actionType: "CREATE_OFFICE",
+        subject: NO_SUBJECT,
+        notes: [`${session.displayName} created this sample office, with its agents on ${provider.name}.`],
+      });
+    });
+    switchSeat(db, session, office.id);
+    return { officeId: office.id };
   });
 }
 

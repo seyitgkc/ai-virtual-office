@@ -82,6 +82,8 @@ async function main(): Promise<void> {
   // -- the office, with the demo pointed at the two services --------------------
   const folder = mkdtempSync(join(tmpdir(), "office-systems-"));
   const adminPassword = randomBytes(18).toString("base64url");
+  // Agents carrying work forward by themselves is checked on its own below.
+  process.env.OFFICE_AGENTS_PAUSED = "1";
   process.env.OFFICE_DB_PATH = join(folder, "office.db");
   process.env.AUTH_SECRET = randomBytes(40).toString("base64url");
   process.env.ADMIN_EMAIL = "owner@example.test";

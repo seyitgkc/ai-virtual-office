@@ -11,11 +11,12 @@ import { PeopleTab, ProvidersTab } from "./SettingsAgents";
 import { RecordsTab } from "./SettingsRecords";
 import { ConfirmButton, SavedField, Section, TabBar } from "./settingsParts";
 
-type Tab = "offices" | "office" | "rooms" | "records" | "people" | "roles" | "rules" | "providers";
+type Tab = "offices" | "own-providers" | "office" | "rooms" | "records" | "people" | "roles" | "rules" | "providers";
 
 /** Each tab and the permission that opens it. Offices is open to everyone. */
 const TABS: { id: Tab; label: string; needs: Permission | null }[] = [
   { id: "offices", label: "Offices", needs: null },
+  { id: "own-providers", label: "Your AI providers", needs: null },
   { id: "office", label: "This office", needs: "manage_office" },
   { id: "rooms", label: "Rooms", needs: "manage_rooms" },
   { id: "records", label: "Records and systems", needs: "manage_rooms" },
@@ -60,8 +61,11 @@ export function Settings({
   onClose: () => void;
 }) {
   const own = view.viewer.permissions;
-  const tabs = TABS.filter((t) => t.needs === null || own.includes(t.needs));
-  const [tab, setTab] = useState<Tab>(tabs[1]?.id ?? "offices");
+  // Providers of one's own need a password account, which demo access is not.
+  const tabs = TABS.filter(
+    (t) => (t.needs === null || own.includes(t.needs)) && (t.id !== "own-providers" || view.ownProvidersEditable),
+  );
+  const [tab, setTab] = useState<Tab>(tabs.find((t) => t.needs !== null)?.id ?? "offices");
   const open = tabs.some((t) => t.id === tab) ? tab : "offices";
   const office = view.office;
 
@@ -93,7 +97,8 @@ export function Settings({
           )}
           {open === "roles" && <RolesTab office={office} ownPermissions={own} adminOp={adminOp} />}
           {open === "rules" && <RulesTab office={office} dispatch={dispatch} />}
-          {open === "providers" && <ProvidersTab view={view} providerOp={providerOp} />}
+          {open === "providers" && <ProvidersTab view={view} providerOp={providerOp} scope="office" />}
+          {open === "own-providers" && <ProvidersTab view={view} providerOp={providerOp} scope="account" />}
         </div>
       </div>
     </div>
@@ -166,7 +171,51 @@ function OfficesTab({ view, officeOp }: { view: OfficeView; officeOp: (op: Offic
         </form>
         <p className="hint">Removing an office deletes everything in it for everyone, and cannot be undone.</p>
       </Section>
+
+      {view.ownProvidersEditable && <SampleOffice view={view} officeOp={officeOp} />}
     </>
+  );
+}
+
+/** Adds the demo's distributor as an office of one's own, staffed by AI agents. */
+function SampleOffice({ view, officeOp }: { view: OfficeView; officeOp: (op: OfficeOp) => void }) {
+  const usable = view.ownProviders.filter((p) => p.usable);
+  const [providerId, setProviderId] = useState(usable[0]?.id ?? "");
+  const chosen = usable.some((p) => p.id === providerId) ? providerId : (usable[0]?.id ?? "");
+  return (
+    <Section
+      title="Add a sample office with AI agents"
+      hint={
+        usable.length === 0
+          ? "This adds the distributor from the demo as an office of your own, with five AI agents in place of the playbook agents. It needs an AI provider from your account: add one under Your AI providers first."
+          : "This adds the distributor from the demo as an office of your own: the same rooms, roles and records, five AI agents on the provider you choose, and you as its manager. It starts with no work. Every step an agent takes is a call to that provider."
+      }
+    >
+      <form
+        className="form-inline"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (chosen) officeOp({ operation: "create_sample", providerId: chosen });
+        }}
+      >
+        <select
+          aria-label="AI provider for the sample office's agents"
+          value={chosen}
+          onChange={(e) => setProviderId(e.target.value)}
+          disabled={usable.length === 0}
+        >
+          {usable.length === 0 && <option value="">No usable provider in your account</option>}
+          {usable.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}: {p.defaultModel}
+            </option>
+          ))}
+        </select>
+        <button type="submit" className="btn primary" disabled={usable.length === 0}>
+          Add the sample office
+        </button>
+      </form>
+    </Section>
   );
 }
 
@@ -202,6 +251,25 @@ function OfficeTab({
           </div>
         </Section>
       )}
+
+      <Section
+        title="How work moves"
+        hint="Halts are the same either way: a question, missing access, an approval and the review decision always wait for a person."
+      >
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={office.autoHandoff}
+            onChange={(e) => adminOp({ type: "SET_AUTO_HANDOFF", on: e.target.checked })}
+          />
+          Agents hand a finished step on to the next stage by themselves
+        </label>
+        <p className="hint">
+          {office.autoHandoff
+            ? "A task moves from stage to stage without anyone clicking, until it reaches a halt or the review."
+            : "A person moves each task on with the Advance button once an agent has finished its step."}
+        </p>
+      </Section>
 
       <Section title="Danger zone" hint="These cannot be undone.">
         <div className="row-actions">

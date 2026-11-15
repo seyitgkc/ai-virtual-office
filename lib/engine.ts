@@ -141,6 +141,12 @@ export interface AgentStepInput {
    * latest thing in the thread.
    */
   afterAction?: boolean;
+  /**
+   * Set when the agent does not own the task and is looking at it only
+   * because someone left it a note. It may do its own part and answer with a
+   * note. It does not take the task over.
+   */
+  attending?: { fromId: ParticipantId; body: string };
 }
 
 export interface DraftQuestion {
@@ -264,7 +270,11 @@ export type Action =
       taskId: TaskId;
       byId: ParticipantId;
       verdict: "approved" | "rejected" | "changes_requested";
-    };
+    }
+  /** An agent takes its step again. Raised by the office, never by a person. */
+  | { type: "AGENT_RESUME"; taskId: TaskId }
+  /** An agent looks at a note left for it. Raised by the office, never by a person. */
+  | { type: "AGENT_ATTEND"; taskId: TaskId; participantId: ParticipantId; noteId: string };
 
 export interface StepResult {
   state: EngineState;
@@ -272,7 +282,19 @@ export interface StepResult {
   emitted: Message[];
   /** Plain-language trace for the activity feed and for debugging. */
   notes: string[];
+  /**
+   * Agents that now have something to pick up because of this action. The
+   * engine only names them. Whoever runs the office decides when they go.
+   */
+  wake: Wake[];
 }
+
+/** An agent with something waiting for it. */
+export type Wake =
+  /** An answer to its question arrived, so it can take its step again. */
+  | { kind: "resume"; taskId: TaskId; participantId: ParticipantId }
+  /** Someone left it a note on a task it does not own. */
+  | { kind: "attend"; taskId: TaskId; participantId: ParticipantId; noteId: string };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -368,11 +390,20 @@ export async function reduce(
     }
   };
 
-  const done = (): StepResult => ({
-    state: { ...state, office, now, seq },
-    emitted,
-    notes,
-  });
+  const wake: Wake[] = [];
+  const done = (): StepResult => {
+    // A note for an AI agent that does not own the task is something for it
+    // to look at. The owner reads its notes when it next takes a step anyway.
+    for (const m of emitted) {
+      if (m.kind !== "note" || m.audience.to !== "participant") continue;
+      const reader = office.participants.find((p) => p.id === (m.audience as { id: string }).id);
+      const task = office.tasks.find((t) => t.id === m.taskId);
+      if (reader?.agentType === "ai" && task && task.closedAt === null && task.ownerId !== reader.id) {
+        wake.push({ kind: "attend", taskId: task.id, participantId: reader.id, noteId: m.id });
+      }
+    }
+    return { state: { ...state, office, now, seq }, emitted, notes, wake };
+  };
 
   switch (action.type) {
     // -- a human files new work ------------------------------------------
@@ -613,6 +644,11 @@ export async function reduce(
       // carries the action out, provided the agent may still act there.
       const held = question.heldAction;
       const asker = office.participants.find((p) => p.id === question.fromId);
+      // An AI agent that asked an ordinary question has its answer now, and
+      // can take the step again once nothing else is holding the task.
+      if (!held && asker?.agentType === "ai" && unblocked.ownerId === asker.id && unblocked.status !== "blocked_question") {
+        wake.push({ kind: "resume", taskId: task.id, participantId: asker.id });
+      }
       const system = held ? office.systems.find((s) => s.id === held.systemId) : undefined;
       if (held && asker && asker.kind === "agent") {
         const say = (body: string): void => {
@@ -817,6 +853,43 @@ export async function reduce(
     }
 
     // -- the review gate ----------------------------------------------------
+    case "AGENT_RESUME": {
+      const task = office.tasks.find((t) => t.id === action.taskId);
+      const owner = office.participants.find((p) => p.id === task?.ownerId);
+      if (!task || task.closedAt !== null || !owner || owner.kind !== "agent" || task.status !== openStatus(task.stage)) {
+        return done();
+      }
+      const turn = await runAgent(office, task, task.stage, owner, runtime, now, nextId, true);
+      office = turn.office;
+      emitted.push(...turn.emitted);
+      notes.push(...turn.notes);
+      return done();
+    }
+
+    case "AGENT_ATTEND": {
+      const task = office.tasks.find((t) => t.id === action.taskId);
+      const reader = office.participants.find((p) => p.id === action.participantId);
+      const note = office.messages.find((m) => m.id === action.noteId);
+      if (
+        !task ||
+        task.closedAt !== null ||
+        !reader ||
+        reader.agentType !== "ai" ||
+        task.ownerId === reader.id ||
+        !note ||
+        note.kind !== "note" ||
+        note.audience.to !== "participant" ||
+        note.audience.id !== reader.id
+      ) {
+        return done();
+      }
+      const turn = await runAgent(office, task, task.stage, reader, runtime, now, nextId, true, false, note);
+      office = turn.office;
+      emitted.push(...turn.emitted);
+      notes.push(...turn.notes);
+      return done();
+    }
+
     case "DECIDE": {
       const task = findTask(office, action.taskId);
       const by = findParticipant(office, action.byId);
@@ -951,6 +1024,8 @@ async function runAgent(
   resumed = false,
   /** True for the one further step an AI agent takes after acting in a system. */
   afterAction = false,
+  /** The note that brought an agent to a task it does not own, when that is why it is here. */
+  attending: Message | null = null,
 ): Promise<{ office: Office; emitted: Message[]; notes: string[] }> {
   if (participant.kind !== "agent") {
     return { office, emitted: [], notes: [] };
@@ -990,14 +1065,26 @@ async function runAgent(
     })),
   };
 
-  const result = await runtime.step({
+  const answered = await runtime.step({
     task,
     stage,
     participant,
     priorMessages: prior,
     surroundings,
     ...(afterAction ? { afterAction } : {}),
+    ...(attending && attending.fromId !== "system" ? { attending: { fromId: attending.fromId, body: attending.body } } : {}),
   });
+  // An agent attending to a note does its own part and may answer with one
+  // note. It cannot halt or redirect a task that is not its own.
+  const result: AgentStepResult = attending
+    ? {
+        ...(answered.statusNote ? { statusNote: answered.statusNote } : {}),
+        questions: [],
+        assumptions: [],
+        ...(answered.actions ? { actions: answered.actions } : {}),
+        notes: (answered.notes ?? []).slice(0, 1),
+      }
+    : answered;
   const emitted: Message[] = [];
   const notes: string[] = [];
   let updated: Task = task;
@@ -1099,8 +1186,14 @@ async function runAgent(
   });
   // Acting in a system the agent may not act in is a need like any other, and
   // halts the task the same way.
-  const actionNeeds: AccessNeed[] = calls
-    .filter((call) => resolveAccess(participant, call.system.roomId, "act", ctx).effect !== "allow")
+  const mayCall = (call: SystemCall): boolean =>
+    resolveAccess(participant, call.system.roomId, "act", ctx).effect === "allow";
+  // An agent attending to a note raises no need: what it may not do is left
+  // undone, and whoever left the note is told.
+  const allowedCalls = attending ? calls.filter(mayCall) : calls;
+  const refusedCalls = attending ? calls.filter((call) => !mayCall(call)) : [];
+  const actionNeeds: AccessNeed[] = (attending ? [] : calls)
+    .filter((call) => !mayCall(call))
     .map((call) => ({
       room: call.system.roomId,
       scope: "act",
@@ -1186,9 +1279,18 @@ async function runAgent(
     });
     notes.push(`${participant.displayName} left a note for ${findParticipant(office, toId).displayName} on ${task.id}`);
   };
+  if (attending && attending.fromId !== "system") {
+    for (const call of refusedCalls) {
+      tell(
+        attending.fromId,
+        `I may not act in ${call.system.name}, so I did not ${(operationOf(call.system.kind, call.operation)?.label ?? call.operation).toLowerCase()}.`,
+      );
+    }
+  }
+
   let acted = false;
   if (!wallHit) {
-    for (const call of calls) {
+    for (const call of allowedCalls) {
       // Where a system needs approval, being allowed to act is not enough: the
       // action is put to a person as a question and waits for their answer.
       if (call.system.needsApproval) {
@@ -1278,7 +1380,12 @@ async function runAgent(
       ...updated,
       history: [
         ...updated.history,
-        { at: now, summary: `${participant.displayName} worked ${stageSpec(stage).label}` },
+        {
+          at: now,
+          summary: attending
+            ? `${participant.displayName} attended to a note`
+            : `${participant.displayName} worked ${stageSpec(stage).label}`,
+        },
       ],
     };
   }
@@ -1290,7 +1397,7 @@ async function runAgent(
   // such step. If the model cannot answer, what it already did stands.
   if (acted && !afterAction && participant.agentType === "ai" && updated.status !== "blocked_question") {
     try {
-      const next = await runAgent(after, updated, stage, participant, runtime, now, nextId, true, true);
+      const next = await runAgent(after, updated, stage, participant, runtime, now, nextId, true, true, attending);
       return { office: next.office, emitted: [...emitted, ...next.emitted], notes: [...notes, ...next.notes] };
     } catch (error) {
       notes.push(

@@ -210,6 +210,7 @@ export const PERMISSIONS = [
   "manage_rooms",
   "manage_roles",
   "manage_providers",
+  "use_shared_providers",
   "manage_office",
 ] as const;
 
@@ -240,6 +241,10 @@ export const PERMISSION_INFO: Record<Permission, { label: string; description: s
   manage_providers: {
     label: "Manage AI providers",
     description: "Add, change and remove AI providers and their API keys.",
+  },
+  use_shared_providers: {
+    label: "Use shared AI providers",
+    description: "Give agents an AI provider that another person brought to this office from their own account.",
   },
   manage_office: { label: "Manage the office", description: "Rename the office, clear all work, or remove the office." },
 };
@@ -643,6 +648,11 @@ export interface Office {
   messages: Message[];
   /** Outside systems connected to rooms. Addresses and keys stay on the server. */
   systems: ConnectedSystem[];
+  /**
+   * When set, an agent that finishes its step cleanly hands the task to the
+   * next stage by itself. Halts and the review decision still wait for a person.
+   */
+  autoHandoff: boolean;
 }
 
 /** Can this participant take ownership of work in this room? */

@@ -17,7 +17,8 @@ import { seal, unseal } from "./secrets";
 
 interface ProviderRow {
   id: string;
-  office_id: string;
+  office_id: string | null;
+  owner_user_id: string | null;
   name: string;
   kind: ProviderKind;
   base_url: string | null;
@@ -30,35 +31,91 @@ interface ProviderRow {
 /** Thrown for input a person can correct. The message is shown to them. */
 export class ProviderError extends Error {}
 
-const rows = (db: Db, officeId: string): ProviderRow[] =>
-  all<ProviderRow>(db, "SELECT * FROM ai_providers WHERE office_id = ? ORDER BY position", officeId);
+/** Who a provider belongs to: one office, or one account. */
+export type ProviderOwner = { officeId: string } | { userId: string };
 
-const row = (db: Db, officeId: string, id: string): ProviderRow | undefined =>
-  get<ProviderRow>(db, "SELECT * FROM ai_providers WHERE office_id = ? AND id = ?", officeId, id);
+const rows = (db: Db, owner: ProviderOwner): ProviderRow[] =>
+  "officeId" in owner
+    ? all<ProviderRow>(db, "SELECT * FROM ai_providers WHERE office_id = ? ORDER BY position", owner.officeId)
+    : all<ProviderRow>(db, "SELECT * FROM ai_providers WHERE owner_user_id = ? ORDER BY position", owner.userId);
 
-export const providerIds = (db: Db, officeId: string): Set<string> => new Set(rows(db, officeId).map((r) => r.id));
+const row = (db: Db, owner: ProviderOwner, id: string): ProviderRow | undefined =>
+  rows(db, owner).find((r) => r.id === id);
+
+/**
+ * Providers that belong to an account and can be used in this office: those
+ * whose owner has a seat here.
+ */
+const sharedRows = (db: Db, officeId: string): (ProviderRow & { owner_name: string })[] =>
+  all<ProviderRow & { owner_name: string }>(
+    db,
+    `SELECT v.*, u.display_name AS owner_name
+       FROM ai_providers v
+       JOIN users u ON u.id = v.owner_user_id
+      WHERE v.owner_user_id IN (
+              SELECT m.user_id FROM memberships m JOIN participants p ON p.id = m.participant_id
+               WHERE p.office_id = ?)
+      ORDER BY v.position`,
+    officeId,
+  );
+
+/** A provider an agent in this office can run on, wherever it belongs. */
+const usableIn = (db: Db, officeId: string, id: string): ProviderRow | undefined =>
+  row(db, { officeId }, id) ?? sharedRows(db, officeId).find((r) => r.id === id);
+
+/**
+ * The providers this person may give to an agent here: the office's own, the
+ * ones from their own account, and other people's when their role allows it.
+ */
+export function providerIds(db: Db, officeId: string, userId: string, mayUseOthers: boolean): Set<string> {
+  return new Set([
+    ...rows(db, { officeId }).map((r) => r.id),
+    ...sharedRows(db, officeId)
+      .filter((r) => mayUseOthers || r.owner_user_id === userId)
+      .map((r) => r.id),
+  ]);
+}
 
 /** A provider can be used once it holds a readable key, or needs none. */
 const usable = (r: ProviderRow): boolean =>
   unseal(r.api_key_cipher) !== null || (r.kind === "openai_compatible" && r.api_key_cipher === null);
 
-/** The providers of an office, without their keys. */
-export function providerViews(db: Db, officeId: string): ProviderView[] {
-  return rows(db, officeId).map((r) => {
-    const key = unseal(r.api_key_cipher);
-    return {
-      id: r.id,
-      name: r.name,
-      kind: r.kind,
-      baseUrl: r.base_url,
-      defaultModel: r.default_model,
-      hasKey: key !== null,
-      keyHint: key !== null ? r.key_hint : null,
-      keyUnreadable: r.api_key_cipher !== null && key === null,
-      usable: usable(r),
-    };
-  });
+const toView = (r: ProviderRow, sharedBy: string | null, selectable: boolean): ProviderView => {
+  const key = unseal(r.api_key_cipher);
+  return {
+    id: r.id,
+    name: r.name,
+    kind: r.kind,
+    baseUrl: r.base_url,
+    defaultModel: r.default_model,
+    hasKey: key !== null,
+    keyHint: key !== null ? r.key_hint : null,
+    keyUnreadable: r.api_key_cipher !== null && key === null,
+    usable: usable(r),
+    sharedBy,
+    selectable,
+  };
+};
+
+/**
+ * The providers agents in an office can run on, without their keys: the
+ * office's own, then those brought in from the accounts of people seated
+ * here. A key's last characters are shown only to its owner.
+ */
+export function providerViews(db: Db, officeId: string, userId: string, mayUseOthers: boolean): ProviderView[] {
+  return [
+    ...rows(db, { officeId }).map((r) => toView(r, null, true)),
+    ...sharedRows(db, officeId).map((r) => {
+      const mine = r.owner_user_id === userId;
+      const view = toView(r, mine ? "you" : r.owner_name, mine || mayUseOthers);
+      return mine ? view : { ...view, keyHint: null, baseUrl: null };
+    }),
+  ];
 }
+
+/** The providers that belong to one account, without their keys. */
+export const accountProviderViews = (db: Db, userId: string): ProviderView[] =>
+  rows(db, { userId }).map((r) => toView(r, "you", true));
 
 /** Refuse addresses that are malformed or point at a machine's own metadata. */
 export function checkedBaseUrl(input: string, whose = "the provider's"): string {
@@ -89,10 +146,12 @@ export interface ProviderInput {
 }
 
 /** Add a provider, or change one when `id` is given. Returns its id. */
-export function saveProvider(db: Db, officeId: string, input: ProviderInput): string {
-  const existing = input.id ? row(db, officeId, input.id) : undefined;
-  if (input.id && !existing) throw new ProviderError("That AI provider does not exist in this office.");
-  if (!existing && rows(db, officeId).length >= 12) throw new ProviderError("An office can hold up to 12 AI providers.");
+export function saveProvider(db: Db, owner: ProviderOwner, input: ProviderInput): string {
+  const existing = input.id ? row(db, owner, input.id) : undefined;
+  if (input.id && !existing) throw new ProviderError("That AI provider does not exist here.");
+  if (!existing && rows(db, owner).length >= 12) {
+    throw new ProviderError(`${"officeId" in owner ? "An office" : "An account"} can hold up to 12 AI providers.`);
+  }
 
   const name = input.name.trim();
   if (name.length < 2 || name.length > 40) throw new ProviderError("Give the provider a name (2 to 40 characters).");
@@ -140,10 +199,11 @@ export function saveProvider(db: Db, officeId: string, input: ProviderInput): st
     run(
       db,
       `INSERT INTO ai_providers
-         (id, office_id, position, name, kind, base_url, default_model, api_key_cipher, key_hint, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, office_id, owner_user_id, position, name, kind, base_url, default_model, api_key_cipher, key_hint, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
-      officeId,
+      "officeId" in owner ? owner.officeId : null,
+      "userId" in owner ? owner.userId : null,
       next?.next ?? 0,
       name,
       input.kind,
@@ -158,17 +218,17 @@ export function saveProvider(db: Db, officeId: string, input: ProviderInput): st
 }
 
 /** Remove a provider. Agents that used it are left with none. */
-export function removeProvider(db: Db, officeId: string, id: string): string {
-  const existing = row(db, officeId, id);
-  if (!existing) throw new ProviderError("That AI provider does not exist in this office.");
+export function removeProvider(db: Db, owner: ProviderOwner, id: string): string {
+  const existing = row(db, owner, id);
+  if (!existing) throw new ProviderError("That AI provider does not exist here.");
   run(db, "DELETE FROM ai_providers WHERE id = ?", id);
   return existing.name;
 }
 
 /** Check a stored provider with the service itself. Nothing is generated. */
-export async function testStoredProvider(db: Db, officeId: string, id: string): Promise<string> {
-  const r = row(db, officeId, id);
-  if (!r) throw new ProviderError("That AI provider does not exist in this office.");
+export async function testStoredProvider(db: Db, owner: ProviderOwner, id: string): Promise<string> {
+  const r = row(db, owner, id);
+  if (!r) throw new ProviderError("That AI provider does not exist here.");
   const key = unseal(r.api_key_cipher);
   if (r.kind === "anthropic") {
     if (!key) throw new ProviderError("No readable API key is stored for this provider.");
@@ -184,7 +244,7 @@ const cache = new Map<string, { stamp: string; runtime: ConversationRuntime }>()
  * sentence when the agent has no provider or the provider cannot be used.
  */
 export function runtimeForAgent(db: Db, officeId: string, agent: Participant): ConversationRuntime {
-  const r = agent.providerId ? row(db, officeId, agent.providerId) : undefined;
+  const r = agent.providerId ? usableIn(db, officeId, agent.providerId) : undefined;
   if (!r) {
     throw new Error(
       `${agent.displayName} has no AI provider. Choose one under Settings, People and agents.`,

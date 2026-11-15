@@ -41,6 +41,13 @@ export interface ProviderView {
   keyUnreadable: boolean;
   /** Whether an agent can use this provider as it stands. */
   usable: boolean;
+  /**
+   * Null for a provider that belongs to the office. For one brought in from
+   * an account: "you" when it is the viewer's own, else the owner's name.
+   */
+  sharedBy: string | null;
+  /** Whether this viewer may give it to an agent. */
+  selectable: boolean;
 }
 
 /** A system connected to a room. The API key itself is never included. */
@@ -87,6 +94,10 @@ export interface OfficeView {
   providers: ProviderView[];
   /** Whether this viewer may add or change providers here. */
   providersEditable: boolean;
+  /** The providers that belong to the viewer's own account, usable in any of their offices. */
+  ownProviders: ProviderView[];
+  /** Whether this account may keep providers of its own. Demo access may not. */
+  ownProvidersEditable: boolean;
   /** The viewer's direct conversations, with people and with agents. */
   directs: DirectLine[];
   /** What the viewer has not opened yet. */
@@ -106,6 +117,8 @@ export interface OfficeView {
   offices: { officeId: string; name: string; canRemove: boolean; isDemo: boolean; active: boolean }[];
   /** True in the shared demo office, where some settings are locked. */
   isDemoOffice: boolean;
+  /** True while agents are carrying work forward in the background. */
+  agentsAtWork: boolean;
   accessTokens: TokenView[];
   /** Sign-in accounts. Empty unless the viewer manages people. */
   accounts: { participantId: string; email: string; hasPassword: boolean }[];

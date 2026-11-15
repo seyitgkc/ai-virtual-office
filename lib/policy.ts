@@ -79,6 +79,11 @@ export function authorize(
       return mayActIn(office, ctx, actor, question.roomId);
     }
 
+    // Raised by the office itself when an agent has something to pick up.
+    case "AGENT_RESUME":
+    case "AGENT_ATTEND":
+      return no("Only the office can wake an agent.");
+
     case "RESOLVE_ASSUMPTION": {
       const assumption = office.messages.find((m) => m.id === action.assumptionId);
       return assumption
@@ -117,6 +122,8 @@ export function stampActor(action: Action, actorId: string): Action {
     case "DECIDE":
       return { ...action, byId: actorId };
     case "ADVANCE":
+    case "AGENT_RESUME":
+    case "AGENT_ATTEND":
       return action;
   }
 }

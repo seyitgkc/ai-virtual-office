@@ -36,6 +36,7 @@ export const CONFIGURABLE_STAGES: ConfigurableStage[] = ["intake", "planning", "
 export type AdminOp =
   | { type: "RENAME_OFFICE"; name: string }
   | { type: "CLEAR_WORK" }
+  | { type: "SET_AUTO_HANDOFF"; on: boolean }
   | {
       type: "ADD_AGENT";
       displayName: string;
@@ -126,6 +127,7 @@ export function permissionFor(op: AdminOp): Permission {
   switch (op.type) {
     case "RENAME_OFFICE":
     case "CLEAR_WORK":
+    case "SET_AUTO_HANDOFF":
       return "manage_office";
     case "ADD_AGENT":
     case "UPDATE_PARTICIPANT":
@@ -320,6 +322,9 @@ export function applyAdminOp(
   switch (op.type) {
     case "RENAME_OFFICE":
       return { ...office, name: named(op.name, "a name for the office") };
+
+    case "SET_AUTO_HANDOFF":
+      return { ...office, autoHandoff: op.on };
 
     case "CLEAR_WORK":
       // Grants made for one task go with the tasks. Standing rules stay.
@@ -738,6 +743,7 @@ export function blankOffice(input: {
     tasks: [],
     messages: [],
     systems: [],
+    autoHandoff: true,
   };
 }
 
@@ -822,6 +828,8 @@ export function parseAdminOp(input: unknown): AdminOp | null {
       return text(o.name) ? { type: "RENAME_OFFICE", name: o.name } : null;
     case "CLEAR_WORK":
       return { type: "CLEAR_WORK" };
+    case "SET_AUTO_HANDOFF":
+      return typeof o.on === "boolean" ? { type: "SET_AUTO_HANDOFF", on: o.on } : null;
     case "ADD_AGENT":
       return text(o.displayName) && text(o.title) && text(o.roleId, 60) && text(o.roomId, 60)
         ? {

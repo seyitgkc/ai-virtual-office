@@ -15,6 +15,8 @@ const text = (value: unknown): string => (typeof value === "string" ? value : ""
 export async function POST(request: Request) {
   return withSession(request, async (session) => {
     const body = await readJson(request);
+    // "account" keeps the provider in the signed-in account, for all its offices.
+    const scope = body?.scope === "account" ? "account" : "office";
     switch (body?.operation) {
       case "save": {
         const kind = body.kind;
@@ -27,12 +29,12 @@ export async function POST(request: Request) {
           defaultModel: text(body.defaultModel),
           ...(typeof body.apiKey === "string" ? { apiKey: body.apiKey } : {}),
           removeKey: body.removeKey === true,
-        });
+        }, scope);
       }
       case "remove":
-        return removeProviderSettings(session, text(body.id));
+        return removeProviderSettings(session, text(body.id), scope);
       case "test":
-        return testProviderSettings(session, text(body.id));
+        return testProviderSettings(session, text(body.id), scope);
       default:
         throw new OfficeError(400, "Unknown operation.");
     }

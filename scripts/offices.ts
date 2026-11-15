@@ -20,6 +20,8 @@ async function main(): Promise<void> {
   const folder = mkdtempSync(join(tmpdir(), "office-check-"));
   const databaseFile = join(folder, "office.db");
   const adminPassword = randomBytes(18).toString("base64url");
+  // Agents do not carry work forward by themselves in these checks.
+  process.env.OFFICE_AGENTS_PAUSED = "1";
   process.env.OFFICE_DB_PATH = databaseFile;
   process.env.AUTH_SECRET = randomBytes(40).toString("base64url");
   process.env.ADMIN_EMAIL = "owner@example.test";
@@ -67,7 +69,7 @@ async function main(): Promise<void> {
   expect("one room", view.office.floorplan.rooms.length, 1);
   expect("one person, the administrator", view.office.participants.map((p) => p.displayName).join(), "Alex Kim");
   expect("nothing from the demo leaked in", JSON.stringify(view).includes("Dana Reyes") || JSON.stringify(view).includes("Northline"), false);
-  expect("it holds every permission in its own office", view.viewer.permissions.length, 10);
+  expect("it holds every permission in its own office", view.viewer.permissions.length, 11);
 
   console.log("\n-- demo access is limited --");
   const dana = await sessionFor(demoPeople.find((u) => u.participantId === "p-dana")!.email, "p-dana");

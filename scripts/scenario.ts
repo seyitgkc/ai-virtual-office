@@ -33,6 +33,7 @@ const blank: Office = {
   tasks: [],
   messages: [],
   systems: [],
+  autoHandoff: false,
 };
 
 let state: EngineState = {

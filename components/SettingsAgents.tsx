@@ -70,8 +70,10 @@ function ProviderSelect({
     <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">No provider chosen</option>
       {providers.map((p) => (
-        <option key={p.id} value={p.id}>
-          {p.name}: {p.defaultModel}{p.usable ? "" : " (needs a key)"}
+        <option key={p.id} value={p.id} disabled={!p.selectable && p.id !== value}>
+          {p.name}: {p.defaultModel}
+          {p.sharedBy ? ` (from ${p.sharedBy === "you" ? "your account" : `${p.sharedBy}'s account`})` : ""}
+          {p.usable ? "" : " (needs a key)"}
         </option>
       ))}
     </select>
@@ -910,17 +912,26 @@ function PlaybookEditor({
 
 const EMPTY_FORM = { id: "", name: "", kind: "anthropic" as ProviderKind, baseUrl: "", defaultModel: "", apiKey: "" };
 
-/** The office's AI providers. An office can hold several, of either kind. */
+/**
+ * AI providers, of either kind. With scope "office" these are the office's
+ * own. With scope "account" they belong to the signed-in person and can be
+ * used in every office that person has a seat in.
+ */
 export function ProvidersTab({
   view,
-  providerOp,
+  providerOp: sendOp,
+  scope,
 }: {
   view: OfficeView;
   providerOp: (op: ProviderOp) => Promise<boolean>;
+  scope: "office" | "account";
 }) {
-  const { providers } = view;
+  const own = scope === "account";
+  const providers = own ? view.ownProviders : view.providers.filter((p) => p.sharedBy === null);
+  const shared = own ? [] : view.providers.filter((p) => p.sharedBy !== null);
+  const providerOp = (op: ProviderOp): Promise<boolean> => sendOp({ ...op, scope });
   const [form, setForm] = useState(EMPTY_FORM);
-  const locked = !view.providersEditable;
+  const locked = own ? !view.ownProvidersEditable : !view.providersEditable;
   const editing = providers.find((p) => p.id === form.id) ?? null;
   const usedBy = (id: string) =>
     view.office.participants.filter((p) => p.kind === "agent" && p.agentType === "ai" && p.providerId === id);
@@ -930,13 +941,15 @@ export function ProvidersTab({
   return (
     <>
       <Section
-        title="AI providers"
+        title={own ? "Your AI providers" : "This office's AI providers"}
         hint={
-          view.isDemoOffice
-            ? "The demo office is shared with every visitor, so it cannot hold API keys. Its agents are playbook agents."
-            : locked
-              ? "Sign in with a password account to change AI providers."
-              : "An office can hold several providers. Each AI agent names the one it uses, under People and agents."
+          own
+            ? "These belong to your account. They can be given to agents in every office you have a seat in, so a key is entered once. Other people in an office see that the provider is yours, and can give it to an agent only if their role has the Use shared AI providers permission."
+            : view.isDemoOffice
+              ? "The demo office is shared with every visitor, so it cannot hold API keys. Its agents are playbook agents."
+              : locked
+                ? "Sign in with a password account to change AI providers."
+                : "These belong to this office alone. Each AI agent names the provider it uses, under People and agents."
         }
       >
         <div className="table-scroll">
@@ -1023,6 +1036,43 @@ export function ProvidersTab({
           for a single token.
         </p>
       </Section>
+
+      {shared.length > 0 && (
+        <Section
+          title="Brought in from people's accounts"
+          hint="Providers that belong to someone seated in this office. Their owner changes them under Your AI providers."
+        >
+          <div className="table-scroll">
+            <table className="grid-table">
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Belongs to</th>
+                  <th scope="col">Default model</th>
+                  <th scope="col">You may give it to agents</th>
+                  <th scope="col">Used by</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shared.map((p) => {
+                  const agents = usedBy(p.id);
+                  return (
+                    <tr key={p.id}>
+                      <td>{p.name}</td>
+                      <td>{p.sharedBy === "you" ? "You" : p.sharedBy}</td>
+                      <td>{p.defaultModel}</td>
+                      <td className="muted">{p.selectable ? "Yes" : "No"}</td>
+                      <td className="muted">
+                        {agents.length === 0 ? "No agents" : agents.map((a) => a.displayName).join(", ")}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
 
       <Section title={editing ? `Edit ${editing.name}` : "Add a provider"}>
         <form

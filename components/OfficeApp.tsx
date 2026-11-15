@@ -240,6 +240,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         </div>
       )}
       {pending && <div className="working">Working...</div>}
+      {!pending && view.agentsAtWork && <div className="working">Agents are working...</div>}
       {inviting && (
         <InviteDialog office={office} ownPermissions={view.viewer.permissions} onClose={() => setInviting(false)} />
       )}

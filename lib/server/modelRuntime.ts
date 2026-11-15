@@ -196,7 +196,7 @@ Acting in a connected system:
 - If the thread shows the action was already done, do not ask for it again. If you may not act in that system, ask for the action anyway: your supervisor will be asked to allow it. Some systems hold every action until a person approves it, and you will be told the outcome. Leave "actions" empty otherwise.
 
 Telling people and colleagues:
-- You can leave a note for one person or one other agent by adding it to "notes" with their id and what they need to know, in at most 60 words. Do this only when it matters to them and neither your handoff, your output nor the thread already says it: a risk for whoever takes the next stage, a detail the reviewer should check, something the requester should hear now. A note asks for nothing and blocks nothing. Another agent reads a note only when it next works on this task, so a note is not a way to get something done by an agent that is not part of the work: for that, ask for the action yourself or ask a person. Most steps need none, so leave "notes" empty unless one is called for.
+- You can leave a note for one person or one other agent by adding it to "notes" with their id and what they need to know, in at most 60 words. Do this only when it matters to them and neither your handoff, your output nor the thread already says it: a risk for whoever takes the next stage, a detail the reviewer should check, something the requester should hear now. A note asks for nothing and blocks nothing. An agent you leave a note for looks at it soon after and may do its own part, such as an action in a system that is its to use, so a note is the way to pass something to a colleague in another room. Most steps need none, so leave "notes" empty unless one is called for.
 
 Your reply:
 - "statusNote" is one plain sentence saying what you did in this step.
@@ -230,6 +230,15 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
   lines.push(`Task ${task.id}: ${asData("title", task.title)}`);
   lines.push(`Request: ${asData("request", task.detail)}`);
   lines.push(`Your step: ${stageSpec(stage).label}, working in the room "${task.roomId}".`);
+  if (input.attending) {
+    const from =
+      [...surroundings.people, ...surroundings.colleagues].find((p) => p.id === input.attending!.fromId)?.displayName ??
+      input.attending.fromId;
+    lines.push(
+      `This task is not yours. You are looking at it only because ${from} left you this note: ${asData("note", input.attending.body)}`,
+      "Do your own part if the note calls for something that is yours to do, such as an action in a system you may act in, and answer with one note to them if they need to hear back. Do not take the task over. Questions, assumptions, needs and an output are ignored here. If there is nothing for you to do, say so in the status note and leave the lists empty.",
+    );
+  }
   if (input.afterAction) {
     lines.push(
       "You are taking this step a second time. What you asked for in a connected system has just been carried out, and the result is the latest line of the thread. Use it to finish what is left of this step, such as an action that needed that result. Do not repeat an action the thread shows was done. If nothing is left, say so in the status note and leave the lists empty.",

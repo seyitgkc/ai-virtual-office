@@ -676,11 +676,12 @@ function writeMessage(db: Db, officeId: string, m: Message): void {
 function writeClock(db: Db, state: EngineState): void {
   run(
     db,
-    "UPDATE offices SET name = ?, clock_ms = ?, clock_step_minutes = ?, id_sequence = ? WHERE id = ?",
+    "UPDATE offices SET name = ?, clock_ms = ?, clock_step_minutes = ?, id_sequence = ?, auto_handoff = ? WHERE id = ?",
     state.office.name,
     state.now,
     state.clockStepMinutes,
     state.seq,
+    flag(state.office.autoHandoff),
     state.office.id,
   );
 }
@@ -713,14 +714,15 @@ export function writeWholeOffice(db: Db, state: EngineState): void {
   {
     run(
       db,
-      `INSERT INTO offices (id, name, clock_ms, clock_step_minutes, id_sequence, id_scope)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO offices (id, name, clock_ms, clock_step_minutes, id_sequence, id_scope, auto_handoff)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       office.id,
       office.name,
       state.now,
       state.clockStepMinutes,
       state.seq,
       state.idScope ?? "",
+      flag(office.autoHandoff),
     );
     writeFloorplan(db, office);
     writeStageRooms(db, office);
@@ -934,6 +936,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     clock_step_minutes: number;
     id_sequence: number;
     id_scope: string;
+    auto_handoff: number;
   }>(db, "SELECT * FROM offices WHERE id = ?", officeId);
   if (!officeRow) return null;
 
@@ -1490,6 +1493,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
       tasks,
       messages,
       systems,
+      autoHandoff: officeRow.auto_handoff === 1,
     },
     now: officeRow.clock_ms,
     seq: officeRow.id_sequence,

@@ -11,7 +11,7 @@ export type { FeedEntry } from "./view";
 type Halt = "none" | "question" | "permission";
 
 /** A change to one of the office's AI providers. */
-export type ProviderOp =
+export type ProviderOp = { scope?: "office" | "account" } & (
   | {
       operation: "save";
       id?: string;
@@ -22,7 +22,8 @@ export type ProviderOp =
       apiKey?: string;
       removeKey?: boolean;
     }
-  | { operation: "remove" | "test"; id: string };
+  | { operation: "remove" | "test"; id: string }
+);
 
 /** A change to a system connected to one of the office's rooms. */
 export type SystemOp =
@@ -40,11 +41,14 @@ export type SystemOp =
 
 export type OfficeOp =
   | { operation: "create"; name: string }
+  | { operation: "create_sample"; providerId: string }
   | { operation: "switch" | "remove"; officeId: string }
   | { operation: "reset_demo" };
 
 /** How often the office is re-read, so that other people's actions show up. */
 const REFRESH_MS = 5000;
+/** While agents are working in the background, their progress shows sooner. */
+const WORKING_REFRESH_MS = 1500;
 
 async function request(url: string, body?: unknown): Promise<{ status: number; data: unknown }> {
   const response = await fetch(url, {
@@ -194,9 +198,9 @@ export function useOffice(initial: OfficeView) {
       } catch {
         // Offline for a moment. The next tick tries again.
       }
-    }, REFRESH_MS);
+    }, view.agentsAtWork ? WORKING_REFRESH_MS : REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [view.agentsAtWork]);
 
   const { office } = view;
 
