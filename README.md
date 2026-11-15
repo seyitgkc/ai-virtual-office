@@ -72,6 +72,14 @@ pricing, and a finance approval before a quote goes out.
 - **Two kinds of agent.** An AI agent asks a language model at each step and
   is shown only what it may read. A playbook agent follows when-then steps
   that a person writes in Settings, with no model involved.
+- **Agents that keep working between clicks.** An agent takes its step again
+  when its question is answered, looks at a note a colleague left it, and
+  hands a finished step on to the next stage by itself. A task runs until it
+  reaches a real halt: a question, missing access, an approval or the review.
+- **AI providers of your own.** A provider can belong to your account and be
+  used in every office you sit in, so a key is entered once.
+- **A sample office with AI agents.** Anyone signed in can add the demo's
+  distributor as an office of their own, staffed by real AI agents.
 - **Several AI providers per office.** Anthropic, and any service that offers
   the OpenAI chat completions interface. Each AI agent names the provider and
   model it uses.
@@ -82,7 +90,7 @@ pricing, and a finance approval before a quote goes out.
 - **Two sample services in the stack.** A storefront and a freight carrier run
   as their own containers beside the office. The demo office is connected to
   both, and its agents place a real order in the storefront.
-- **Granular role permissions.** Ten separate permissions, such as managing
+- **Granular role permissions.** Eleven separate permissions, such as managing
   access, deciding reviews or inviting people, ticked per role in a table.
 - **Many offices.** An account can add offices, switch between them and remove
   them. Each office is separate, and a new one starts empty.
@@ -194,8 +202,11 @@ message: for work, file a request.
 it works on a task. It is for something they should know that the handoff and
 the outputs do not say, such as a detail the reviewer should check. A note
 lives in the task's thread, only its author and the one it is for can read it
-(and people who may see everything), and it blocks nothing. An agent that the
-note is for reads it the next time it takes a step on that task. Whoever filed
+(and people who may see everything), and it blocks nothing. The owner of the
+task reads its notes the next time it takes a step. An AI agent that does not
+own the task looks at the note shortly after it is left: it may do its own
+part, such as booking freight in a system that is its to use, and may answer
+with one note. It cannot halt or take over a task that is not its own. Whoever filed
 a request also gets a note when a connected system refuses or cannot be
 reached, because the task carries on regardless.
 
@@ -234,18 +245,19 @@ checked on the server, stored, and written to the audit log.
 
 | Tab | Needs the permission | What you can do |
 | --- | --- | --- |
-| Offices | none | See every office your account has a seat in. Open another one. Add a new office. Remove one you manage. |
-| This office | Manage the office | Rename the office. Clear all work, or remove the office. In the demo office: reset it to how it first loaded. |
+| Offices | none | See every office your account has a seat in. Open another one. Add a new, empty office, or a sample office with AI agents. Remove one you manage. |
+| Your AI providers | none, with a password account | Add, edit, test and remove providers that belong to your account. They can be used in every office you have a seat in. |
+| This office | Manage the office | Rename the office. Choose whether agents hand work on by themselves. Clear all work, or remove the office. In the demo office: reset it to how it first loaded. |
 | Rooms | Manage rooms | Rename a room or change its purpose. Add a room against a wall of an existing one, with a door between them. Remove an empty room. Choose which room hosts each workflow stage. |
 | Records and systems | Manage rooms | Edit the records kept in each room you can read. See what a connected system holds right now. Connect a system to a room, change it, or disconnect it. |
 | People and agents | Manage people and agents | Add an AI agent or a playbook agent with a desk and a role. Choose an agent's provider and model, or write its playbook. Rename anyone, change their role, or move their desk. Remove someone who has no history. |
 | Roles and permissions | Manage roles | Add, rename or remove a role. Tick each permission per role. Tick allow or deny for each scope in each room. |
 | Access rules | Manage access | See every individual rule in a table and revoke one. Add rules for a person or agent by ticking cells and giving a reason. |
-| AI providers | Manage AI providers | Add, edit, test and remove providers. Each holds a type, a default model and an API key. |
+| AI providers | Manage AI providers | Add, edit, test and remove the office's own providers. Each holds a type, a default model and an API key. See which providers people have brought in from their accounts. |
 
 A tab appears only for someone whose role carries its permission.
 
-**Permissions.** A role carries any of ten permissions, ticked in a table of
+**Permissions.** A role carries any of eleven permissions, ticked in a table of
 permissions against roles:
 
 | Permission | Lets a person |
@@ -259,6 +271,7 @@ permissions against roles:
 | Manage rooms | Add, rename and remove rooms. Choose where each stage happens. Edit the records and connected systems of rooms they can read. |
 | Manage roles | Add and remove roles and change what each role may do. |
 | Manage AI providers | Add, change and remove AI providers and their API keys. |
+| Use shared AI providers | Give agents an AI provider that another person brought to this office from their own account. |
 | Manage the office | Rename the office, clear all work, or remove the office. |
 
 Nobody can hand out more than they hold. A person can tick only the
@@ -291,6 +304,20 @@ and the model with the provider without generating anything. A key is
 encrypted before it is stored and is never sent back to the page: afterwards
 the table shows only its last four characters. The shared demo office cannot
 hold a key.
+
+A provider can also belong to your account, under *Your AI providers*. It is
+then listed in every office you have a seat in, and you can give it to agents
+there without entering the key again. Other people in the office see that it
+is yours. They can give it to an agent only if their role has the *Use shared
+AI providers* permission, and they never see its address or its key. It stops
+being usable in an office once you no longer have a seat there.
+
+**A sample office.** Under *Offices*, *Add the sample office* creates the
+demo's distributor as an office of your own: the same five rooms, roles and
+records, the storefront and the carrier where the server has them, five AI
+agents on the provider you pick from your account, and you as its manager. It
+starts with no work. Unlike the public demo it is yours alone, so model calls
+are spent only by people you invite.
 
 **Records and systems.** A room's records are sentences, one per line, such
 as a policy or an account's terms. A connected system belongs to one room and
@@ -350,10 +377,10 @@ outlined in red.
    the order in the storefront connected to Fulfilment. The task waits.
 3. Click **Approve** under the question. The order is placed, the thread
    shows the order number, and Laval's stock of that product drops by six
-   under Settings, Records and systems.
-4. Click **Advance to Review**. The task moves to Finance and Ledger picks it
-   up.
-5. Click **Approve**. The task completes, the grant from step 2 expires with
+   under Settings, Records and systems. Quill's step is now finished, so
+   within a second or two the task moves to Finance by itself and Ledger
+   picks it up. Nobody clicks Advance.
+4. Click **Approve**. The task completes, the grant from step 2 expires with
    it, and Quill's token stops working.
 
 ### 2. A grant that does not work
@@ -362,7 +389,8 @@ This is the more instructive path, and it starts from a new request.
 
 1. Click **New request**, then **Send to Reception**. Iris takes it, records an
    assumption about the branch, and asks whether the heads are standalone.
-2. Answer the question, then advance to Planning and on to Execution.
+2. Answer the question. The task moves on to Planning and then Execution by
+   itself, each agent taking its step as the work arrives.
 3. In Fulfilment the task goes to Vera, who needs to read Finance to price the
    order. Vera is blocked.
 4. Click **Grant read on finance, for this task only**. The task stays blocked.
@@ -371,7 +399,8 @@ This is the more instructive path, and it starts from a new request.
    denies it (added by a later security review). Deny wins among individual
    rules, so adding another allow changes nothing.
 6. Click **Revoke the blocking rule**. With `r-02` gone the task-scoped grant
-   applies and the task is unblocked. Advance it to review and approve.
+   applies and the task is unblocked. Vera asks to place the order: approve
+   it, and the task moves on to review, where you approve it.
 
 A supervisor learns from step 4 that the policy has a real order of precedence
 and that the system will explain it. The same story runs headless under
@@ -535,6 +564,7 @@ lib/server/invites.ts     inviting people
 lib/server/providers.ts   an office's AI providers and the runtime each AI agent gets
 lib/agentState.ts         what someone at a desk is doing right now
 lib/server/chat.ts        direct messages, read state, and what a model is shown for a conversation
+lib/sampleOffice.ts       the demo's distributor as an office of one's own, with AI agents
 lib/server/systems.ts     connected systems: storage, live records, carrying out operations
 lib/server/modelRuntime.ts   the AI agent runtime for Anthropic models
 lib/server/openaiRuntime.ts  the AI agent runtime for OpenAI compatible services
@@ -542,7 +572,7 @@ app/api/                  route handlers
 app/page.tsx              the office, for a signed-in person
 app/login, app/invite     sign-in and invite pages
 components/               3D scene, panels, settings, sign-in and invite forms
-scripts/                  nine check scripts
+scripts/                  ten check scripts
 services/storefront, services/carrier   the two sample services, one file each
 Dockerfile, compose.yaml  container build and run of the office and both services
 ```
@@ -718,6 +748,33 @@ output given as bare text gets a label. A reply that still cannot be read is
 asked for once more, and if the second one fails too the step is not taken and
 the message says what was wrong with it.
 
+**Between clicks.** An agent does not only act at the moment a person clicks.
+After every action the engine names the agents that now have something in
+front of them, and the server works through that in the background:
+
+```mermaid
+flowchart TD
+  click["A person's action<br/>is applied and stored"] --> reply["The click returns"]
+  click --> look{"Anything for<br/>an agent?"}
+  look -->|"an answer to its question"| again["It takes its step again"]
+  look -->|"a note on a task it does not own"| attend["It looks at the note,<br/>may act and answer"]
+  look -->|"a finished step, and the office<br/>lets agents hand work on"| hand["The task goes to<br/>the next stage"]
+  again --> look
+  attend --> look
+  hand --> look
+  look -->|"a halt, the review,<br/>or nothing left"| stop["Stops and waits<br/>for a person"]
+```
+
+Each background step takes its own turn in the same queue as people's actions,
+so the office is never changed by two things at once and a person's click fits
+in between. The page shows "Agents are working" and refreshes every second and
+a half until they stop. A run takes at most twelve steps. A step that fails,
+for example because the provider cannot be reached, is written to the activity
+log and the task is left where it was for a person to move. Whether agents
+hand a finished step on by themselves is a setting of the office, on for new
+offices and the demo. With it off, a person moves each task with Advance, and
+agents still pick up answers and notes.
+
 A conversation at an agent's desk goes through a second filter. The agent is
 shown a room's records, a system's live records and a task's messages only
 when both it and the person asking may read them, so asking an agent never
@@ -821,10 +878,10 @@ last reason, until `r-02` is revoked.
 | `GET /api/office` | signed in | The office as this viewer may see it |
 | `POST /api/office/actions` | signed in | Apply one action |
 | `POST /api/admin` | the permission for that change | Apply one set-up change |
-| `POST /api/admin/providers` | Manage AI providers, password account | Add, change, remove or test an AI provider |
+| `POST /api/admin/providers` | Manage AI providers, password account. For one's own: a password account | Add, change, remove or test an AI provider of the office, or of the signed-in account |
 | `POST /api/admin/systems` | Manage rooms, and read on the room | Read a connected system's live records. With a password account: connect, change or disconnect one |
 | `POST /api/chat` | signed in. For an agent: may enter its room | Send a direct message to a person or an agent, or mark a conversation or a note as opened |
-| `POST /api/offices` | signed in | Add an office, switch to another, or remove one. In the demo, with Manage the office: reset it |
+| `POST /api/offices` | signed in | Add an empty or a sample office, switch to another, or remove one. In the demo, with Manage the office: reset it |
 | `POST /api/invites` | Invite people | Create a person, a desk and an invite link |
 | `POST /api/invites/accept` | invite holder | Set email and password, sign in |
 | `POST /api/tokens/:id` | Manage access, or holder to reveal | Reveal or revoke a permission token |
@@ -900,6 +957,7 @@ erDiagram
     text name
     int clock_ms
     int id_sequence
+    int auto_handoff
   }
   rooms {
     text id PK
@@ -998,7 +1056,8 @@ erDiagram
 
   ai_providers {
     text id PK
-    text office_id FK
+    text office_id FK "set for an office's provider"
+    text owner_user_id FK "set for an account's provider"
     int position
     text name
     text kind
@@ -1318,6 +1377,11 @@ foreign keys, so an entry survives the task or rule it describes.
 - Resetting the demo office to its seeded state, without signing anyone out.
 - Answering a question by picking one of the agent's choices or by typing an
   answer.
+- Agents carrying work forward in the background: the step taken again after
+  an answer, attending to a colleague's note, and handing a finished step on.
+- AI providers that belong to an account, usable in each of its offices, and
+  the permission that lets other people hand them to agents.
+- The sample office with AI agents.
 - Several AI providers per office, each with an encrypted, write-only API key
   and a connection test.
 - Many offices per account, each isolated, with adding, switching and
@@ -1430,17 +1494,20 @@ playbook.
   which room hosts each one.
 - A playbook's conditions are the stage, text in the request and who asked.
   A message cannot start work or change anything. An agent writes to someone
-  only as a note while it takes a step on a task, never between steps.
-  Agents do not answer notes from each other: the receiving agent reads the
-  note at its next step on that task.
+  only as a note while it takes a step on a task.
   An AI agent reads what its rooms and their connected systems hold and
   replies. It cannot search a system or page through it.
 - A connected system is one of two kinds, each with a fixed set of
   operations. A playbook's action has fixed field values.
-- A model-backed step takes several seconds, and the interface waits for it.
-- Agents take a step when work arrives, and again when a halt for access is
-  cleared. An agent that asked a question does not take its step again after
-  the answer. The task moves on at the next advance.
+- The first step after a click is taken while the page waits, which is
+  several seconds with a model. What follows runs in the background.
+- Work waiting to be carried forward is held in the server's memory. If the
+  server restarts mid-run, the tasks stay where they were and a person moves
+  them on with Advance.
+- A background run stops after twelve steps, so a very long chain needs one
+  more click.
+- A provider from someone's account can be used in an office only while its
+  owner has a seat there.
 - When a connected system refuses or cannot be reached, the thread says so and
   the task carries on. It does not halt.
 - No password reset and no email. An administrator would issue a new invite.
@@ -1466,7 +1533,7 @@ Requires Node 24 or later, for the built-in SQLite module.
 ```bash
 npm install
 npm run dev       # http://localhost:3000
-npm run verify    # type check, then all nine check scripts
+npm run verify    # type check, then all ten check scripts
 npm run services  # the two sample services, on ports 8081 and 8082
 npm run build     # production server in .next/standalone
 ```
@@ -1543,7 +1610,7 @@ fresh filesystem.
 ## Verification
 
 Every script runs under Node and nothing leaves the machine. Six use an
-in-memory database and two a temporary database file. One needs no database
+in-memory database and three a temporary database file. One needs no database
 and starts a stand-in model service on a local port, and one starts the two
 sample services the same way.
 
@@ -1558,6 +1625,7 @@ sample services the same way.
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
 | The two sample services, connecting a system, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 99 of 99 pass |
+| Agents working between clicks, providers that belong to an account, and the sample office | `npm run loop` | 38 of 38 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
