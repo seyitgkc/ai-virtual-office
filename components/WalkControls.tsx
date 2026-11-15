@@ -14,13 +14,13 @@ import {
 
 const EYE_HEIGHT = 1.5;
 const BODY_RADIUS = 0.3;
-const WALK_SPEED = 4.8;
-const RUN_SPEED = 8.4;
+const WALK_SPEED = 4.0;
+const RUN_SPEED = 7.2;
 /** Head movement while walking: metres travelled per step, and how far the view rises and sways. */
 const STRIDE = 1.5;
-const BOB_HEIGHT = 0.02;
-const BOB_SWAY = 0.01;
-const BOB_ROLL = 0.002;
+const BOB_HEIGHT = 0.012;
+const BOB_SWAY = 0.006;
+const BOB_ROLL = 0.001;
 const TURN_SPEED = 1.9;
 const LOOK_SENSITIVITY = 0.0042;
 const MAX_PITCH = 1.15;
