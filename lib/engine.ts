@@ -1108,8 +1108,8 @@ async function runAgent(
 
   // Nothing is done in an outside system while the step is halted for access.
   // It is done when the halt is cleared and the agent takes the step again.
-  // A note goes to one person or agent who is in the office. It is written
-  // even when the step is halted, because it asks for nothing.
+  // A note goes to one person or agent who is in the office. An agent's own
+  // notes are written even when the step is halted, because they ask for nothing.
   const tell = (toId: ParticipantId, body: string): void => {
     const text = body.trim();
     if (!text || toId === participant.id || !office.participants.some((p) => p.id === toId)) return;
@@ -1126,8 +1126,6 @@ async function runAgent(
     });
     notes.push(`${participant.displayName} left a note for ${findParticipant(office, toId).displayName} on ${task.id}`);
   };
-  for (const draft of (result.notes ?? []).slice(0, 2)) tell(draft.toParticipantId, draft.body);
-
   let acted = false;
   if (!wallHit) {
     for (const call of calls) {
@@ -1156,6 +1154,10 @@ async function runAgent(
       if (!outcome.ok) tell(task.requestedById, `${call.system.name} did not do what ${task.id} needed: ${outcome.summary}`);
     }
   }
+
+  // Notes come after anything done in a system, so a note that speaks of an
+  // order follows the order in the thread.
+  for (const draft of (result.notes ?? []).slice(0, 2)) tell(draft.toParticipantId, draft.body);
 
   // A playbook's output is written for a step that went through, so it only
   // lands when the step did. An AI agent's output was written knowing what it
