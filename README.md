@@ -91,8 +91,13 @@ pricing, and a finance approval before a quote goes out.
 - **Settings.** Rooms, people and agents, roles and their permissions, access
   rules and AI providers are all set up in the interface, each behind its own
   permission.
+- **Talking to agents.** Walk up to an agent, or click it, and say something.
+  An AI agent answers through its provider from what you may both read. A
+  playbook agent reports where its work stands. A conversation changes nothing
+  in the office.
 - **A walkable office.** An overview from above, and a first-person mode with
-  a map.
+  a map. Every desk's screen shows what its occupant is doing right now, and
+  facing someone offers a key to talk to them.
 
 ## Everyday use
 
@@ -155,6 +160,17 @@ drawn low so every room stays visible from any angle.
 with W A S D or the arrow keys, hold Shift to move faster, drag to look around
 and click someone to inspect them. A map in the corner shows where you are.
 Escape returns to the overview.
+
+Each desk's monitor shows its occupant's name and state: working, waiting for
+access, waiting on an answer, waiting for a decision, or nothing on the desk,
+with the task and the last thing they said about it. When you stand within a
+few steps of someone in the same room and face them, a prompt appears: press F
+and their panel opens with the keyboard in the message box.
+
+**Talking to an agent.** An agent's panel has a *Right now* line and a *Talk
+to* box. Type and press Enter. You can talk to an agent only if you may enter
+the room it sits in. What is said stays between you and that agent, and no
+task, rule or record changes because of it: for work, file a request.
 
 **Reading the office.** Every name tag says Human or AI. People are rounded
 figures. Agents are faceted and carry a slowly turning ring. A pulsing marker
@@ -415,7 +431,7 @@ flowchart TB
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>52 tables in 3NF")]
+  db[("SQLite<br/>53 tables in 3NF")]
   llm["Anthropic or an OpenAI<br/>compatible service"]
 
   hook -->|"action"| http
@@ -484,6 +500,8 @@ lib/server/secrets.ts     encryption for stored API keys
 lib/server/accessTokens.ts   scoped permission tokens
 lib/server/invites.ts     inviting people
 lib/server/providers.ts   an office's AI providers and the runtime each AI agent gets
+lib/agentState.ts         what someone at a desk is doing right now
+lib/server/chat.ts        conversations with agents: storage and what the model is shown
 lib/server/systems.ts     connected systems: storage, live records, carrying out operations
 lib/server/modelRuntime.ts   the AI agent runtime for Anthropic models
 lib/server/openaiRuntime.ts  the AI agent runtime for OpenAI compatible services
@@ -663,6 +681,12 @@ A model's reply is validated against a schema and then cleaned: rooms, people
 and systems that do not exist are dropped, lists are capped and text is
 trimmed.
 
+A conversation at an agent's desk goes through a second filter. The agent is
+shown a room's records, a system's live records and a task's messages only
+when both it and the person asking may read them, so asking an agent never
+reveals what the person could not have read for themselves. A conversation
+has no way to act: the reply is text, and nothing in it is carried out.
+
 An agent's reply may also ask for something to be done in a connected system.
 The engine decides whether it happens:
 
@@ -758,6 +782,7 @@ last reason, until `r-02` is revoked.
 | `POST /api/admin` | the permission for that change | Apply one set-up change |
 | `POST /api/admin/providers` | Manage AI providers, password account | Add, change, remove or test an AI provider |
 | `POST /api/admin/systems` | Manage rooms, and read on the room | Read a connected system's live records. With a password account: connect, change or disconnect one |
+| `POST /api/chat` | signed in, and may enter the agent's room | Say something to an agent and get its answer |
 | `POST /api/offices` | signed in | Add an office, switch to another, or remove one. In the demo, with Manage the office: reset it |
 | `POST /api/invites` | Invite people | Create a person, a desk and an invite link |
 | `POST /api/invites/accept` | invite holder | Set email and password, sign in |
@@ -780,7 +805,7 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 52 tables. One database holds many offices. The schema is in
+SQLite, one file, 53 tables. One database holds many offices. The schema is in
 third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
@@ -1103,6 +1128,7 @@ erDiagram
   participants ||--o| invites : "invited by link"
   access_rules ||--o{ access_tokens : issues
   access_rule_scopes ||--o| access_tokens : "one per scope"
+  participants ||--o{ chat_messages : "talks or is talked to"
   offices ||--o{ audit_log : records
   participants ||--o{ audit_log : acted
   audit_log ||--o{ audit_notes : describes
@@ -1132,6 +1158,14 @@ erDiagram
     text created_by FK
     int expires_at
     int accepted_at
+  }
+  chat_messages {
+    int id PK
+    text agent_id FK
+    text person_id FK
+    int from_agent
+    text body
+    int at
   }
   access_tokens {
     text id PK
@@ -1224,7 +1258,11 @@ foreign keys, so an entry survives the task or rule it describes.
   and a connection test.
 - Many offices per account, each isolated, with adding, switching and
   removing.
-- The 3D office, walking, the map.
+- Talking to an agent: the conversation box, the reply of a playbook agent,
+  the call to either kind of provider for an AI agent, and the limit to what
+  both sides may read.
+- The 3D office, walking, the map, live desk screens and the prompt to talk to
+  whoever you face.
 
 **Simulated**
 
@@ -1307,6 +1345,8 @@ playbook.
 - The workflow always has the same five stages, though each office chooses
   which room hosts each one.
 - A playbook's conditions are the stage, text in the request and who asked.
+  A conversation with an agent cannot start work or change anything, and an
+  agent does not speak first.
   An AI agent reads what its rooms and their connected systems hold and
   replies. It cannot search a system or page through it.
 - A connected system is one of two kinds, each with a fixed set of
@@ -1427,11 +1467,11 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, and the follow-up step after an action | `npm run agents` | 46 of 46 pass |
-| Which playbook step applies, and an AI agent's calls to an OpenAI compatible service and to an Anthropic compatible one | `npm run providers` | 49 of 49 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states and what a conversation is shown | `npm run agents` | 58 of 58 pass |
+| Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 54 of 54 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
-| The two sample services, connecting a system, live records, orders placed only with `act` on the room, and resetting the demo | `npm run systems` | 65 of 65 pass |
+| The two sample services, connecting a system, live records, orders placed only with `act` on the room, talking to an agent, and resetting the demo | `npm run systems` | 73 of 73 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
