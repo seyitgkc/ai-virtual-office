@@ -10,10 +10,9 @@ import type { AgentRuntime, AgentStepInput, AgentStepResult } from "../engine";
 import {
   buildStepPrompt,
   JSON_INSTRUCTIONS,
-  parseReply,
+  readReply,
   type ChatTurn,
   type ConversationRuntime,
-  StepSchema,
   dataMarker,
   systemPrompt,
   toStepResult,
@@ -165,14 +164,9 @@ export class OpenAiCompatibleRuntime implements ConversationRuntime {
     return text;
   }
 
-  async step(input: AgentStepInput): Promise<AgentStepResult> {
-    const who = `${input.participant.displayName} could not answer`;
-    const marker = dataMarker();
-    const messages = [
-      { role: "system", content: systemPrompt(marker) + JSON_INSTRUCTIONS },
-      { role: "user", content: buildStepPrompt(input, marker) },
-    ];
-
+  /** One request for a step. Returns the reply's text. */
+  private async ask(messages: { role: string; content: string }[], name: string): Promise<string> {
+    const who = `${name} could not answer`;
     // Services differ in how much of the reply format they can enforce. Ask
     // for the strictest form first and fall back when a service refuses it.
     let response: Response | null = null;
@@ -195,29 +189,34 @@ export class OpenAiCompatibleRuntime implements ConversationRuntime {
     }
     if (!response || !response.ok) throw describeStatus(response?.status ?? 0, who);
 
-    let content: unknown;
     try {
       const data = (await response.json()) as { choices?: { message?: { content?: unknown; refusal?: unknown } }[] };
       const message = data.choices?.[0]?.message;
       if (message?.refusal) throw new Error("refused");
-      content = message?.content;
+      return typeof message?.content === "string" ? message.content : "";
     } catch (error) {
       if (error instanceof Error && error.message === "refused") {
-        throw new Error(`${input.participant.displayName} declined this request, so the step was not taken.`);
+        throw new Error(`${name} declined this request, so the step was not taken.`);
       }
       throw new Error(`${who}: the provider's reply could not be read.`);
     }
+  }
 
-    let parsed;
-    try {
-      parsed = StepSchema.safeParse(parseReply(typeof content === "string" ? content : ""));
-    } catch {
-      parsed = null;
+  async step(input: AgentStepInput): Promise<AgentStepResult> {
+    const name = input.participant.displayName;
+    const marker = dataMarker();
+    const messages = [
+      { role: "system", content: systemPrompt(marker) + JSON_INSTRUCTIONS },
+      { role: "user", content: buildStepPrompt(input, marker) },
+    ];
+    let problem = "";
+    // A reply that cannot be read is asked for once more before giving up.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const read = readReply(await this.ask(messages, name));
+      if ("step" in read) return toStepResult(read.step, input);
+      problem = read.problem;
     }
-    if (!parsed || !parsed.success) {
-      throw new Error(`${input.participant.displayName} gave an answer in the wrong shape, so the step was not taken.`);
-    }
-    return toStepResult(parsed.data, input);
+    throw new Error(`${name} could not be understood twice in a row (${problem}), so the step was not taken.`);
   }
 }
 

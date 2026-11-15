@@ -192,10 +192,11 @@ When something is missing or unclear:
 Acting in a connected system:
 - Some rooms have a connected system, such as a storefront or a carrier. Its live records are shown with the records when you can read its room. To do something in a system, add an entry to "actions" with the system's id, one of its operations, and a value for every field of that operation, taken from the request, the thread or the records.
 - Act only when your step calls for it and nothing is left to guess. If the request, the thread or your own plan says something must be checked, confirmed or approved before the action, do not take the action until the thread shows that it was done. Ask, or leave a note for whoever has to do it.
+- An action is not done until the thread shows the system's answer. In your status note, output and notes, say that you have asked for it, never that it is done. Where a system is marked as holding actions for approval, a person decides first.
 - If the thread shows the action was already done, do not ask for it again. If you may not act in that system, ask for the action anyway: your supervisor will be asked to allow it. Some systems hold every action until a person approves it, and you will be told the outcome. Leave "actions" empty otherwise.
 
 Telling people and colleagues:
-- You can leave a note for one person or one other agent by adding it to "notes" with their id and what they need to know, in at most 60 words. Do this only when it matters to them and neither your handoff, your output nor the thread already says it: a risk for whoever takes the next stage, a detail the reviewer should check, something the requester should hear now. A note asks for nothing and blocks nothing. Most steps need none, so leave "notes" empty unless one is called for.
+- You can leave a note for one person or one other agent by adding it to "notes" with their id and what they need to know, in at most 60 words. Do this only when it matters to them and neither your handoff, your output nor the thread already says it: a risk for whoever takes the next stage, a detail the reviewer should check, something the requester should hear now. A note asks for nothing and blocks nothing. Another agent reads a note only when it next works on this task, so a note is not a way to get something done by an agent that is not part of the work: for that, ask for the action yourself or ask a person. Most steps need none, so leave "notes" empty unless one is called for.
 
 Your reply:
 - "statusNote" is one plain sentence saying what you did in this step.
@@ -266,7 +267,8 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
       lines.push(
         `- ${system.id} (${system.name}, a ${SYSTEM_INFO[system.kind].label.toLowerCase()}) in the room "${system.roomId}". ` +
           `${system.readable ? "You can read it." : "You cannot read it."} ` +
-          `${system.mayAct ? "You may act in it." : "You may not act in it."} Operations: ${operations}.`,
+          `${system.mayAct ? "You may act in it." : "You may not act in it."} ` +
+          `${system.needsApproval ? "It holds every action until a person approves it. " : ""}Operations: ${operations}.`,
       );
     }
     lines.push("");
@@ -385,9 +387,87 @@ export function parseReply(text: string): unknown {
   const body = (fenced ? fenced[1] : text).trim();
   const start = body.indexOf("{");
   const end = body.lastIndexOf("}");
-  const parsed: unknown = JSON.parse(start >= 0 && end > start ? body.slice(start, end + 1) : body);
-  // A reply with no actions or notes may leave those lists out.
-  return parsed && typeof parsed === "object" ? { actions: [], notes: [], ...parsed } : parsed;
+  return JSON.parse(start >= 0 && end > start ? body.slice(start, end + 1) : body);
+}
+
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+const word = (value: unknown): string =>
+  typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : "";
+
+/**
+ * Put a parsed reply into the expected shape where the meaning is plain: a
+ * list left out or given as null becomes empty, a confidence in other words
+ * becomes medium, an output given as bare text gets a label, and an action's
+ * fields may be an object of names and values. Nothing is invented: a part
+ * that cannot be read this way is left for the schema to reject.
+ */
+export function tidyReply(parsed: unknown): unknown {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return parsed;
+  const raw = parsed as Record<string, unknown>;
+  const output = raw.output;
+  return {
+    statusNote: word(raw.statusNote),
+    questions: list(raw.questions).map((q) => {
+      const item = record(q);
+      return {
+        body: word(item.body),
+        toParticipantId: word(item.toParticipantId ?? item.to),
+        blocking: item.blocking === undefined || item.blocking === null ? true : item.blocking === true || item.blocking === "true",
+        options: list(item.options).map(word).filter((o) => o.length > 0),
+      };
+    }),
+    assumptions: list(raw.assumptions).map((a) => {
+      const item = record(a);
+      const confidence = word(item.confidence).toLowerCase();
+      return {
+        assumed: word(item.assumed),
+        because: word(item.because),
+        confidence: confidence === "low" || confidence === "high" ? confidence : "medium",
+      };
+    }),
+    needs: list(raw.needs).flatMap((n) => {
+      const item = record(n);
+      const scope = word(item.scope).toLowerCase();
+      return scope === "enter" || scope === "read" || scope === "act"
+        ? [{ room: word(item.room), scope, purpose: word(item.purpose) }]
+        : [];
+    }),
+    actions: list(raw.actions).map((a) => {
+      const item = record(a);
+      const fields = Array.isArray(item.fields)
+        ? item.fields.map((f) => ({ name: word(record(f).name), value: word(record(f).value) }))
+        : Object.entries(record(item.fields)).map(([name, value]) => ({ name, value: word(value) }));
+      return { system: word(item.system ?? item.systemId), operation: word(item.operation), fields };
+    }),
+    notes: list(raw.notes).map((n) => {
+      const item = record(n);
+      return { to: word(item.to ?? item.toParticipantId), body: word(item.body) };
+    }),
+    output:
+      typeof output === "string"
+        ? output.trim()
+          ? { label: "Output", body: output }
+          : null
+        : output && typeof output === "object" && !Array.isArray(output)
+          ? { label: word(record(output).label), body: word(record(output).body) }
+          : null,
+  };
+}
+
+/** Read a model's reply as a step, or say in a few words why it could not be read. */
+export function readReply(text: string): { step: RawStep } | { problem: string } {
+  let parsed: unknown;
+  try {
+    parsed = parseReply(text);
+  } catch {
+    return { problem: text.trim() ? "its answer was not valid JSON" : "its answer was empty" };
+  }
+  const checked = StepSchema.safeParse(tidyReply(parsed));
+  if (checked.success) return { step: checked.data };
+  const issue = checked.error.issues[0];
+  return { problem: `its answer had the wrong shape at "${issue?.path.join(".") || "the top"}"` };
 }
 
 /** One side of a conversation, oldest first. */
@@ -421,31 +501,29 @@ export class ModelRuntime implements ConversationRuntime {
   private async plainStep(input: AgentStepInput): Promise<AgentStepResult> {
     const who = input.participant.displayName;
     const marker = dataMarker();
-    let response;
-    try {
-      response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: 4096,
-        system: systemPrompt(marker) + JSON_INSTRUCTIONS,
-        messages: [{ role: "user", content: buildStepPrompt(input, marker) }],
-      });
-    } catch (error) {
-      throw explain(error, `${who} could not answer`);
+    let problem = "";
+    // A reply that cannot be read is asked for once more before giving up.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let response;
+      try {
+        response = await this.client.messages.create({
+          model: this.model,
+          max_tokens: 8192,
+          system: systemPrompt(marker) + JSON_INSTRUCTIONS,
+          messages: [{ role: "user", content: buildStepPrompt(input, marker) }],
+        });
+      } catch (error) {
+        throw explain(error, `${who} could not answer`);
+      }
+      if (response.stop_reason === "refusal") {
+        throw new Error(`${who} declined this request, so the step was not taken.`);
+      }
+      const text = response.content.map((block) => (block.type === "text" ? block.text : "")).join("");
+      const read = readReply(text);
+      if ("step" in read) return toStepResult(read.step, input);
+      problem = response.stop_reason === "max_tokens" ? "its answer was cut off before it finished" : read.problem;
     }
-    if (response.stop_reason === "refusal") {
-      throw new Error(`${who} declined this request, so the step was not taken.`);
-    }
-    const text = response.content.map((block) => (block.type === "text" ? block.text : "")).join("");
-    let parsed;
-    try {
-      parsed = StepSchema.safeParse(parseReply(text));
-    } catch {
-      parsed = null;
-    }
-    if (!parsed || !parsed.success) {
-      throw new Error(`${who} gave an answer in the wrong shape, so the step was not taken.`);
-    }
-    return toStepResult(parsed.data, input);
+    throw new Error(`${who} could not be understood twice in a row (${problem}), so the step was not taken.`);
   }
 
   async chat(who: string, system: string, turns: ChatTurn[]): Promise<string> {

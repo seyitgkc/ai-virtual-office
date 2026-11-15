@@ -136,7 +136,7 @@ async function main(): Promise<void> {
   mode = "fenced";
   expect("a reply wrapped in a code fence is read", (await runtime.step(input)).statusNote, "Checked the request");
   mode = "garbage";
-  expect("a reply in the wrong shape stops the step", (await errorOf(() => runtime.step(input)))?.includes("wrong shape"), true);
+  expect("a reply that cannot be read stops the step, after a second try", (await errorOf(() => runtime.step(input)))?.includes("could not be understood twice in a row (its answer was not valid JSON)"), true);
   mode = "refuse";
   expect("a refusal stops the step", (await errorOf(() => runtime.step(input)))?.includes("declined"), true);
 
@@ -223,7 +223,7 @@ async function main(): Promise<void> {
   claudeMode = "fenced";
   expect("a reply wrapped in a code fence is read", (await claudeLike.step(input)).statusNote, "Checked the request");
   claudeMode = "garbage";
-  expect("a reply in the wrong shape stops the step", (await errorOf(() => claudeLike.step(input)))?.includes("wrong shape"), true);
+  expect("a reply that cannot be read stops the step, after a second try", (await errorOf(() => claudeLike.step(input)))?.includes("could not be understood twice in a row (its answer was not valid JSON)"), true);
 
   calls.length = 0;
   expect(

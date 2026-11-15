@@ -13,7 +13,7 @@ import { deskState, statusReply } from "../lib/agentState";
 import { canRead, resolveAccess } from "../lib/model";
 import { contextOf } from "../lib/policy";
 import { buildChatSystem } from "../lib/server/chat";
-import { buildStepPrompt, dataMarker, SYSTEM_PROMPT, systemPrompt, toStepResult } from "../lib/server/modelRuntime";
+import { buildStepPrompt, dataMarker, readReply, SYSTEM_PROMPT, systemPrompt, toStepResult } from "../lib/server/modelRuntime";
 
 let failures = 0;
 function expect(label: string, actual: unknown, wanted: unknown): void {
@@ -288,6 +288,65 @@ async function main(): Promise<void> {
   expect("an agent that cannot read Finance is never shown it", buildChatSystem(seeded, who("p-vera"), who("p-dana"), seededCtx, []).includes("dealer tier 2"), false);
   expect("live records it is handed are included", buildChatSystem(seeded, who("p-vera"), who("p-dana"), seededCtx, ["[Storefront, live] Product X"]).includes("[Storefront, live] Product X"), true);
   expect("the conversation instructions rule out changing anything", withDana.includes("You cannot change anything from this conversation"), true);
+
+  console.log("\n-- a grant made for one task counts only for that task --");
+  const veraPerson = initialState.office.participants.find((p) => p.id === "p-vera")!;
+  const scoped = {
+    ...initialState.office,
+    // Vera's standing rules are set aside, leaving one grant made for T-1002.
+    rules: [
+      {
+        id: "r-scoped",
+        participantId: "p-vera",
+        room: "finance",
+        scopes: ["read" as const],
+        effect: "allow" as const,
+        reason: "Unit cost for the transfer",
+        grantedBy: "p-dana",
+        grantedAt: initialState.now,
+        expiresOnTaskId: "T-1002",
+      },
+    ],
+  };
+  const scopedCtx = contextOf(scoped, initialState.now);
+  const reads = (forTask: string | null | undefined) =>
+    resolveAccess(veraPerson, "finance", "read", { ...scopedCtx, ...(forTask === undefined ? {} : { forTask }) }).effect;
+  expect("working on that task, the grant opens the room", reads("T-1002"), "allow");
+  expect("working on another task, it does not", reads("T-1001"), "deny");
+  expect("outside any task, it does not either", reads(null), "deny");
+  expect("asked simply what she holds right now, it shows", reads(undefined), "allow");
+  const financeLine = (taskId: string) => ({ ...initialState.office.messages[0], taskId, audience: { to: "room" as const, id: "finance" }, roomId: "finance" });
+  expect("she can read that task's messages in the room", canRead(financeLine("T-1002"), veraPerson, scopedCtx), true);
+  expect("and not another task's", canRead(financeLine("T-1001"), veraPerson, scopedCtx), false);
+  let otherTaskStep: AgentStepInput | null = null;
+  await reduce(
+    { ...initialState, office: { ...scoped, participants: scoped.participants.map((p) => (p.id === "p-iris" ? { ...p, id: "p-iris" } : p)), rules: [{ ...scoped.rules[0], participantId: "p-iris", room: "finance" }] } },
+    { type: "SUBMIT_REQUEST", title: "Another job", detail: "Something else.", requestedById: "p-sam" },
+    { step: async (input) => ((otherTaskStep = input), { questions: [], assumptions: [] }) },
+  );
+  expect("an agent's step on a new task is not shown the room its other task opened", (otherTaskStep as AgentStepInput | null)?.surroundings.rooms.find((r) => r.id === "finance")?.readable, false);
+
+  console.log("\n-- a reply that is nearly right is read, and one that is not says why --");
+  const loose = readReply(JSON.stringify({
+    statusNote: "Checked.",
+    questions: [{ body: "Which branch?", toParticipantId: "p-sam", options: null }],
+    assumptions: [{ assumed: "Laval ships", because: "It holds the stock", confidence: "Moderate" }],
+    needs: null,
+    actions: [{ system: "sys-shop", operation: "place_order", fields: { account: "A-1", branch: "Laval" } }],
+    output: "Stock is fine.",
+  }));
+  const looseStep = "step" in loose ? loose.step : null;
+  expect("a list given as null, or left out, is read as empty", `${looseStep?.needs.length} ${looseStep?.notes.length} ${looseStep?.questions[0].options.length}`, "0 0 0");
+  expect("a question with no blocking flag is taken as blocking", looseStep?.questions[0].blocking, true);
+  expect("a confidence in other words becomes medium", looseStep?.assumptions[0].confidence, "medium");
+  expect("an action's fields may be an object of names and values", looseStep?.actions[0].fields.map((f) => `${f.name}=${f.value}`).join(), "account=A-1,branch=Laval");
+  expect("an output given as bare text gets a label", looseStep?.output?.body, "Stock is fine.");
+  const unreadable = readReply("Sure, here is what I did.");
+  expect("a reply that is not JSON says so", "problem" in unreadable && unreadable.problem, "its answer was not valid JSON");
+  expect("an empty reply says so", (readReply("  ") as { problem: string }).problem, "its answer was empty");
+  expect("a list in place of an object is refused", "problem" in readReply("[1, 2]"), true);
+  expect("the prompt marks a system that holds actions for approval", buildStepPrompt({ ...vera, surroundings: { ...vera.surroundings, systems: [{ id: "sys-shop", name: "Shop", kind: "storefront", roomId: "fulfilment", needsApproval: true, readable: true, mayAct: true }] } }).includes("It holds every action until a person approves it."), true);
+  expect("and the instructions say an action is not done until the system answers", SYSTEM_PROMPT.includes("An action is not done until the thread shows the system's answer"), true);
 
   console.log("\n-- notes from an agent --");
   let seenByNext: AgentStepInput | null = null;
