@@ -16,6 +16,14 @@ services:
       ADMIN_NAME: ${ADMIN_NAME:-}
       # The demo office and password-free entry to it. Set to 0 to turn off.
       DEMO_LOGIN: ${DEMO_LOGIN:-1}
+      # The two sample services below, which the demo office is connected to.
+      # They are reached over the stack's own network and published nowhere.
+      DEMO_STOREFRONT_URL: http://storefront:8081
+      DEMO_CARRIER_URL: http://carrier:8082
+      DEMO_SYSTEMS_KEY: ${DEMO_SYSTEMS_KEY:-sample-systems-key}
+    depends_on:
+      - storefront
+      - carrier
     volumes:
       - office-data:/data
     restart: unless-stopped
@@ -23,6 +31,37 @@ services:
     tmpfs:
       - /tmp
       - /app/.next/cache
+
+  # A stand-in storefront: catalogue, stock per branch and orders. Its data is
+  # kept in memory, so a restart brings the sample data back.
+  storefront:
+    build:
+      context: ./services
+      args:
+        SERVICE: storefront
+    image: ai-virtual-office-storefront:latest
+    environment:
+      PORT: "8081"
+      API_KEY: ${DEMO_SYSTEMS_KEY:-sample-systems-key}
+    expose:
+      - "8081"
+    restart: unless-stopped
+    read_only: true
+
+  # A stand-in freight carrier: service levels, rates and shipment bookings.
+  carrier:
+    build:
+      context: ./services
+      args:
+        SERVICE: carrier
+    image: ai-virtual-office-carrier:latest
+    environment:
+      PORT: "8082"
+      API_KEY: ${DEMO_SYSTEMS_KEY:-sample-systems-key}
+    expose:
+      - "8082"
+    restart: unless-stopped
+    read_only: true
 
 volumes:
   office-data:

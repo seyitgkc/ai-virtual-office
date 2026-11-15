@@ -75,6 +75,13 @@ pricing, and a finance approval before a quote goes out.
 - **Several AI providers per office.** Anthropic, and any service that offers
   the OpenAI chat completions interface. Each AI agent names the provider and
   model it uses.
+- **Records and connected systems per room.** Each room keeps records that a
+  person writes in Settings, and can be connected to an outside system whose
+  records are read live. `read` on the room shows both. `act` on the room lets
+  an agent do something in the system, such as placing an order.
+- **Two sample services in the stack.** A storefront and a freight carrier run
+  as their own containers beside the office. The demo office is connected to
+  both, and its agents place a real order in the storefront.
 - **Granular role permissions.** Ten separate permissions, such as managing
   access, deciding reviews or inviting people, ticked per role in a table.
 - **Many offices.** An account can add offices, switch between them and remove
@@ -187,6 +194,7 @@ checked on the server, stored, and written to the audit log.
 | Offices | none | See every office your account has a seat in. Open another one. Add a new office. Remove one you manage. |
 | This office | Manage the office | Rename the office. Clear all work, or remove the office. |
 | Rooms | Manage rooms | Rename a room or change its purpose. Add a room against a wall of an existing one, with a door between them. Remove an empty room. Choose which room hosts each workflow stage. |
+| Records and systems | Manage rooms | Edit the records kept in each room you can read. See what a connected system holds right now. Connect a system to a room, change it, or disconnect it. |
 | People and agents | Manage people and agents | Add an AI agent or a playbook agent with a desk and a role. Choose an agent's provider and model, or write its playbook. Rename anyone, change their role, or move their desk. Remove someone who has no history. |
 | Roles and permissions | Manage roles | Add, rename or remove a role. Tick each permission per role. Tick allow or deny for each scope in each room. |
 | Access rules | Manage access | See every individual rule in a table and revoke one. Add rules for a person or agent by ticking cells and giving a reason. |
@@ -205,7 +213,7 @@ permissions against roles:
 | See everything | Read every message and the whole activity log. |
 | Invite people | Add a person to the office with a role and a desk. |
 | Manage people and agents | Add, configure and remove agents. Rename people, change roles, move desks. |
-| Manage rooms | Add, rename and remove rooms. Choose where each stage happens. |
+| Manage rooms | Add, rename and remove rooms. Choose where each stage happens. Edit the records and connected systems of rooms they can read. |
 | Manage roles | Add and remove roles and change what each role may do. |
 | Manage AI providers | Add, change and remove AI providers and their API keys. |
 | Manage the office | Rename the office, clear all work, or remove the office. |
@@ -228,7 +236,7 @@ changeable afterwards:
   conditions under *When* (the stage the work is at, text the request
   contains, who the request is from) and an outcome under *Then* (a line for
   the activity log, an output, a question, an assumption, a need for access to
-  a room). The agent takes the first step whose conditions all hold. When no
+  a room, something to do in a connected system). The agent takes the first step whose conditions all hold. When no
   step applies it does nothing and says so.
 
 **AI providers.** An office can hold several. A provider is either Anthropic or
@@ -240,6 +248,24 @@ and the model with the provider without generating anything. A key is
 encrypted before it is stored and is never sent back to the page: afterwards
 the table shows only its last four characters. The shared demo office cannot
 hold a key.
+
+**Records and systems.** A room's records are sentences, one per line, such
+as a policy or an account's terms. A connected system belongs to one room and
+is one of two kinds:
+
+| Kind | Live records | Operations |
+| --- | --- | --- |
+| Storefront | Products with list price and stock per branch, and recent orders | Place an order, cancel an order |
+| Freight carrier | Service levels with their rates, and recent shipments | Book a shipment, cancel a shipment |
+
+The room's access rules cover the system. Someone with `read` on the room is
+shown the system's records as they are at that moment. An agent with `act` on
+the room may use its operations, and an agent without it halts the task and
+asks its supervisor, exactly as it does for a room it cannot read. What the
+system answered is written to the thread, including a refusal such as a branch
+that does not hold enough stock. A system's address and API key are entered
+once, the key is stored encrypted, and neither a manager without `read` on the
+room nor any agent ever receives them. The demo office's two systems are fixed.
 
 The screen refuses changes that would leave the office broken, and says why: a
 room that hosts a stage or still has people in it cannot be removed, the last
@@ -265,7 +291,11 @@ outlined in red.
    stopped it.
 2. Click **Grant read on finance, for this task only**. An individual allow
    outranks a role deny, so the task returns to *in progress*. A permission
-   token for Quill appears in Quill's inspector.
+   token for Quill appears in Quill's inspector. Quill takes its step again
+   now that it can read Finance: its draft quote lands in the thread, and it
+   places the order in the storefront connected to Fulfilment. The thread
+   shows the order number, and Laval's stock of that product drops by six
+   under Settings, Records and systems.
 3. Click **Advance to Review**. The task moves to Finance and Ledger picks it
    up.
 4. Click **Approve**. The task completes, the grant from step 2 expires with
@@ -278,8 +308,8 @@ This is the more instructive path, and it starts from a new request.
 1. Click **New request**, then **Send to Reception**. Iris takes it, records an
    assumption about the branch, and asks whether the heads are standalone.
 2. Answer the question, then advance to Planning and on to Execution.
-3. In Fulfilment the task goes to Vera, who needs to read Finance to price a
-   transfer. Vera is blocked.
+3. In Fulfilment the task goes to Vera, who needs to read Finance to price the
+   order. Vera is blocked.
 4. Click **Grant read on finance, for this task only**. The task stays blocked.
 5. The reason is on screen. Vera carries two older individual rules: `r-01`
    allows reading Finance (left over from a margin review project) and `r-02`
@@ -295,7 +325,7 @@ and that the system will explain it. The same story runs headless under
 ```text
 > Advance to Execution
    - T-1 moved to Execution (Fulfilment), owner Vera
-   - Vera recorded an assumption: The dealer will accept a split-origin shipment
+   - Vera recorded an assumption: The dealer will accept shipment from Laval
    - Vera blocked on read access to finance. Denied by individual rule r-02 (deny: Security review: fulfilment agents should not read credit data); overrides individual rule r-01 (allow: Needed landed-cost visibility for the margin review project)
    pass  blocked on permission -> blocked_permission
 
@@ -379,7 +409,7 @@ flowchart TB
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>48 tables in 3NF")]
+  db[("SQLite<br/>52 tables in 3NF")]
   llm["Anthropic or an OpenAI<br/>compatible service"]
 
   hook -->|"action"| http
@@ -435,7 +465,8 @@ lib/policy.ts             who may dispatch which action, and what each viewer ma
 lib/admin.ts              set-up changes: rooms, roles, people, agents, a blank office
 lib/playbook.ts           how a playbook agent picks and takes a step
 lib/seed.ts               the demo office: floorplan, roles, people, rules, tasks
-lib/referenceData.ts      mock business records kept in each room
+lib/systems.ts            kinds of connected system and the operations each offers
+lib/referenceData.ts      the records the demo office's rooms start with
 lib/geometry.ts           walls, doors, walking collision, desk placement
 lib/useOffice.ts          browser hook: holds the view, sends actions
 lib/server/schema.ts      the database schema
@@ -447,14 +478,16 @@ lib/server/secrets.ts     encryption for stored API keys
 lib/server/accessTokens.ts   scoped permission tokens
 lib/server/invites.ts     inviting people
 lib/server/providers.ts   an office's AI providers and the runtime each AI agent gets
+lib/server/systems.ts     connected systems: storage, live records, carrying out operations
 lib/server/modelRuntime.ts   the AI agent runtime for Anthropic models
 lib/server/openaiRuntime.ts  the AI agent runtime for OpenAI compatible services
 app/api/                  route handlers
 app/page.tsx              the office, for a signed-in person
 app/login, app/invite     sign-in and invite pages
 components/               3D scene, panels, settings, sign-in and invite forms
-scripts/                  eight check scripts
-Dockerfile, compose.yaml  container build and run
+scripts/                  nine check scripts
+services/storefront, services/carrier   the two sample services, one file each
+Dockerfile, compose.yaml  container build and run of the office and both services
 ```
 
 ### Access model
@@ -608,6 +641,7 @@ flowchart LR
   filter -->|yes| prompt["Step input"]
   filter -->|no| dropped["Left out"]
   rooms["Records kept<br/>in each room"] --> gate{"Agent holds read<br/>on that room?"}
+  live["Live records of<br/>connected systems"] --> gate
   gate -->|yes| prompt
   gate -->|no| dropped
   prompt --> rt["AgentRuntime.step"]
@@ -619,8 +653,27 @@ An agent without `read` on Finance never receives Finance's records or
 messages, whichever kind of agent it is. If it needs them, it has to say so in
 `needs`, which is what halts the task and brings a person in.
 
-A model's reply is validated against a schema and then cleaned: rooms and
-people that do not exist are dropped, lists are capped and text is trimmed.
+A model's reply is validated against a schema and then cleaned: rooms, people
+and systems that do not exist are dropped, lists are capped and text is
+trimmed.
+
+An agent's reply may also ask for something to be done in a connected system.
+The engine decides whether it happens:
+
+```mermaid
+flowchart LR
+  reply["Step result<br/>with an action"] --> known{"System and operation<br/>exist, fields filled?"}
+  known -->|no| drop["Dropped"]
+  known -->|yes| act{"Agent holds act<br/>on the system's room?"}
+  act -->|no| halt["Task halts,<br/>supervisor is asked"]
+  act -->|yes| call["Server calls the system<br/>with the stored key"]
+  call --> thread["Outcome written<br/>to the thread"]
+  halt -->|"access granted"| again["Agent takes<br/>the step again"]
+  again --> act
+```
+
+The call carries a key derived from the task and the request, so a step taken
+twice places one order.
 
 ### Sign-in and sessions
 
@@ -693,11 +746,12 @@ last reason, until `r-02` is revoked.
 | `POST /api/office/actions` | signed in | Apply one action |
 | `POST /api/admin` | the permission for that change | Apply one set-up change |
 | `POST /api/admin/providers` | Manage AI providers, password account | Add, change, remove or test an AI provider |
+| `POST /api/admin/systems` | Manage rooms, and read on the room | Read a connected system's live records. With a password account: connect, change or disconnect one |
 | `POST /api/offices` | signed in | Add an office, switch to another, or remove one |
 | `POST /api/invites` | Invite people | Create a person, a desk and an invite link |
 | `POST /api/invites/accept` | invite holder | Set email and password, sign in |
 | `POST /api/tokens/:id` | Manage access, or holder to reveal | Reveal or revoke a permission token |
-| `GET /api/rooms/:room/thread` | permission token | Read a room's records and thread |
+| `GET /api/rooms/:room/thread` | permission token | Read a room's records, its connected systems' live records, and its thread |
 
 ### Rendering
 
@@ -715,7 +769,7 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 48 tables. One database holds many offices. The schema is in
+SQLite, one file, 52 tables. One database holds many offices. The schema is in
 third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
@@ -746,6 +800,8 @@ erDiagram
   offices ||--|| floorplans : has
   floorplans ||--o{ rooms : contains
   rooms ||--o{ doors : has
+  rooms ||--o{ room_records : keeps
+  rooms ||--o{ connected_systems : "is connected to"
   rooms ||--o{ desks : holds
   rooms ||--o{ stage_rooms : hosts
   offices ||--o{ stage_rooms : maps
@@ -783,6 +839,20 @@ erDiagram
     real x
     real z
     real facing
+  }
+  room_records {
+    text room_id PK
+    int position PK
+    text body
+  }
+  connected_systems {
+    text id PK
+    text room_id FK
+    text name
+    text kind
+    text base_url
+    text api_key_cipher
+    text key_hint
   }
   stage_rooms {
     text office_id PK
@@ -843,6 +913,8 @@ erDiagram
   playbook_steps ||--o| playbook_assumptions : records
   playbook_steps ||--o| playbook_needs : needs
   rooms ||--o{ playbook_needs : "access to"
+  playbook_steps ||--o| playbook_actions : does
+  playbook_actions ||--o{ playbook_action_fields : "filled with"
 
   ai_providers {
     text id PK
@@ -898,6 +970,16 @@ erDiagram
     text scope
     text purpose
   }
+  playbook_actions {
+    text step_id PK
+    text system_id
+    text operation
+  }
+  playbook_action_fields {
+    text step_id PK
+    text name PK
+    text value
+  }
 ```
 
 An agent's kind, provider and model live in `agent_settings`, one row per
@@ -905,7 +987,9 @@ agent. Removing a provider sets `provider_id` to NULL and leaves the agent in
 place. A playbook step keeps its conditions on the step row, where a NULL
 stage means any stage and a NULL `requested_by` means anyone. Each part of a
 step's outcome has its own table and a row there only when the step does that
-thing, so no step carries empty columns for parts it does not use.
+thing, so no step carries empty columns for parts it does not use. An action's
+`system_id` is deliberately not a foreign key: a step keeps its action when the
+system is disconnected, and skips it until a system with that id exists again.
 
 ### Work and messages
 
@@ -1107,6 +1191,11 @@ foreign keys, so an entry survives the task or rule it describes.
   was granted for that task, and the other halted at review because it could
   not read the room the answers were given in. The check scripts cover the
   same path against a stand-in service on the same machine.
+- Room records edited in Settings, and connected systems. The office calls the
+  two sample services over HTTP with a stored key, reads their records live,
+  and places and cancels orders and shipments in them. In the demo office, the
+  agent working a dealer order places it in the storefront once its halt for
+  Finance is cleared, and the storefront's stock goes down.
 - Answering a question by picking one of the agent's choices or by typing an
   answer.
 - Several AI providers per office, each with an encrypted, write-only API key
@@ -1122,6 +1211,11 @@ foreign keys, so an entry survives the task or rule it describes.
   demo says so on its title card and on its request form.
 - All business data: dealers, branches, stock, pricing tiers, people. The
   records in `lib/referenceData.ts` are invented.
+- The storefront and the carrier. They are real HTTP services with keys,
+  validation, refusals and repeat-safe requests, and the office talks to them
+  as it would to any other. Their catalogue, stock and rates are invented, and
+  they keep their data in memory: it returns to the sample state when a
+  service restarts and once a day.
 
 The stored data says which is which. Every agent is labelled as an AI agent or
 a playbook agent, and every output message records whether it came from a
@@ -1138,10 +1232,11 @@ playbook.
 
 **Proposed**
 
-- Connectors to real systems such as the storefront, inventory and accounting,
-  in place of the invented room records.
-- Tools for AI agents, so a step can look something up instead of only
-  reading what the room holds.
+- Connectors for named products such as Shopify, WooCommerce or an accounting
+  package. A new kind is a list of operations in `lib/systems.ts` and an
+  adapter in `lib/server/systems.ts`.
+- Lookups an AI agent chooses for itself during a step. Today it is shown a
+  fixed snapshot of each system it may read.
 - More playbook conditions, such as the answer to an earlier question.
 - A drag-and-drop floorplan editor. Rooms are added today through a form.
 - Workflows with a different number of stages.
@@ -1190,11 +1285,16 @@ playbook.
 - The workflow always has the same five stages, though each office chooses
   which room hosts each one.
 - A playbook's conditions are the stage, text in the request and who asked.
-  An AI agent has no tools: it reads what its rooms hold and replies.
+  An AI agent reads what its rooms and their connected systems hold and
+  replies. It cannot search a system or page through it.
+- A connected system is one of two kinds, each with a fixed set of
+  operations. A playbook's action has fixed field values.
 - A model-backed step takes several seconds, and the interface waits for it.
-- Agents take a step when work arrives. An agent that was blocked does not
-  redo its step after access is granted. The task moves on at the next
-  advance.
+- Agents take a step when work arrives, and again when a halt for access is
+  cleared. An agent that asked a question does not take its step again after
+  the answer. The task moves on at the next advance.
+- When a connected system refuses or cannot be reached, the thread says so and
+  the task carries on. It does not halt.
 - No password reset and no email. An administrator would issue a new invite.
 - Browsers poll for changes every five seconds.
 - SQLite suits one server process. More than one would need a different
@@ -1218,13 +1318,20 @@ Requires Node 24 or later, for the built-in SQLite module.
 ```bash
 npm install
 npm run dev       # http://localhost:3000
-npm run verify    # type check, then all eight check scripts
+npm run verify    # type check, then all nine check scripts
+npm run services  # the two sample services, on ports 8081 and 8082
 npm run build     # production server in .next/standalone
 ```
 
 The database is created at `./data/office.db` on first run, with the demo
 office in it. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` to get an account with its
 own empty office. Delete the `data` folder to start again.
+
+Started this way the demo office has no connected systems. To give it the two
+sample services, run `npm run services` in a second terminal and start the
+office with `DEMO_STOREFRONT_URL=http://127.0.0.1:8081`,
+`DEMO_CARRIER_URL=http://127.0.0.1:8082` and
+`DEMO_SYSTEMS_KEY=local-systems-key`.
 
 ### Configuration
 
@@ -1237,11 +1344,15 @@ All optional. See `.env.example`.
 | `DEMO_LOGIN` | `1` | Creates the demo office and allows password-free entry to it. `0` turns that off. |
 | `OFFICE_DB_PATH` | `./data/office.db` | Where the SQLite file lives. |
 | `ADMIN_NAME` | taken from the email | The administrator's display name. |
+| `DEMO_STOREFRONT_URL`, `DEMO_CARRIER_URL` | set by `compose.yaml` | Where the demo office finds the two sample services. Unset, the demo has no connected systems. |
+| `DEMO_SYSTEMS_KEY` | `sample-systems-key` in `compose.yaml` | The key the office and the sample services share. |
 
 ### Docker
 
-The image runs the checks, builds the server, and runs it as a non-root user
-on port 8080. Data lives on a named volume.
+The stack is three containers. The office image runs the checks, builds the
+server, and runs it as a non-root user on port 8080, with its data on a named
+volume. The storefront and the carrier each run from one file with no
+dependencies, also as a non-root user.
 
 ```bash
 docker compose up -d --build    # http://localhost:8080
@@ -1253,10 +1364,15 @@ flowchart LR
   proxy -->|"HTTP on 127.0.0.1:8080"| app["Container<br/>Node server, non-root"]
   app --> vol[("Volume /data<br/>office.db, auth-secret")]
   app -.->|"only for offices with a model connected"| api["Model API"]
+  app -->|"HTTP, bearer key"| shop["Container<br/>storefront :8081"]
+  app -->|"HTTP, bearer key"| freight["Container<br/>carrier :8082"]
 ```
 
-The container listens on localhost only, so a reverse proxy with TLS belongs
-in front of it. Back up the office by copying the volume.
+The office listens on localhost only, so a reverse proxy with TLS belongs in
+front of it. The two services publish no port: only the office reaches them,
+over the stack's own network. An office other than the demo can connect to
+them too, at `http://storefront:8081` and `http://carrier:8082` with the value
+of `DEMO_SYSTEMS_KEY`. Back up the office by copying the volume.
 
 ### Plesk
 
@@ -1272,8 +1388,9 @@ fresh filesystem.
 ## Verification
 
 Every script runs under Node and nothing leaves the machine. Six use an
-in-memory database and one a temporary database file. The eighth needs no
-database and starts a stand-in model service on a local port.
+in-memory database and two a temporary database file. One needs no database
+and starts a stand-in model service on a local port, and one starts the two
+sample services the same way.
 
 | What | Command | Result |
 | --- | --- | --- |
@@ -1281,10 +1398,11 @@ database and starts a stand-in model service on a local port.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, and halts at review that end in a decision | `npm run agents` | 37 of 37 pass |
+| What an agent is shown, cleaning of a model's reply, and halts at review that end in a decision | `npm run agents` | 38 of 38 pass |
 | Which playbook step applies, and an AI agent's calls to an OpenAI compatible service and to an Anthropic compatible one | `npm run providers` | 49 of 49 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
+| The two sample services, connecting a system, live records, and orders placed only with `act` on the room | `npm run systems` | 55 of 55 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
