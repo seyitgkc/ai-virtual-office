@@ -91,10 +91,16 @@ pricing, and a finance approval before a quote goes out.
 - **Settings.** Rooms, people and agents, roles and their permissions, access
   rules and AI providers are all set up in the interface, each behind its own
   permission.
-- **Talking to agents.** Walk up to an agent, or click it, and say something.
-  An AI agent answers through its provider from what you may both read. A
-  playbook agent reports where its work stands. A conversation changes nothing
-  in the office.
+- **Messages.** Anyone can write to anyone in the office, and only the two of
+  them can read it. Writing to an agent is a conversation at its desk: an AI
+  agent answers through its provider from what you may both read, and a
+  playbook agent reports where its work stands. A message changes nothing in
+  the office.
+- **Notes from agents.** While it works on a task, an agent can leave a note
+  for one person or one other agent when they should know something the
+  handoff and the outputs do not say. A note blocks nothing.
+- **An inbox.** One place for what is waiting on you, the notes agents left
+  you, and your conversations, with a count of what is new.
 - **A walkable office.** An overview from above, and a first-person mode with
   a map. Every desk's screen shows what its occupant is doing right now, and
   facing someone offers a key to talk to them.
@@ -167,10 +173,30 @@ with the task and the last thing they said about it. When you stand within a
 few steps of someone in the same room and face them, a prompt appears: press F
 and their panel opens with the keyboard in the message box.
 
-**Talking to an agent.** An agent's panel has a *Right now* line and a *Talk
-to* box. Type and press Enter. You can talk to an agent only if you may enter
-the room it sits in. What is said stays between you and that agent, and no
-task, rule or record changes because of it: for work, file a request.
+**Messages.** Everyone's panel has a *Right now* line and a message box. Type
+and press Enter. A message to a person is delivered to their inbox, and anyone
+may write to anyone. A message to an agent is answered at once, and you can
+talk to an agent only if you may enter the room it sits in. Either way, only
+the two of you can read what is said. The activity log records that a message
+was sent and never what it said. No task, rule or record changes because of a
+message: for work, file a request.
+
+**Inbox.** The *Inbox* button on the title card carries a count. Inside:
+
+| Section | What it holds | Clicking a row |
+| --- | --- | --- |
+| Waiting for you | Questions addressed to you, requests for access addressed to you, and tasks at review if you may decide reviews | Opens the task |
+| Notes left for you | Notes agents addressed to you in task threads, unopened ones marked | Opens the task and marks the note opened |
+| Conversations | Everyone you have exchanged messages with, the latest line and how many are new | Opens their panel with the keyboard in the message box |
+
+**Notes.** An agent can leave a note for one person or one other agent while
+it works on a task. It is for something they should know that the handoff and
+the outputs do not say, such as a detail the reviewer should check. A note
+lives in the task's thread, only its author and the one it is for can read it
+(and people who may see everything), and it blocks nothing. An agent that the
+note is for reads it the next time it takes a step on that task. Whoever filed
+a request also gets a note when a connected system refuses or cannot be
+reached, because the task carries on regardless.
 
 **Reading the office.** Every name tag says Human or AI. People are rounded
 figures. Agents are faceted and carry a slowly turning ring. A pulsing marker
@@ -252,7 +278,7 @@ changeable afterwards:
   conditions under *When* (the stage the work is at, text the request
   contains, who the request is from) and an outcome under *Then* (a line for
   the activity log, an output, a question, an assumption, a need for access to
-  a room, something to do in a connected system). The agent takes the first step whose conditions all hold. When no
+  a room, something to do in a connected system, a note for someone). The agent takes the first step whose conditions all hold. When no
   step applies it does nothing and says so.
 
 **AI providers.** An office can hold several. A provider is either Anthropic or
@@ -431,7 +457,7 @@ flowchart TB
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>53 tables in 3NF")]
+  db[("SQLite<br/>56 tables in 3NF")]
   llm["Anthropic or an OpenAI<br/>compatible service"]
 
   hook -->|"action"| http
@@ -501,7 +527,7 @@ lib/server/accessTokens.ts   scoped permission tokens
 lib/server/invites.ts     inviting people
 lib/server/providers.ts   an office's AI providers and the runtime each AI agent gets
 lib/agentState.ts         what someone at a desk is doing right now
-lib/server/chat.ts        conversations with agents: storage and what the model is shown
+lib/server/chat.ts        direct messages, read state, and what a model is shown for a conversation
 lib/server/systems.ts     connected systems: storage, live records, carrying out operations
 lib/server/modelRuntime.ts   the AI agent runtime for Anthropic models
 lib/server/openaiRuntime.ts  the AI agent runtime for OpenAI compatible services
@@ -782,7 +808,7 @@ last reason, until `r-02` is revoked.
 | `POST /api/admin` | the permission for that change | Apply one set-up change |
 | `POST /api/admin/providers` | Manage AI providers, password account | Add, change, remove or test an AI provider |
 | `POST /api/admin/systems` | Manage rooms, and read on the room | Read a connected system's live records. With a password account: connect, change or disconnect one |
-| `POST /api/chat` | signed in, and may enter the agent's room | Say something to an agent and get its answer |
+| `POST /api/chat` | signed in. For an agent: may enter its room | Send a direct message to a person or an agent, or mark a conversation or a note as opened |
 | `POST /api/offices` | signed in | Add an office, switch to another, or remove one. In the demo, with Manage the office: reset it |
 | `POST /api/invites` | Invite people | Create a person, a desk and an invite link |
 | `POST /api/invites/accept` | invite holder | Set email and password, sign in |
@@ -805,7 +831,7 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 53 tables. One database holds many offices. The schema is in
+SQLite, one file, 56 tables. One database holds many offices. The schema is in
 third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
@@ -816,7 +842,7 @@ third normal form:
   the in-memory model carries both directions for convenience.
 - **No column depends on another non-key column.** A permission token stores
   only its rule and scope. The holder and the room are read through the rule.
-- **Each message kind has its own table.** The ten kinds carry different
+- **Each message kind has its own table.** The eleven kinds carry different
   fields, so the shared part lives in `messages` and the rest in a detail
   table keyed by the message id.
 - **A NULL room on a grant or rule means every room.**
@@ -950,6 +976,8 @@ erDiagram
   playbook_steps ||--o| playbook_needs : needs
   rooms ||--o{ playbook_needs : "access to"
   playbook_steps ||--o| playbook_actions : does
+  playbook_steps ||--o| playbook_notes : tells
+  participants o|--o{ playbook_notes : "is told"
   playbook_actions ||--o{ playbook_action_fields : "filled with"
 
   ai_providers {
@@ -1005,6 +1033,11 @@ erDiagram
     text room_id FK
     text scope
     text purpose
+  }
+  playbook_notes {
+    text step_id PK
+    text to_participant_id FK
+    text body
   }
   playbook_actions {
     text step_id PK
@@ -1128,7 +1161,9 @@ erDiagram
   participants ||--o| invites : "invited by link"
   access_rules ||--o{ access_tokens : issues
   access_rule_scopes ||--o| access_tokens : "one per scope"
-  participants ||--o{ chat_messages : "talks or is talked to"
+  participants ||--o{ direct_messages : "writes or is written to"
+  participants ||--o{ direct_reads : "has read up to"
+  participants ||--o{ note_reads : "has opened"
   offices ||--o{ audit_log : records
   participants ||--o{ audit_log : acted
   audit_log ||--o{ audit_notes : describes
@@ -1159,13 +1194,21 @@ erDiagram
     int expires_at
     int accepted_at
   }
-  chat_messages {
+  direct_messages {
     int id PK
-    text agent_id FK
-    text person_id FK
-    int from_agent
+    text from_id FK
+    text to_id FK
     text body
     int at
+  }
+  direct_reads {
+    text reader_id PK
+    text other_id PK
+    int last_read_id
+  }
+  note_reads {
+    text reader_id PK
+    text message_id PK
   }
   access_tokens {
     text id PK
@@ -1258,6 +1301,9 @@ foreign keys, so an entry survives the task or rule it describes.
   and a connection test.
 - Many offices per account, each isolated, with adding, switching and
   removing.
+- Messages between people, with unread counts, and the inbox.
+- Notes from an agent to a person or another agent, from a model's reply or a
+  playbook step, and the note to the requester when a system refuses.
 - Talking to an agent: the conversation box, the reply of a playbook agent,
   the call to either kind of provider for an AI agent, and the limit to what
   both sides may read.
@@ -1345,8 +1391,10 @@ playbook.
 - The workflow always has the same five stages, though each office chooses
   which room hosts each one.
 - A playbook's conditions are the stage, text in the request and who asked.
-  A conversation with an agent cannot start work or change anything, and an
-  agent does not speak first.
+  A message cannot start work or change anything. An agent writes to someone
+  only as a note while it takes a step on a task, never between steps.
+  Agents do not answer notes from each other: the receiving agent reads the
+  note at its next step on that task.
   An AI agent reads what its rooms and their connected systems hold and
   replies. It cannot search a system or page through it.
 - A connected system is one of two kinds, each with a fixed set of
@@ -1467,11 +1515,11 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states and what a conversation is shown | `npm run agents` | 58 of 58 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, and notes | `npm run agents` | 65 of 65 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 54 of 54 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
-| The two sample services, connecting a system, live records, orders placed only with `act` on the room, talking to an agent, and resetting the demo | `npm run systems` | 73 of 73 pass |
+| The two sample services, connecting a system, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, and resetting the demo | `npm run systems` | 88 of 88 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
