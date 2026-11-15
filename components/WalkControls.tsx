@@ -18,9 +18,9 @@ const WALK_SPEED = 4.8;
 const RUN_SPEED = 8.4;
 /** Head movement while walking: metres travelled per step, and how far the view rises and sways. */
 const STRIDE = 1.5;
-const BOB_HEIGHT = 0.05;
-const BOB_SWAY = 0.028;
-const BOB_ROLL = 0.006;
+const BOB_HEIGHT = 0.02;
+const BOB_SWAY = 0.01;
+const BOB_ROLL = 0.002;
 const TURN_SPEED = 1.9;
 const LOOK_SENSITIVITY = 0.0042;
 const MAX_PITCH = 1.15;
