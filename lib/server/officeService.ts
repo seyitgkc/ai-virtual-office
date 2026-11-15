@@ -48,7 +48,16 @@ import {
   testStoredProvider,
   type ProviderInput,
 } from "./providers";
-import { buildChatSystem, chatLines, earlierTurns, recordExchange } from "./chat";
+import {
+  buildChatSystem,
+  directLines,
+  earlierTurns,
+  markDirectRead,
+  markNoteRead,
+  readNoteIds,
+  recordDirect,
+  unreadDirects,
+} from "./chat";
 import {
   ensureDemoSystems,
   liveRecords,
@@ -317,7 +326,14 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
     // providers or choose one for an agent.
     providers: can("manage_providers") || can("manage_people") ? providerViews(db, office.id) : [],
     providersEditable: can("manage_providers") && session.hasPassword && !isDemoOffice(office.id),
-    chats: chatLines(db, viewer.id).filter((line) => state.office.participants.some((p) => p.id === line.agentId)),
+    directs: directLines(db, viewer.id),
+    unread: {
+      directs: unreadDirects(db, viewer.id),
+      notes: ((opened) =>
+        state.office.messages
+          .filter((m) => m.kind === "note" && m.audience.to === "participant" && m.audience.id === viewer.id && !opened.has(m.id))
+          .map((m) => m.id))(readNoteIds(db, viewer.id)),
+    },
     // Addresses are for people who manage rooms, and only for systems in
     // rooms they can read.
     systems: can("manage_rooms")
@@ -677,61 +693,85 @@ export function useChatReply(reply: ((system: string, turns: { content: string }
 }
 
 /**
- * Say something to an agent at its desk and get its answer. The person must
- * be allowed to enter the room the agent sits in. An AI agent answers through
- * its provider, shown only what both of them may read. A playbook agent has
- * no model and reports where its work stands. Nothing in the office changes.
+ * Send a direct message to someone in the office.
+ *
+ * To a person it is simply delivered: anyone may message anyone, and only the
+ * two of them can read it. To an agent it is a conversation at the agent's
+ * desk, so the sender must be allowed to enter the agent's room, and the
+ * agent answers at once. An AI agent answers through its provider, shown only
+ * what both of them may read. A playbook agent has no model and reports where
+ * its work stands. Nothing else in the office changes.
  */
-export function talkToAgent(session: Session, agentId: string, said: string): Promise<OfficeView> {
+export function sendDirectMessage(session: Session, toId: string, said: string): Promise<OfficeView> {
   return inTurn(async () => {
     const db = officeDatabase();
     const state = loadOffice(db, session);
     const { office } = state;
-    const asker = viewerOf(office, session);
-    const agent = office.participants.find((p) => p.id === agentId && p.kind === "agent");
-    if (!agent) throw new OfficeError(404, "That agent is not in this office.");
+    const sender = viewerOf(office, session);
+    const other = office.participants.find((p) => p.id === toId);
+    if (!other) throw new OfficeError(404, "That person or agent is not in this office.");
+    if (other.id === sender.id) throw new OfficeError(400, "You cannot send a message to yourself.");
     const body = said.trim();
     if (body.length === 0 || body.length > 600) throw new OfficeError(400, "Write a message of up to 600 characters.");
 
     const ctx = contextOf(office, state.now);
-    const room = office.floorplan.rooms.find((r) => r.deskIds.includes(agent.deskId ?? ""));
-    if (room && resolveAccess(asker, room.id, "enter", ctx).effect !== "allow") {
-      throw new OfficeError(403, `You cannot enter ${room.name}, so you cannot talk to ${agent.displayName} at their desk.`);
-    }
-
-    let reply: string;
-    if (agent.agentType !== "ai") {
-      reply = statusReply(office, agent, asker, ctx);
-    } else {
-      const shared = office.systems
-        .filter((s) => mayRead(ctx, agent, s.roomId) && mayRead(ctx, asker, s.roomId))
-        .map((s) => s.id);
-      const live = shared.length > 0 ? await liveRecords(db, office.id, shared) : [];
-      const system = buildChatSystem(office, agent, asker, ctx, live);
-      const turns = [...earlierTurns(db, agent.id, asker.id), { role: "user" as const, content: body }];
-      try {
-        reply = overriddenChat.__officeChat
-          ? await overriddenChat.__officeChat(system, turns)
-          : await runtimeForAgent(db, office.id, agent).chat(agent.displayName, system, turns);
-      } catch (error) {
-        // Reported as 424 for the same reason as a failed connection test.
-        throw new OfficeError(424, error instanceof Error ? error.message : `${agent.displayName} could not answer.`);
+    const room = office.floorplan.rooms.find((r) => r.deskIds.includes(other.deskId ?? ""));
+    let reply: string | null = null;
+    if (other.kind === "agent") {
+      if (room && resolveAccess(sender, room.id, "enter", ctx).effect !== "allow") {
+        throw new OfficeError(403, `You cannot enter ${room.name}, so you cannot talk to ${other.displayName} at their desk.`);
+      }
+      if (other.agentType !== "ai") {
+        reply = statusReply(office, other, sender, ctx);
+      } else {
+        const shared = office.systems
+          .filter((s) => mayRead(ctx, other, s.roomId) && mayRead(ctx, sender, s.roomId))
+          .map((s) => s.id);
+        const live = shared.length > 0 ? await liveRecords(db, office.id, shared) : [];
+        const system = buildChatSystem(office, other, sender, ctx, live);
+        const turns = [...earlierTurns(db, other.id, sender.id), { role: "user" as const, content: body }];
+        try {
+          reply = overriddenChat.__officeChat
+            ? await overriddenChat.__officeChat(system, turns)
+            : await runtimeForAgent(db, office.id, other).chat(other.displayName, system, turns);
+        } catch (error) {
+          // Reported as 424 for the same reason as a failed connection test.
+          throw new OfficeError(424, error instanceof Error ? error.message : `${other.displayName} could not answer.`);
+        }
       }
     }
 
     transaction(db, () => {
-      recordExchange(db, agent.id, asker.id, body, reply.slice(0, 2000), state.now);
+      recordDirect(db, sender.id, other.id, body, state.now);
+      if (reply !== null) recordDirect(db, other.id, sender.id, reply.slice(0, 2000), state.now);
+      // The sender is looking at the conversation, so it is read up to here.
+      markDirectRead(db, sender.id, other.id);
       recordAudit(db, {
         officeId: office.id,
         officeClock: state.now,
-        actorId: asker.id,
-        actionType: "TALK_TO_AGENT",
-        subject: { ...NO_SUBJECT, subjectParticipantId: agent.id, roomId: room?.id ?? null },
-        notes: [`${asker.displayName} talked to ${agent.displayName}`],
+        actorId: sender.id,
+        actionType: other.kind === "agent" ? "TALK_TO_AGENT" : "SEND_MESSAGE",
+        subject: { ...NO_SUBJECT, subjectParticipantId: other.id },
+        notes: [`${sender.displayName} ${other.kind === "agent" ? "talked to" : "sent a message to"} ${other.displayName}`],
       });
     });
     return buildView(db, loadOffice(db, session), session);
   });
+}
+
+/** Mark a conversation, or one note addressed to the viewer, as opened. */
+export function markOpened(session: Session, target: { otherId?: string; noteId?: string }): OfficeView {
+  const db = officeDatabase();
+  const state = loadOffice(db, session);
+  const viewer = viewerOf(state.office, session);
+  if (target.otherId && state.office.participants.some((p) => p.id === target.otherId)) {
+    markDirectRead(db, viewer.id, target.otherId);
+  }
+  const note = state.office.messages.find((m) => m.id === target.noteId);
+  if (note && note.kind === "note" && note.audience.to === "participant" && note.audience.id === viewer.id) {
+    markNoteRead(db, viewer.id, note.id);
+  }
+  return buildView(db, state, session);
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ import {
 } from "../lib/engine";
 import { initialState } from "../lib/initialState";
 import { deskState, statusReply } from "../lib/agentState";
-import { resolveAccess } from "../lib/model";
+import { canRead, resolveAccess } from "../lib/model";
 import { contextOf } from "../lib/policy";
 import { buildChatSystem } from "../lib/server/chat";
 import { buildStepPrompt, SYSTEM_PROMPT, toStepResult } from "../lib/server/modelRuntime";
@@ -103,6 +103,11 @@ async function main(): Promise<void> {
         { room: "finance", scope: "read", purpose: "dealer tier" },
       ],
       actions: [{ system: "sys-nowhere", operation: "place_order", fields: [] }],
+      notes: [
+        { to: "p-ledger", body: "Check the credit limit before approving." },
+        { to: "p-nobody", body: "Made-up recipient." },
+        { to: "p-dana", body: "   " },
+      ],
       output: { label: "", body: "   " },
     },
     vera,
@@ -115,6 +120,7 @@ async function main(): Promise<void> {
   expect("needs for unknown or already readable rooms are dropped", cleaned.needs?.map((n) => n.room).join(","), "finance");
   expect("an empty output is no output", cleaned.output, undefined);
   expect("an action in a system that is not connected is dropped", cleaned.actions, undefined);
+  expect("a note to someone in the office is kept, and the rest dropped", cleaned.notes?.map((n) => n.toParticipantId).join(), "p-ledger");
 
   const wordy = toStepResult(
     {
@@ -130,6 +136,7 @@ async function main(): Promise<void> {
       assumptions: [],
       needs: [],
       actions: [],
+      notes: [],
       output: null,
     },
     vera,
@@ -281,6 +288,39 @@ async function main(): Promise<void> {
   expect("an agent that cannot read Finance is never shown it", buildChatSystem(seeded, who("p-vera"), who("p-dana"), seededCtx, []).includes("dealer tier 2"), false);
   expect("live records it is handed are included", buildChatSystem(seeded, who("p-vera"), who("p-dana"), seededCtx, ["[Storefront, live] Product X"]).includes("[Storefront, live] Product X"), true);
   expect("the conversation instructions rule out changing anything", withDana.includes("You cannot change anything from this conversation"), true);
+
+  console.log("\n-- notes from an agent --");
+  let seenByNext: AgentStepInput | null = null;
+  const noted = await reduce(
+    initialState,
+    { type: "SUBMIT_REQUEST", title: "Two heads", detail: "Northline need two heads.", requestedById: "p-sam" },
+    {
+      step: async (input) => {
+        seenByNext = input;
+        return {
+          questions: [],
+          assumptions: [],
+          notes: [
+            { toParticipantId: "p-atlas", body: "The dealer wants delivery before the 24th." },
+            { toParticipantId: "p-atlas", body: "The dealer wants delivery before the 24th." },
+            { toParticipantId: input.participant.id, body: "A note to myself." },
+            { toParticipantId: "p-nobody", body: "A note to nobody." },
+            { toParticipantId: "p-sam", body: "Logged, nothing needed from you." },
+          ],
+        };
+      },
+    },
+  );
+  const left = noted.emitted.filter((m) => m.kind === "note");
+  expect("a note is addressed to one participant, a person or another agent", left.map((m) => (m.audience.to === "participant" ? m.audience.id : "")).join(), "p-atlas");
+  expect("repeats, notes to itself, to nobody and beyond two are dropped", left.length, 1);
+  expect("the agent is told who its colleagues are", (seenByNext as AgentStepInput | null)?.surroundings.colleagues.some((c) => c.id === "p-atlas"), true);
+  expect("and its prompt lists them", buildStepPrompt(seenByNext!).includes("Other agents in the office:"), true);
+  const atlasPerson = initialState.office.participants.find((p) => p.id === "p-atlas")!;
+  const samPerson = initialState.office.participants.find((p) => p.id === "p-sam")!;
+  const noteCtx = contextOf(noted.state.office, noted.state.now);
+  expect("the agent it is for can read it", canRead(left[0], atlasPerson, noteCtx), true);
+  expect("someone else in the same room cannot", canRead(left[0], samPerson, noteCtx), false);
 
   console.log(`\n${failures === 0 ? "all agent checks passed" : failures + " FAILED"}\n`);
   process.exit(failures === 0 ? 0 : 1);

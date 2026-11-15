@@ -136,6 +136,7 @@ export const StepSchema = z.object({
       fields: z.array(z.object({ name: z.string(), value: z.string() })),
     }),
   ),
+  notes: z.array(z.object({ to: z.string(), body: z.string() })),
   output: z.object({ label: z.string(), body: z.string() }).nullable(),
 });
 
@@ -151,6 +152,7 @@ How to work:
 - If you can proceed but had to guess something, add it to "assumptions" with what you assumed, why, and how confident you are. Record every guess, even small ones, but never repeat an assumption that is already in the thread.
 - Ask a question only when you cannot do your step without the answer, and only when the thread does not already answer it. Mark it blocking in that case and offer two to four options when you can. Each option is a possible answer of at most eight words. Address the question to one person from the list of people, using their id.
 - Some rooms have a connected system, such as a storefront or a carrier. Its live records are shown with the records when you can read its room. To do something in a system, add an entry to "actions" with the system's id, one of its operations, and a value for every field of that operation, taken from the request, the thread or the records. Act only when your step calls for it and nothing is left to guess. If the thread shows the action was already done, do not ask for it again. If you may not act in that system, ask for the action anyway: your supervisor will be asked to allow it. Leave "actions" empty otherwise.
+- You can leave a note for one person or one other agent by adding it to "notes" with their id and what they need to know, in at most 60 words. Do this only when it matters to them and neither your handoff, your output nor the thread already says it: a risk for whoever takes the next stage, a detail the reviewer should check, something the requester should hear now. A note asks for nothing and blocks nothing. Most steps need none, so leave "notes" empty unless one is called for.
 - "statusNote" is one plain sentence saying what you did in this step.
 - Give "output" only when the step produced something a colleague will use, such as a plan, a check, a draft or a summary. Keep its label under eight words and its body under 120 words. Otherwise set it to null.
 - Write plain sentences. No headings, bullet lists or emphasis marks.`;
@@ -198,6 +200,13 @@ export function buildStepPrompt(input: AgentStepInput): string {
     lines.push(`- ${person.id}: ${person.displayName}, ${person.title}`);
   }
   lines.push("");
+  if (surroundings.colleagues.length > 0) {
+    lines.push("Other agents in the office:");
+    for (const colleague of surroundings.colleagues) {
+      lines.push(`- ${colleague.id}: ${colleague.displayName}, ${colleague.title}`);
+    }
+    lines.push("");
+  }
 
   if (surroundings.systems.length > 0) {
     lines.push("Connected systems:");
@@ -293,6 +302,12 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
       fields: Object.fromEntries(a.fields.slice(0, 12).map((f) => [f.name.trim(), clip(f.value, 200)])),
     }));
 
+  const colleagues = new Set(input.surroundings.colleagues.map((c) => c.id));
+  const notes = raw.notes
+    .filter((n) => n.body.trim().length > 0 && (people.has(n.to) || colleagues.has(n.to)))
+    .slice(0, 2)
+    .map((n) => ({ toParticipantId: n.to, body: clip(n.body, 400) }));
+
   const statusNote = clip(raw.statusNote, 300);
   const output =
     raw.output && raw.output.body.trim().length > 0
@@ -305,6 +320,7 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
     assumptions,
     ...(needs.length > 0 ? { needs } : {}),
     ...(actions.length > 0 ? { actions } : {}),
+    ...(notes.length > 0 ? { notes } : {}),
     ...(output ? { output } : {}),
   };
 }
@@ -312,7 +328,7 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
 export const JSON_INSTRUCTIONS = `
 
 Reply with one JSON object and nothing else. It must have exactly these fields:
-"statusNote" (string), "questions" (array of objects with "body", "toParticipantId", "blocking" and "options"), "assumptions" (array of objects with "assumed", "because" and "confidence" as "low", "medium" or "high"), "needs" (array of objects with "room", "scope" as "enter", "read" or "act", and "purpose"), "actions" (array of objects with "system", "operation" and "fields", where "fields" is an array of objects with "name" and "value"), and "output" (an object with "label" and "body", or null). Use empty arrays where there is nothing to report.`;
+"statusNote" (string), "questions" (array of objects with "body", "toParticipantId", "blocking" and "options"), "assumptions" (array of objects with "assumed", "because" and "confidence" as "low", "medium" or "high"), "needs" (array of objects with "room", "scope" as "enter", "read" or "act", and "purpose"), "actions" (array of objects with "system", "operation" and "fields", where "fields" is an array of objects with "name" and "value"), "notes" (array of objects with "to" and "body"), and "output" (an object with "label" and "body", or null). Use empty arrays where there is nothing to report.`;
 
 /** Pull the JSON object out of a reply that may be wrapped in a code fence. */
 export function parseReply(text: string): unknown {
@@ -321,8 +337,8 @@ export function parseReply(text: string): unknown {
   const start = body.indexOf("{");
   const end = body.lastIndexOf("}");
   const parsed: unknown = JSON.parse(start >= 0 && end > start ? body.slice(start, end + 1) : body);
-  // A reply with nothing to do in a connected system may leave the list out.
-  return parsed && typeof parsed === "object" && !("actions" in parsed) ? { ...parsed, actions: [] } : parsed;
+  // A reply with no actions or notes may leave those lists out.
+  return parsed && typeof parsed === "object" ? { actions: [], notes: [], ...parsed } : parsed;
 }
 
 /** One side of a conversation, oldest first. */

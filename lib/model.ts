@@ -78,6 +78,8 @@ export interface PlaybookStep {
     need: { room: RoomId; scope: AccessScope; purpose: string } | null;
     /** Something to do in a connected system. Needs `act` on that system's room. */
     action: SystemAction | null;
+    /** Something to tell one person or agent, or whoever filed the request. */
+    note: { to: ParticipantId | "requester"; body: string } | null;
   };
 }
 
@@ -428,7 +430,8 @@ export type MessageKind =
   | "handoff"
   | "escalation"
   | "decision"
-  | "output";
+  | "output"
+  | "note";
 
 export type Audience =
   | { to: "participant"; id: ParticipantId }
@@ -518,6 +521,15 @@ export interface OutputMessage extends MessageBase {
   simulated: boolean;
 }
 
+/**
+ * Something one participant wants another to know about a task, beyond what
+ * the handoff and the outputs say. It is addressed to one person or agent,
+ * blocks nothing and asks for nothing.
+ */
+export interface NoteMessage extends MessageBase {
+  kind: "note";
+}
+
 export type Message =
   | RequestMessage
   | AssignmentMessage
@@ -528,7 +540,8 @@ export type Message =
   | HandoffMessage
   | EscalationMessage
   | DecisionMessage
-  | OutputMessage;
+  | OutputMessage
+  | NoteMessage;
 
 /** Message visibility follows the `read` scope on the room it was said in. */
 export function canRead(

@@ -147,15 +147,31 @@ async function main(): Promise<void> {
 
   console.log("\n-- talking to an agent at its desk --");
   const tasksBefore = JSON.stringify(service.getView(await dana()).office.tasks);
-  demo = await service.talkToAgent(await dana(), "p-ledger", "  What are you working on?  ");
-  expect("the exchange is kept for the person who had it", demo.chats.map((c) => (c.fromAgent ? "agent" : "person")).join(), "person,agent");
-  expect("what was said is stored trimmed", demo.chats[0].body, "What are you working on?");
-  expect("a playbook agent reports where its work stands", demo.chats[1].body.startsWith("I follow a playbook"), true);
+  demo = await service.sendDirectMessage(await dana(), "p-ledger", "  What are you working on?  ");
+  expect("the exchange is kept for the person who had it", demo.directs.map((c) => (c.fromMe ? "me" : "agent")).join(), "me,agent");
+  expect("what was said is stored trimmed", demo.directs[0].body, "What are you working on?");
+  expect("a playbook agent reports where its work stands", demo.directs[1].body.startsWith("I follow a playbook"), true);
+  expect("the reply counts as read, since the sender is looking at it", Object.keys(demo.unread.directs).length, 0);
   expect("talking changes no task", JSON.stringify(demo.office.tasks), tasksBefore);
-  expect("nobody else sees the conversation", service.getView(await sam()).chats.length, 0);
-  expect("an empty message is refused", await refusal(async () => service.talkToAgent(await dana(), "p-ledger", "   ")), 400);
-  expect("so is one to a person", await refusal(async () => service.talkToAgent(await dana(), "p-sam", "Hello")), 404);
-  expect("someone who may not enter the agent's room cannot talk to it there", await refusal(async () => service.talkToAgent(await sam(), "p-ledger", "Hello")), 403);
+  expect("nobody else sees the conversation", service.getView(await sam()).directs.length, 0);
+  expect("an empty message is refused", await refusal(async () => service.sendDirectMessage(await dana(), "p-ledger", "   ")), 400);
+  expect("so is one to yourself", await refusal(async () => service.sendDirectMessage(await dana(), "p-dana", "Hello")), 400);
+  expect("and one to someone who is not in the office", await refusal(async () => service.sendDirectMessage(await dana(), "p-nobody", "Hello")), 404);
+  expect("someone who may not enter the agent's room cannot talk to it there", await refusal(async () => service.sendDirectMessage(await sam(), "p-ledger", "Hello")), 403);
+
+  console.log("\n-- messages between people --");
+  await service.sendDirectMessage(await sam(), "p-dana", "Can you look at the Northline order?");
+  await service.sendDirectMessage(await sam(), "p-dana", "No rush.");
+  demo = service.getView(await dana());
+  expect("a person can write to any other person, whatever rooms they may enter", demo.directs.filter((d) => d.withId === "p-sam").length, 2);
+  expect("the recipient sees them as unread", demo.unread.directs["p-sam"], 2);
+  expect("the sender has nothing unread", Object.keys(service.getView(await sam()).unread.directs).length, 0);
+  demo = service.markOpened(await dana(), { otherId: "p-sam" });
+  expect("opening the conversation clears the count", demo.unread.directs["p-sam"], undefined);
+  demo = await service.sendDirectMessage(await dana(), "p-sam", "On it.");
+  expect("a reply reaches the first person as unread", service.getView(await sam()).unread.directs["p-dana"], 1);
+  expect("the conversation with the agent is kept apart from it", demo.directs.filter((d) => d.withId === "p-ledger").length, 2);
+  expect("the activity log says a message was sent, without its content", JSON.stringify(demo.feed).includes("sent a message to Sam Okafor") && !JSON.stringify(demo.feed).includes("On it."), true);
 
   console.log("\n-- the demo can be put back as it first loaded --");
   expect("someone who does not manage the office cannot reset it", await refusal(async () => service.resetDemoOffice(await sam())), 403);
@@ -169,6 +185,14 @@ async function main(): Promise<void> {
   expect("the other demo sign-in still has its seat", service.getView(await sam()).viewer.participantId, "p-sam");
   expect("no demo account was duplicated", auth.usersInOffice(db, service.DEMO_OFFICE_ID).length, 2);
   expect("no dangling references after the reset", all(db, "PRAGMA foreign_key_check").length, 0);
+
+  console.log("\n-- an agent leaves a note for another agent --");
+  demo = await service.applyAction(await dana(), { type: "GRANT_ACCESS", participantId: "p-quill", room: "finance", scopes: ["read"], effect: "allow", reason: "Dealer tier for this order", grantedBy: "", expiresOnTaskId: "T-1001" });
+  const quillNote = demo.office.messages.find((m) => m.kind === "note" && m.taskId === "T-1001");
+  expect("the quoting agent's note is in the thread, addressed to the finance agent", `${quillNote?.fromId} ${quillNote?.audience.to === "participant" ? quillNote.audience.id : ""}`, "p-quill p-ledger");
+  expect("someone who cannot read everything does not see a note between two others", service.getView(await sam()).office.messages.some((m) => m.kind === "note"), false);
+  expect("a note for someone else is not in the manager's own inbox", demo.unread.notes.length, 0);
+  await service.resetDemoOffice(await dana());
 
   console.log("\n-- an office of one's own --");
   const admin = auth.authenticate(db, "owner@example.test", adminPassword)!;
@@ -199,7 +223,7 @@ async function main(): Promise<void> {
       {
         id: "",
         when: { stage: "intake" as const, requestContains: "", requestedBy: "anyone" },
-        then: { statusNote: "Ordering.", output: null, question: null, assumption: null, need: null, action: { systemId: shopId, operation: "place_order", fields } },
+        then: { statusNote: "Ordering.", output: null, question: null, assumption: null, need: null, action: { systemId: shopId, operation: "place_order", fields }, note: null },
       },
     ],
   });
@@ -218,6 +242,10 @@ async function main(): Promise<void> {
   await service.applyAction(await owner(), { type: "GRANT_ACCESS", participantId: nova, room: warehouse, scopes: ["act"], effect: "allow", reason: "Standing order desk", grantedBy: "" });
   view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Bulk", detail: "Forty PTAC units.", requestedById: "" });
   expect("a refusal by the storefront is reported in the thread", view.office.messages.some((m) => m.body.startsWith("Shop: refused the order: Laval holds 3 of PTAC-12")), true);
+  const refusalNote = view.office.messages.find((m) => m.kind === "note");
+  expect("and whoever asked for the work gets a note about it", refusalNote?.audience.to === "participant" && refusalNote.audience.id === view.viewer.participantId && refusalNote.body.includes("did not do what"), true);
+  expect("which is unread in their inbox", view.unread.notes.join(), refusalNote?.id);
+  expect("until they open it", service.markOpened(await owner(), { noteId: refusalNote!.id }).unread.notes.length, 0);
 
   shop.close();
   shop.closeAllConnections();

@@ -98,7 +98,7 @@ async function main(): Promise<void> {
       {
         id: "",
         when: { stage: "intake", requestContains: "", requestedBy: "anyone" },
-        then: { statusNote: "Logged by Nova", output: null, question: null, assumption: null, need: null, action: null },
+        then: { statusNote: "Logged by Nova", output: null, question: null, assumption: null, need: null, action: null, note: null },
       },
     ],
   });

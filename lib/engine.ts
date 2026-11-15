@@ -103,6 +103,8 @@ export interface AgentSurroundings {
   rooms: { id: RoomId; name: string; purpose: string; readable: boolean; records: string[] }[];
   /** People the agent can address a question to. */
   people: { id: ParticipantId; displayName: string; title: string }[];
+  /** The other agents in the office, whom it can leave a note for. */
+  colleagues: { id: ParticipantId; displayName: string; title: string }[];
   /**
    * Outside systems connected to rooms. `readable` and `mayAct` follow the
    * agent's access to the system's room.
@@ -141,6 +143,11 @@ export interface DraftQuestion {
   options?: string[];
 }
 
+export interface DraftNote {
+  toParticipantId: ParticipantId;
+  body: string;
+}
+
 export interface DraftAssumption {
   assumed: string;
   because: string;
@@ -169,6 +176,8 @@ export interface AgentStepResult {
   needs?: AccessNeed[];
   /** Things to do in connected systems. Each needs `act` on the system's room. */
   actions?: SystemAction[];
+  /** Things to tell one person or agent each. They block nothing. */
+  notes?: DraftNote[];
   output?: { label: string; body: string };
 }
 
@@ -911,6 +920,9 @@ async function runAgent(
     people: office.participants
       .filter((p) => p.kind === "human")
       .map((p) => ({ id: p.id, displayName: p.displayName, title: p.title })),
+    colleagues: office.participants
+      .filter((p) => p.kind === "agent" && p.id !== participant.id)
+      .map((p) => ({ id: p.id, displayName: p.displayName, title: p.title })),
     systems: office.systems.map((system) => ({
       ...system,
       readable: resolveAccess(participant, system.roomId, "read", ctx).effect === "allow",
@@ -935,7 +947,9 @@ async function runAgent(
   const said = new Set(
     resumed
       ? office.messages.flatMap((m) =>
-          m.taskId === task.id && m.fromId === participant.id && (m.kind === "status" || m.kind === "question")
+          m.taskId === task.id &&
+          m.fromId === participant.id &&
+          (m.kind === "status" || m.kind === "question" || m.kind === "note")
             ? [`${m.kind}:${m.body}`]
             : [],
         )
@@ -1094,6 +1108,26 @@ async function runAgent(
 
   // Nothing is done in an outside system while the step is halted for access.
   // It is done when the halt is cleared and the agent takes the step again.
+  // A note goes to one person or agent who is in the office. It is written
+  // even when the step is halted, because it asks for nothing.
+  const tell = (toId: ParticipantId, body: string): void => {
+    const text = body.trim();
+    if (!text || toId === participant.id || !office.participants.some((p) => p.id === toId)) return;
+    if (said.has(`note:${text}`) || emitted.some((m) => m.kind === "note" && m.body === text)) return;
+    emitted.push({
+      id: nextId("m"),
+      kind: "note",
+      taskId: task.id,
+      fromId: participant.id,
+      audience: { to: "participant", id: toId },
+      roomId: task.roomId,
+      at: now,
+      body: text,
+    });
+    notes.push(`${participant.displayName} left a note for ${findParticipant(office, toId).displayName} on ${task.id}`);
+  };
+  for (const draft of (result.notes ?? []).slice(0, 2)) tell(draft.toParticipantId, draft.body);
+
   let acted = false;
   if (!wallHit) {
     for (const call of calls) {
@@ -1117,6 +1151,9 @@ async function runAgent(
       notes.push(
         `${participant.displayName} ${outcome.ok ? "used" : "was refused by"} ${call.system.name}: ${outcome.summary}`,
       );
+      // Whoever asked for the work is told when a system did not do its part,
+      // since the task carries on regardless.
+      if (!outcome.ok) tell(task.requestedById, `${call.system.name} did not do what ${task.id} needed: ${outcome.summary}`);
     }
   }
 

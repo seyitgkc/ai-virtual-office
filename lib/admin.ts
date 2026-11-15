@@ -174,7 +174,10 @@ function cleanPlaybook(office: Office, steps: PlaybookStep[], newId: () => strin
     const requestedBy = step.when.requestedBy;
     if (requestedBy !== "anyone" && !people.has(requestedBy)) refuse(`${label}: that person is not in the office.`);
 
-    const { output, question, assumption, need, action } = step.then;
+    const { output, question, assumption, need, action, note } = step.then;
+    if (note && note.to !== "requester" && !people.has(note.to)) {
+      refuse(`${label}: the note is addressed to someone who is not in the office.`);
+    }
     const system = action ? office.systems.find((s) => s.id === action.systemId) : undefined;
     const fields = action && system ? checkedFields(system.kind, action.operation, action.fields) : null;
     if (action && !system) refuse(`${label}: the connected system it uses does not exist.`);
@@ -213,10 +216,11 @@ function cleanPlaybook(office: Office, steps: PlaybookStep[], newId: () => strin
             : null,
         need: need ? { room: need.room, scope: need.scope, purpose: short(need.purpose, 200) } : null,
         action: action && fields ? { systemId: action.systemId, operation: action.operation, fields } : null,
+        note: note && note.body.trim() ? { to: note.to, body: short(note.body, 400) } : null,
       },
     };
     const t = cleaned.then;
-    if (!t.statusNote && !t.output && !t.question && !t.assumption && !t.need && !t.action) {
+    if (!t.statusNote && !t.output && !t.question && !t.assumption && !t.need && !t.action && !t.note) {
       refuse(`${label} does nothing yet. Fill in at least one part under Then.`);
     }
     return cleaned;
@@ -755,6 +759,7 @@ function parseSteps(input: unknown[]): PlaybookStep[] {
     const assumption = obj(then.assumption);
     const need = obj(then.need);
     const action = obj(then.action);
+    const note = obj(then.note);
     const fields = obj(action?.fields) ?? {};
     return [
       {
@@ -798,6 +803,7 @@ function parseSteps(input: unknown[]): PlaybookStep[] {
                 ),
               }
             : null,
+          note: note ? { to: str(note.to, 60) || "requester", body: str(note.body, 1000) } : null,
         },
       },
     ];

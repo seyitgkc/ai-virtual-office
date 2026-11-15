@@ -56,11 +56,12 @@ export interface SystemView {
   keyUnreadable: boolean;
 }
 
-/** One line of a conversation between the viewer and an agent. */
-export interface ChatLine {
+/** One line of a direct conversation between the viewer and someone else. */
+export interface DirectLine {
   id: number;
-  agentId: string;
-  fromAgent: boolean;
+  /** The other participant in the conversation. */
+  withId: string;
+  fromMe: boolean;
   body: string;
   at: number;
 }
@@ -84,8 +85,15 @@ export interface OfficeView {
   providers: ProviderView[];
   /** Whether this viewer may add or change providers here. */
   providersEditable: boolean;
-  /** What the viewer and the office's agents have said to each other. */
-  chats: ChatLine[];
+  /** The viewer's direct conversations, with people and with agents. */
+  directs: DirectLine[];
+  /** What the viewer has not opened yet. */
+  unread: {
+    /** Per other participant, the number of their messages not yet opened. */
+    directs: Record<string, number>;
+    /** Ids of notes in task threads addressed to the viewer and not yet opened. */
+    notes: string[];
+  };
   /** Connected systems with their addresses, for people who manage rooms. */
   systems: SystemView[];
   /** Whether this viewer may connect, change or disconnect systems here. */

@@ -1,45 +1,91 @@
 /**
- * Conversations between a person and an agent, held at the agent's desk.
+ * Direct messages: between two people, and between a person and an agent at
+ * the agent's desk.
  *
- * A conversation is outside the workflow: it changes no task and grants no
- * access. What an AI agent is shown for it is limited twice over, to what the
- * agent may read and to what the person asking may read, so talking to an
- * agent never reveals a room's contents to someone who could not read them.
+ * A direct message is outside the workflow: it changes no task and grants no
+ * access, and only the two participants can read it. What an AI agent is
+ * shown for a conversation is limited twice over, to what the agent may read
+ * and to what the person asking may read, so talking to an agent never
+ * reveals a room's contents to someone who could not read them.
  */
 import { stageSpec } from "../engine";
 import { bothRead, deskState } from "../agentState";
 import { resolveAccess, type AccessContext, type Office, type Participant } from "../model";
-import type { ChatLine } from "../view";
+import type { DirectLine } from "../view";
 import { all, run, type Db } from "./db";
 import type { ChatTurn } from "./modelRuntime";
 
-const KEPT_PER_PERSON = 200;
+const KEPT_PER_PERSON = 300;
 const TURNS_SHOWN_TO_MODEL = 12;
 
-/** Everything this person and the office's agents have said to each other. */
-export function chatLines(db: Db, personId: string): ChatLine[] {
-  return all<{ id: number; agent_id: string; from_agent: number; body: string; at: number }>(
+/** Everything this participant has said to, or been told by, anyone directly. */
+export function directLines(db: Db, me: string): DirectLine[] {
+  return all<{ id: number; from_id: string; to_id: string; body: string; at: number }>(
     db,
-    "SELECT id, agent_id, from_agent, body, at FROM chat_messages WHERE person_id = ? ORDER BY id DESC LIMIT ?",
-    personId,
+    "SELECT id, from_id, to_id, body, at FROM direct_messages WHERE from_id = ? OR to_id = ? ORDER BY id DESC LIMIT ?",
+    me,
+    me,
     KEPT_PER_PERSON,
   )
     .reverse()
-    .map((r) => ({ id: r.id, agentId: r.agent_id, fromAgent: r.from_agent === 1, body: r.body, at: r.at }));
+    .map((r) => ({
+      id: r.id,
+      withId: r.from_id === me ? r.to_id : r.from_id,
+      fromMe: r.from_id === me,
+      body: r.body,
+      at: r.at,
+    }));
 }
 
-export function recordExchange(db: Db, agentId: string, personId: string, asked: string, reply: string, at: number): void {
-  const insert = "INSERT INTO chat_messages (agent_id, person_id, from_agent, body, at) VALUES (?, ?, ?, ?, ?)";
-  run(db, insert, agentId, personId, 0, asked, at);
-  run(db, insert, agentId, personId, 1, reply, at);
+export function recordDirect(db: Db, fromId: string, toId: string, body: string, at: number): void {
+  run(db, "INSERT INTO direct_messages (from_id, to_id, body, at) VALUES (?, ?, ?, ?)", fromId, toId, body, at);
 }
 
-/** The earlier part of one conversation, as turns for a model. */
+/** Per other participant, how many of their messages this one has not opened. */
+export function unreadDirects(db: Db, me: string): Record<string, number> {
+  const rows = all<{ other: string; n: number }>(
+    db,
+    `SELECT m.from_id AS other, COUNT(*) AS n
+       FROM direct_messages m
+       LEFT JOIN direct_reads r ON r.reader_id = m.to_id AND r.other_id = m.from_id
+      WHERE m.to_id = ? AND m.id > COALESCE(r.last_read_id, 0)
+      GROUP BY m.from_id`,
+    me,
+  );
+  return Object.fromEntries(rows.map((r) => [r.other, r.n]));
+}
+
+/** Mark the whole conversation with one participant as read. */
+export function markDirectRead(db: Db, me: string, other: string): void {
+  run(
+    db,
+    `INSERT INTO direct_reads (reader_id, other_id, last_read_id)
+     SELECT ?, ?, COALESCE(MAX(id), 0) FROM direct_messages
+      WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)
+     ON CONFLICT(reader_id, other_id) DO UPDATE SET last_read_id = excluded.last_read_id`,
+    me,
+    other,
+    me,
+    other,
+    other,
+    me,
+  );
+}
+
+/** The notes this participant has already opened. */
+export const readNoteIds = (db: Db, me: string): Set<string> =>
+  new Set(all<{ message_id: string }>(db, "SELECT message_id FROM note_reads WHERE reader_id = ?", me).map((r) => r.message_id));
+
+export function markNoteRead(db: Db, me: string, messageId: string): void {
+  run(db, "INSERT OR IGNORE INTO note_reads (reader_id, message_id) VALUES (?, ?)", me, messageId);
+}
+
+/** The earlier part of one conversation with an agent, as turns for a model. */
 export function earlierTurns(db: Db, agentId: string, personId: string): ChatTurn[] {
-  return chatLines(db, personId)
-    .filter((line) => line.agentId === agentId)
+  return directLines(db, personId)
+    .filter((line) => line.withId === agentId)
     .slice(-TURNS_SHOWN_TO_MODEL)
-    .map((line) => ({ role: line.fromAgent ? ("assistant" as const) : ("user" as const), content: line.body }));
+    .map((line) => ({ role: line.fromMe ? ("user" as const) : ("assistant" as const), content: line.body }));
 }
 
 /**

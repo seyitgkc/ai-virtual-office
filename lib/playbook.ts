@@ -30,7 +30,7 @@ export function runPlaybook(input: AgentStepInput): AgentStepResult {
     };
   }
 
-  const { statusNote, output, question, assumption, need, action } = step.then;
+  const { statusNote, output, question, assumption, need, action, note } = step.then;
   return {
     ...(statusNote.trim() ? { statusNote: statusNote.trim() } : {}),
     questions: question
@@ -46,6 +46,9 @@ export function runPlaybook(input: AgentStepInput): AgentStepResult {
     assumptions: assumption ? [assumption] : [],
     ...(need ? { needs: [need] } : {}),
     ...(action ? { actions: [action] } : {}),
+    ...(note
+      ? { notes: [{ toParticipantId: note.to === "requester" ? task.requestedById : note.to, body: note.body }] }
+      : {}),
     ...(output ? { output } : {}),
   };
 }

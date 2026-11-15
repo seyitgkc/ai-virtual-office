@@ -1,14 +1,18 @@
 import { readJson, withSession } from "@/lib/server/http";
-import { talkToAgent } from "@/lib/server/officeService";
+import { markOpened, sendDirectMessage } from "@/lib/server/officeService";
 
-/** Say something to an agent at its desk. The reply comes back in the view. */
+const text = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/**
+ * Send a direct message to a person or an agent, or mark a conversation or a
+ * note as opened. An agent's reply comes back in the view.
+ */
 export async function POST(request: Request) {
   return withSession(request, async (session) => {
     const body = await readJson(request);
-    return talkToAgent(
-      session,
-      typeof body?.agentId === "string" ? body.agentId : "",
-      typeof body?.body === "string" ? body.body : "",
-    );
+    if (body?.operation === "read") {
+      return markOpened(session, { otherId: text(body.otherId) || undefined, noteId: text(body.noteId) || undefined });
+    }
+    return sendDirectMessage(session, text(body?.toId), text(body?.body));
   });
 }

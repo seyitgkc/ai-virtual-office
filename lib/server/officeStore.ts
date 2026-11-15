@@ -305,7 +305,16 @@ export function writeParticipant(db: Db, officeId: string, p: Participant): void
       step.when.requestedBy === "anyone" ? null : step.when.requestedBy,
       step.then.statusNote,
     );
-    const { output, question, assumption, need, action } = step.then;
+    const { output, question, assumption, need, action, note } = step.then;
+    if (note) {
+      run(
+        db,
+        "INSERT INTO playbook_notes (step_id, to_participant_id, body) VALUES (?, ?, ?)",
+        step.id,
+        note.to === "requester" ? null : note.to,
+        note.body,
+      );
+    }
     if (action) {
       run(
         db,
@@ -647,6 +656,7 @@ function writeMessage(db: Db, officeId: string, m: Message): void {
       );
       break;
     case "request":
+    case "note":
       break;
   }
 }
@@ -1086,6 +1096,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
   const stepNeeds = byStep<{ step_id: string; room_id: string; scope: AccessScope; purpose: string }>(
     "playbook_needs",
   );
+  const stepNotes = byStep<{ step_id: string; to_participant_id: string | null; body: string }>("playbook_notes");
   const stepActions = byStep<{ step_id: string; system_id: string; operation: string }>("playbook_actions");
   const stepActionFields = groupBy(
     all<{ step_id: string; name: string; value: string }>(db, "SELECT * FROM playbook_action_fields"),
@@ -1109,6 +1120,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
       const assumption = stepAssumptions.get(row.id);
       const need = stepNeeds.get(row.id);
       const action = stepActions.get(row.id);
+      const note = stepNotes.get(row.id);
       return {
         id: row.id,
         when: {
@@ -1138,6 +1150,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
                 fields: Object.fromEntries((stepActionFields.get(row.id) ?? []).map((f) => [f.name, f.value])),
               }
             : null,
+          note: note ? { to: note.to_participant_id ?? "requester", body: note.body } : null,
         },
       };
     });
@@ -1354,6 +1367,8 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     switch (m.kind) {
       case "request":
         return { ...base, kind: "request" };
+      case "note":
+        return { ...base, kind: "note" };
       case "assignment":
         return { ...base, kind: "assignment", toParticipantId: assignments.get(m.id)!.to_participant_id };
       case "question": {

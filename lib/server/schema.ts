@@ -15,7 +15,7 @@
  *    and grants are evaluated in sequence and threads are read in sequence.
  */
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const SCHEMA = /* sql */ `
 CREATE TABLE schema_meta (
@@ -255,6 +255,14 @@ CREATE TABLE playbook_action_fields (
   PRIMARY KEY (step_id, name)
 ) STRICT;
 
+-- What a playbook step tells one participant. A NULL recipient means whoever
+-- filed the request.
+CREATE TABLE playbook_notes (
+  step_id           TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  to_participant_id TEXT REFERENCES participants(id) ON DELETE CASCADE,
+  body              TEXT NOT NULL
+) STRICT;
+
 -- ------------------------------------------------------------------ work
 CREATE TABLE tasks (
   id           TEXT PRIMARY KEY,
@@ -321,7 +329,7 @@ CREATE TABLE messages (
   office_id               TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
   position                INTEGER NOT NULL,
   kind                    TEXT NOT NULL CHECK (kind IN ('request', 'assignment', 'question', 'answer',
-                            'assumption', 'status', 'handoff', 'escalation', 'decision', 'output')),
+                            'assumption', 'status', 'handoff', 'escalation', 'decision', 'output', 'note')),
   task_id                 TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   from_participant_id     TEXT REFERENCES participants(id),
   audience                TEXT NOT NULL CHECK (audience IN ('participant', 'room', 'everyone')),
@@ -508,18 +516,35 @@ CREATE TABLE audit_notes (
 
 CREATE INDEX messages_by_task       ON messages(task_id, position);
 CREATE INDEX rules_by_participant   ON access_rules(participant_id);
--- What a person and an agent have said to each other at the agent's desk.
--- A conversation belongs to that pair and is not part of any task.
-CREATE TABLE chat_messages (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  agent_id   TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
-  person_id  TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
-  from_agent INTEGER NOT NULL CHECK (from_agent IN (0, 1)),
-  body       TEXT NOT NULL,
-  at         INTEGER NOT NULL
+-- What two participants have said to each other directly: a person to a
+-- person, or a person and an agent at the agent's desk. Not part of any task,
+-- and readable only by the two of them.
+CREATE TABLE direct_messages (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_id TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  to_id   TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  body    TEXT NOT NULL,
+  at      INTEGER NOT NULL,
+  CHECK (from_id <> to_id)
 ) STRICT;
 
-CREATE INDEX chat_by_pair ON chat_messages(person_id, agent_id, id);
+CREATE INDEX direct_by_sender    ON direct_messages(from_id, id);
+CREATE INDEX direct_by_recipient ON direct_messages(to_id, id);
+
+-- How far each participant has read in each of their conversations.
+CREATE TABLE direct_reads (
+  reader_id    TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  other_id     TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  last_read_id INTEGER NOT NULL,
+  PRIMARY KEY (reader_id, other_id)
+) STRICT;
+
+-- Notes in task threads that the person they were addressed to has opened.
+CREATE TABLE note_reads (
+  reader_id  TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  PRIMARY KEY (reader_id, message_id)
+) STRICT;
 
 CREATE INDEX sessions_by_user       ON sessions(user_id);
 CREATE INDEX audit_by_office        ON audit_log(office_id, id);
@@ -785,5 +810,80 @@ CREATE TABLE chat_messages (
 ) STRICT;
 
 CREATE INDEX chat_by_pair ON chat_messages(person_id, agent_id, id);
+`,
+  // Version 7 added notes, direct messages between any two participants, and read state.
+  6: /* sql */ `
+-- A message kind is added, which means rebuilding the table to change its check.
+CREATE TABLE messages_new (
+  id                      TEXT PRIMARY KEY,
+  office_id               TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  position                INTEGER NOT NULL,
+  kind                    TEXT NOT NULL CHECK (kind IN ('request', 'assignment', 'question', 'answer',
+                            'assumption', 'status', 'handoff', 'escalation', 'decision', 'output', 'note')),
+  task_id                 TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  from_participant_id     TEXT REFERENCES participants(id),
+  audience                TEXT NOT NULL CHECK (audience IN ('participant', 'room', 'everyone')),
+  audience_participant_id TEXT REFERENCES participants(id),
+  audience_room_id        TEXT REFERENCES rooms(id),
+  room_id                 TEXT NOT NULL REFERENCES rooms(id),
+  at                      INTEGER NOT NULL,
+  in_reply_to             TEXT REFERENCES messages(id),
+  body                    TEXT NOT NULL,
+  CHECK ((audience = 'participant') = (audience_participant_id IS NOT NULL)),
+  CHECK ((audience = 'room') = (audience_room_id IS NOT NULL))
+) STRICT;
+INSERT INTO messages_new SELECT * FROM messages;
+DROP TABLE messages;
+ALTER TABLE messages_new RENAME TO messages;
+CREATE INDEX messages_by_task ON messages(task_id, position);
+
+-- What two participants have said to each other directly: a person to a
+-- person, or a person and an agent at the agent's desk. Not part of any task,
+-- and readable only by the two of them.
+CREATE TABLE direct_messages (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_id TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  to_id   TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  body    TEXT NOT NULL,
+  at      INTEGER NOT NULL,
+  CHECK (from_id <> to_id)
+) STRICT;
+
+CREATE INDEX direct_by_sender    ON direct_messages(from_id, id);
+CREATE INDEX direct_by_recipient ON direct_messages(to_id, id);
+
+-- How far each participant has read in each of their conversations.
+CREATE TABLE direct_reads (
+  reader_id    TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  other_id     TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  last_read_id INTEGER NOT NULL,
+  PRIMARY KEY (reader_id, other_id)
+) STRICT;
+
+-- Notes in task threads that the person they were addressed to has opened.
+CREATE TABLE note_reads (
+  reader_id  TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  PRIMARY KEY (reader_id, message_id)
+) STRICT;
+
+INSERT INTO direct_messages (from_id, to_id, body, at)
+SELECT CASE WHEN from_agent = 1 THEN agent_id ELSE person_id END,
+       CASE WHEN from_agent = 1 THEN person_id ELSE agent_id END,
+       body, at
+  FROM chat_messages ORDER BY id;
+DROP TABLE chat_messages;
+
+-- Those conversations were all read when they were held.
+INSERT INTO direct_reads (reader_id, other_id, last_read_id)
+SELECT to_id, from_id, MAX(id) FROM direct_messages GROUP BY to_id, from_id;
+
+-- What a playbook step tells one participant. A NULL recipient means whoever
+-- filed the request.
+CREATE TABLE playbook_notes (
+  step_id           TEXT PRIMARY KEY REFERENCES playbook_steps(id) ON DELETE CASCADE,
+  to_participant_id TEXT REFERENCES participants(id) ON DELETE CASCADE,
+  body              TEXT NOT NULL
+) STRICT;
 `,
 };

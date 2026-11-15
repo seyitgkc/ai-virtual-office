@@ -128,9 +128,14 @@ export function useOffice(initial: OfficeView) {
     [send, setNotice],
   );
 
-  /** Say something to an agent. The answer arrives with the new view. */
+  /** Send a direct message. An agent's answer arrives with the new view. */
   const talk = useCallback(
-    (agentId: string, body: string) => send("/api/chat", { agentId, body }),
+    (toId: string, body: string) => send("/api/chat", { toId, body }),
+    [send],
+  );
+  /** Mark a conversation or a note addressed to the viewer as opened. */
+  const markOpened = useCallback(
+    (target: { otherId?: string; noteId?: string }) => send("/api/chat", { operation: "read", ...target }),
     [send],
   );
   const systemOp = useCallback((body: SystemOp) => send("/api/admin/systems", body), [send]);
@@ -227,6 +232,7 @@ export function useOffice(initial: OfficeView) {
     systemOp,
     readSystem,
     talk,
+    markOpened,
     tokenOperation,
     signOut,
   };
