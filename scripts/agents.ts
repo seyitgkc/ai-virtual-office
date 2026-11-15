@@ -178,6 +178,34 @@ async function main(): Promise<void> {
   expect("the grant leaves the task waiting for a decision", reviewTask().status, "in_review");
   expect("and the note says so", granted.notes.some((n) => n.includes("It is ready for a decision.")), true);
 
+  console.log("\n-- repeated assumptions and halted drafts --");
+  const guess = { assumed: "Standard delivery terms apply", because: "None were named", confidence: "medium" as const };
+  const repeating = new Recorder((input) => ({
+    questions: [],
+    assumptions: input.stage === "intake" ? [guess] : [{ ...guess, assumed: "standard delivery terms apply." }, { ...guess, assumed: "The customer pays on account" }],
+  }));
+  let repeat = (await reduce(initialState, { type: "SUBMIT_REQUEST", title: "Order 4800", detail: "One head.", requestedById: "p-dana" }, repeating)).state;
+  const repeatId = repeat.office.tasks.at(-1)!.id;
+  repeat = (await reduce(repeat, { type: "ADVANCE", taskId: repeatId }, repeating)).state;
+  const kept = repeat.office.messages.filter((m) => m.kind === "assumption" && m.taskId === repeatId);
+  expect("an assumption repeated at a later step is recorded once", kept.length, 2);
+  expect("and a new one is still recorded", kept.at(-1)?.kind === "assumption" && kept.at(-1)?.body.includes("pays on account"), true);
+
+  const drafting = (agentType: "ai" | "playbook") => {
+    const office = { ...initialState.office, participants: initialState.office.participants.map((p) => (p.id === "p-ledger" ? { ...p, agentType } : p)) };
+    return { ...initialState, office };
+  };
+  const halting = reviewer({ questions: [], assumptions: [], needs: [{ room: closedRoom.id, scope: "read", purpose: "The stock count" }], output: { label: "Review notes", body: "Checked what I could." } });
+  const outputsAfterHalt = async (agentType: "ai" | "playbook") => {
+    let at = (await reduce(drafting(agentType), { type: "SUBMIT_REQUEST", title: "Order 4900", detail: "One head.", requestedById: "p-dana" }, halting)).state;
+    const id = at.office.tasks.at(-1)!.id;
+    for (let i = 0; i < 3; i++) at = (await reduce(at, { type: "ADVANCE", taskId: id }, halting)).state;
+    return at.office.messages.filter((m) => m.kind === "output" && m.taskId === id && m.fromId === "p-ledger");
+  };
+  const aiDraft = await outputsAfterHalt("ai");
+  expect("an AI agent's output survives a halt, marked as a draft", aiDraft[0]?.kind === "output" && aiDraft[0].label, "Draft: Review notes");
+  expect("a playbook agent's output is still held back", (await outputsAfterHalt("playbook")).length, 0);
+
   console.log(`\n${failures === 0 ? "all agent checks passed" : failures + " FAILED"}\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

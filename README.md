@@ -1129,11 +1129,11 @@ playbook.
 
 **Not verified in this repository**
 
-- A live agent step on an Anthropic provider. The Anthropic connection test
-  has been run against the real provider and correctly reported a rejected
-  key, so the network path and the SDK call work, and the prompt and the
-  handling of a reply are shared with the OpenAI compatible path that has
-  been run live. No step has been run with a working Anthropic key, because
+- A live agent step against Anthropic's own service. The Anthropic provider
+  type has been run live against a compatible service at its own address,
+  where two agents took a request through every stage. Against Anthropic
+  itself only the connection test has been run, which correctly reported a
+  rejected key. No step has been run with a working Anthropic key, because
   none was available while this was written.
 
 **Proposed**
@@ -1281,7 +1281,7 @@ database and starts a stand-in model service on a local port.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, and halts at review that end in a decision | `npm run agents` | 33 of 33 pass |
+| What an agent is shown, cleaning of a model's reply, and halts at review that end in a decision | `npm run agents` | 37 of 37 pass |
 | Which playbook step applies, and an AI agent's calls to an OpenAI compatible service and to an Anthropic compatible one | `npm run providers` | 49 of 49 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |

@@ -737,7 +737,7 @@ function TaskInspector({
               </div>
               <div style={{ marginBottom: 3 }}>{a.assumed}</div>
               <div style={{ fontSize: 10, opacity: 0.6 }}>because {a.because}</div>
-              {a.status === "open" && (
+              {a.status === "open" && task.closedAt === null && (
                 <fieldset className="moves" disabled={!mayAdvance.allowed} style={{ marginTop: 6 }}>
                   <button
                     className="btn"

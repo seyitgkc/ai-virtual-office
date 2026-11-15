@@ -867,7 +867,16 @@ async function runAgent(
     emitted.push(status);
   }
 
+  // An assumption already recorded on this task is not recorded again, however
+  // often an agent repeats it from step to step.
+  const wording = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const recorded = new Set(
+    office.messages.flatMap((m) => (m.kind === "assumption" && m.taskId === task.id ? [wording(m.assumed)] : [])),
+  );
+
   for (const draft of result.assumptions) {
+    if (recorded.has(wording(draft.assumed))) continue;
+    recorded.add(wording(draft.assumed));
     const assumption: Message = {
       id: nextId("m"),
       kind: "assumption",
@@ -976,8 +985,11 @@ async function runAgent(
     break;
   }
 
-  // Output only lands when the step actually completed.
-  if (result.output && !wallHit) {
+  // A playbook's output is written for a step that went through, so it only
+  // lands when the step did. An AI agent's output was written knowing what it
+  // could not see, so it is kept and marked as a draft.
+  const asDraft = wallHit && participant.agentType === "ai";
+  if (result.output && (!wallHit || asDraft)) {
     const output: Message = {
       id: nextId("m"),
       kind: "output",
@@ -987,7 +999,7 @@ async function runAgent(
       roomId: task.roomId,
       at: now,
       body: result.output.body,
-      label: result.output.label,
+      label: asDraft ? `Draft: ${result.output.label}` : result.output.label,
       // Only an AI agent's output comes from a model. A playbook's is canned.
       simulated: participant.agentType !== "ai",
     };
