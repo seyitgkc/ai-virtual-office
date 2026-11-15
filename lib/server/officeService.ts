@@ -606,7 +606,14 @@ async function runPending(officeId: string, wakes: Wake[], taskIds: Set<string>)
       return takeStep(db, before, next, stuck);
     });
     if (more === null) return;
-    waiting.push(...more.wake);
+    // Two answers arriving for the same agent are one reason to take the step
+    // again, with both in front of it.
+    for (const wake of more.wake) {
+      const queued = waiting.some(
+        (w) => w.kind === "resume" && wake.kind === "resume" && w.taskId === wake.taskId && w.participantId === wake.participantId,
+      );
+      if (!queued) waiting.push(wake);
+    }
     for (const id of more.taskIds) taskIds.add(id);
   }
 }

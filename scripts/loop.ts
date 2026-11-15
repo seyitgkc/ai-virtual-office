@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   const ledger = `p-ledger-${suffix}`;
   const steps: string[] = [];
   let failAt: string | null = null;
-  service.useAgentRuntime({
+  const scripted = {
     step: async (input: AgentStepInput): Promise<AgentStepResult> => {
       const who = input.participant.displayName;
       const answered = input.priorMessages.some((m) => m.kind === "answer");
@@ -107,7 +107,8 @@ async function main(): Promise<void> {
       }
       return { statusNote: `${who} did ${input.stage}${answered ? " with the answer" : ""}.`, questions: [], assumptions: [] };
     },
-  });
+  };
+  service.useAgentRuntime(scripted);
   const taskOf = (v: typeof view, title: string) => v.office.tasks.find((t) => t.title === title)!;
 
   view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Order, ask first", detail: "Two units.", requestedById: "" });
@@ -132,6 +133,23 @@ async function main(): Promise<void> {
   expect("and does not leave the same note twice", view.office.messages.filter((m) => m.kind === "note" && m.body === "Check this dealer's credit.").length, 1);
   expect("the activity log shows the agents' own steps", view.feed.some((f) => f.text.includes("moved to Review")), true);
   expect("a person cannot raise an agent's wake-up themselves", await refusal(async () => service.applyAction(await owner(), { type: "AGENT_RESUME", taskId: done.id })), 403);
+
+  console.log("\n-- two colleagues answer the same agent --");
+  steps.length = 0;
+  service.useAgentRuntime({
+    step: async (input: AgentStepInput): Promise<AgentStepResult> => {
+      steps.push(`${input.participant.displayName}:${input.attending ? "note" : input.stage}`);
+      if (input.attending) return { questions: [], assumptions: [], notes: [{ toParticipantId: input.attending.fromId, body: `${input.participant.displayName} answers.` }] };
+      if (input.stage === "intake") {
+        return { statusNote: "Asked two colleagues.", questions: [], assumptions: [], notes: [{ toParticipantId: ledger, body: "Credit?" }, { toParticipantId: `p-vera-${suffix}`, body: "Stock?" }] };
+      }
+      return { statusNote: `${input.participant.displayName} did ${input.stage}.`, questions: [], assumptions: [] };
+    },
+  });
+  view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Order, two answers", detail: "Two units.", requestedById: "" });
+  await service.agentsIdle();
+  expect("it takes its step again once, with both answers, and the task moves on", steps.join(" "), "Iris:intake Ledger:note Vera:note Iris:intake Atlas:planning Vera:execution Ledger:review");
+  service.useAgentRuntime(scripted);
 
   console.log("\n-- a step that fails in the background --");
   steps.length = 0;

@@ -1401,6 +1401,13 @@ foreign keys, so an entry survives the task or rule it describes.
 - AI providers that belong to an account, usable in each of its offices, and
   the permission that lets other people hand them to agents.
 - The sample office with AI agents.
+- A large office on the deployed site: nine rooms and 18 AI agents on two
+  providers that belong to an account. One request ran from intake into
+  execution in about two minutes with no click. The intake agent's needs for
+  Accounts and Shipping went to the agents in those rooms as notes, both
+  answered, and it took its step again with their answers. The execution
+  agent asked Accounts the same way, then stopped with a question for a
+  person, because that office had no storefront connected to place the order.
 - Several AI providers per office, each with an encrypted, write-only API key
   and a connection test.
 - Many offices per account, each isolated, with adding, switching and
@@ -1644,7 +1651,7 @@ sample services the same way.
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
 | The two sample services, connecting a system, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 99 of 99 pass |
-| Agents working between clicks, providers that belong to an account, and the sample office | `npm run loop` | 39 of 39 pass |
+| Agents working between clicks, providers that belong to an account, and the sample office | `npm run loop` | 40 of 40 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
