@@ -681,6 +681,11 @@ flowchart LR
 The call carries a key derived from the task and the request, so a step taken
 twice places one order.
 
+After an AI agent has acted, it takes the step once more with the system's
+answer as the latest line of its thread. That lets one stage place an order
+and then book the freight under the new order number. It gets one such step.
+A playbook agent's action has fixed values, so it does not follow up.
+
 ### Sign-in and sessions
 
 ```mermaid
@@ -1204,6 +1209,11 @@ foreign keys, so an entry survives the task or rule it describes.
   Finance is cleared, and the storefront's stock goes down. This was run on
   the deployed site: the grant on T-1001 produced order SO-1001 for six heads
   from Laval, and the storefront's stock there went from 120 to 114.
+- An AI agent using a connected system, on the deployed site. An agent on a
+  DeepSeek model read the storefront's live stock, saw that one branch alone
+  could fill a three-unit order, asked to place it, halted because it lacked
+  `act` on the Warehouse, and placed order SO-1001 once access was granted
+  for that task. The storefront's stock at that branch went from 4 to 1.
 - Resetting the demo office to its seeded state, without signing anyone out.
 - Answering a question by picking one of the agent's choices or by typing an
   answer.
@@ -1414,7 +1424,7 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, and halts at review that end in a decision | `npm run agents` | 38 of 38 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, and the follow-up step after an action | `npm run agents` | 46 of 46 pass |
 | Which playbook step applies, and an AI agent's calls to an OpenAI compatible service and to an Anthropic compatible one | `npm run providers` | 49 of 49 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |

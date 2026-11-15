@@ -126,6 +126,12 @@ export interface AgentStepInput {
    * per record. Fetched by the server just before the step; absent elsewhere.
    */
   liveRecords?: string[];
+  /**
+   * True when the agent is taking the step a second time because something it
+   * asked for in a connected system was just carried out. The outcome is the
+   * latest thing in the thread.
+   */
+  afterAction?: boolean;
 }
 
 export interface DraftQuestion {
@@ -876,6 +882,8 @@ async function runAgent(
   nextId: (prefix: string) => string,
   /** True when the agent takes a step again after a halt was cleared. */
   resumed = false,
+  /** True for the one further step an AI agent takes after acting in a system. */
+  afterAction = false,
 ): Promise<{ office: Office; emitted: Message[]; notes: string[] }> {
   if (participant.kind !== "agent") {
     return { office, emitted: [], notes: [] };
@@ -916,6 +924,7 @@ async function runAgent(
     participant,
     priorMessages: prior,
     surroundings,
+    ...(afterAction ? { afterAction } : {}),
   });
   const emitted: Message[] = [];
   const notes: string[] = [];
@@ -1085,8 +1094,10 @@ async function runAgent(
 
   // Nothing is done in an outside system while the step is halted for access.
   // It is done when the halt is cleared and the agent takes the step again.
+  let acted = false;
   if (!wallHit) {
     for (const call of calls) {
+      acted = true;
       const outcome: SystemOutcome = runtime.perform
         ? await runtime.perform(call)
         : { ok: false, summary: "it is not reachable from here, so nothing was done" };
@@ -1095,8 +1106,10 @@ async function runAgent(
         kind: "status",
         taskId: task.id,
         fromId: participant.id,
-        audience: { to: "room", id: call.system.roomId },
-        roomId: call.system.roomId,
+        // Said where the agent is working, so it and its colleagues on the
+        // task can read what came of it.
+        audience: { to: "room", id: task.roomId },
+        roomId: task.roomId,
         at: now,
         body: `${call.system.name}: ${outcome.summary}`,
       };
@@ -1138,9 +1151,21 @@ async function runAgent(
     };
   }
 
-  return {
-    office: { ...replaceTask(office, updated), messages: [...office.messages, ...emitted] },
-    emitted,
-    notes,
-  };
+  const after: Office = { ...replaceTask(office, updated), messages: [...office.messages, ...emitted] };
+
+  // An AI agent that acted in a system takes the step once more, so it can use
+  // what the system answered: an order number, a refusal, a cost. It gets one
+  // such step. If the model cannot answer, what it already did stands.
+  if (acted && !afterAction && participant.agentType === "ai" && updated.status !== "blocked_question") {
+    try {
+      const next = await runAgent(after, updated, stage, participant, runtime, now, nextId, true, true);
+      return { office: next.office, emitted: [...emitted, ...next.emitted], notes: [...notes, ...next.notes] };
+    } catch (error) {
+      notes.push(
+        `${participant.displayName} could not follow up on ${task.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return { office: after, emitted, notes };
 }

@@ -178,6 +178,11 @@ export function buildStepPrompt(input: AgentStepInput): string {
   lines.push(`Task ${task.id}: ${task.title}`);
   lines.push(`Request: ${task.detail}`);
   lines.push(`Your step: ${stageSpec(stage).label}, working in the room "${task.roomId}".`);
+  if (input.afterAction) {
+    lines.push(
+      "You are taking this step a second time. What you asked for in a connected system has just been carried out, and the result is the latest line of the thread. Use it to finish what is left of this step, such as an action that needed that result. Do not repeat an action the thread shows was done. If nothing is left, say so in the status note and leave the lists empty.",
+    );
+  }
   lines.push("");
 
   lines.push("Rooms:");

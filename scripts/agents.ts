@@ -209,6 +209,56 @@ async function main(): Promise<void> {
   expect("an AI agent's output survives a halt, marked as a draft", aiDraft[0]?.kind === "output" && aiDraft[0].label, "Draft: Review notes");
   expect("a playbook agent's output is still held back", (await outputsAfterHalt("playbook")).length, 0);
 
+  console.log("\n-- an AI agent follows up on what a connected system answered --");
+  const chained = async (agentType: "ai" | "playbook") => {
+    const office = {
+      ...initialState.office,
+      systems: [
+        { id: "sys-shop", name: "Shop", kind: "storefront" as const, roomId: "reception" },
+        { id: "sys-freight", name: "Freight", kind: "carrier" as const, roomId: "reception" },
+      ],
+      participants: initialState.office.participants.map((p) => (p.id === "p-iris" ? { ...p, agentType } : p)),
+    };
+    const steps: AgentStepInput[] = [];
+    const performed: string[] = [];
+    const result = await reduce(
+      { ...initialState, office },
+      { type: "SUBMIT_REQUEST", title: "Three units", detail: "Order and ship three units.", requestedById: "p-sam" },
+      {
+        step: async (input) => {
+          steps.push(input);
+          const last = input.priorMessages[input.priorMessages.length - 1]?.body ?? "";
+          const order = last.match(/SO-\d+/)?.[0];
+          return {
+            statusNote: "Working the order.",
+            questions: [],
+            assumptions: [],
+            actions: !input.afterAction
+              ? [{ systemId: "sys-shop", operation: "place_order", fields: { account: "A-1", branch: "Laval", items: "PTAC-12 x 3" } }]
+              : order
+                ? [{ systemId: "sys-freight", operation: "book_shipment", fields: { reference: order, from: "Laval", to: "Ottawa", weightKg: "144", service: "ground" } }]
+                : [],
+          };
+        },
+        perform: async (call) => {
+          performed.push(`${call.operation}:${call.fields.reference ?? call.fields.items}`);
+          return { ok: true, summary: call.operation === "place_order" ? "placed order SO-7001." : "booked shipment SH-1." };
+        },
+      },
+    );
+    return { steps, performed, bodies: result.emitted.map((m) => m.body) };
+  };
+  const ai = await chained("ai");
+  expect("after acting, an AI agent takes the step once more", ai.steps.length, 2);
+  expect("and is told so", ai.steps[1].afterAction, true);
+  expect("with the system's answer as the latest thing in its thread", ai.steps[1].priorMessages.at(-1)?.body, "Shop: placed order SO-7001.");
+  expect("so the booking can carry the new order number", ai.performed.join(" | "), "place_order:PTAC-12 x 3 | book_shipment:SO-7001");
+  expect("it does not go round a third time", ai.bodies.filter((b) => b === "Working the order.").length, 1);
+  expect("the prompt for that step explains why it is taken again", buildStepPrompt(ai.steps[1]).includes("You are taking this step a second time."), true);
+  expect("and the first prompt does not", buildStepPrompt(ai.steps[0]).includes("a second time"), false);
+  const scripted = await chained("playbook");
+  expect("a playbook agent acts once and does not follow up", `${scripted.steps.length} ${scripted.performed.length}`, "1 1");
+
   console.log(`\n${failures === 0 ? "all agent checks passed" : failures + " FAILED"}\n`);
   process.exit(failures === 0 ? 0 : 1);
 }
