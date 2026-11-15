@@ -1408,6 +1408,15 @@ foreign keys, so an entry survives the task or rule it describes.
   answered, and it took its step again with their answers. The execution
   agent asked Accounts the same way, then stopped with a question for a
   person, because that office had no storefront connected to place the order.
+- The same office with both systems connected, end to end. With one click to
+  file the request and one to approve the order, seven of the 18 agents took
+  it from intake to review in under two minutes of working time. Warehouse
+  asked Accounts for credit by note and got it. The order waited for a
+  person's approval, then became SO-1001 in the storefront. Warehouse passed
+  the order number to Shipping by note, and the Shipping agent booked shipment
+  SH-5001 under it in the carrier. The reviewing agent noticed the storefront
+  recorded list price where tier 2 applied, asked a person how to handle it,
+  and had Billing confirm the figures. No task halted for access.
 - Several AI providers per office, each with an encrypted, write-only API key
   and a connection test.
 - Many offices per account, each isolated, with adding, switching and
