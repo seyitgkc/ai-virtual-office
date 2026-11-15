@@ -303,7 +303,11 @@ is one of two kinds:
 The room's access rules cover the system. Someone with `read` on the room is
 shown the system's records as they are at that moment. An agent with `act` on
 the room may use its operations, and an agent without it halts the task and
-asks its supervisor, exactly as it does for a room it cannot read. What the
+asks its supervisor, exactly as it does for a room it cannot read. A system
+can also be set to hold each action until a person approves it: the agent asks
+"May I place an order in Storefront?" with the details, the task waits, and the
+action is carried out only if the person asked, or someone who manages access,
+chooses Approve. Declining, or typing any other answer, leaves it undone. What the
 system answered is written to the thread, including a refusal such as a branch
 that does not hold enough stock. A system's address and API key are entered
 once, the key is stored encrypted, and neither a manager without `read` on the
@@ -340,13 +344,15 @@ outlined in red.
 2. Click **Grant read on finance, for this task only**. An individual allow
    outranks a role deny, so the task returns to *in progress*. A permission
    token for Quill appears in Quill's inspector. Quill takes its step again
-   now that it can read Finance: its draft quote lands in the thread, and it
-   places the order in the storefront connected to Fulfilment. The thread
+   now that it can read Finance: its draft quote lands in the thread, it
+   leaves Ledger a note about tier pricing, and it asks whether it may place
+   the order in the storefront connected to Fulfilment. The task waits.
+3. Click **Approve** under the question. The order is placed, the thread
    shows the order number, and Laval's stock of that product drops by six
    under Settings, Records and systems.
-3. Click **Advance to Review**. The task moves to Finance and Ledger picks it
+4. Click **Advance to Review**. The task moves to Finance and Ledger picks it
    up.
-4. Click **Approve**. The task completes, the grant from step 2 expires with
+5. Click **Approve**. The task completes, the grant from step 2 expires with
    it, and Quill's token stops working.
 
 ### 2. A grant that does not work
@@ -457,7 +463,7 @@ flowchart TB
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>56 tables in 3NF")]
+  db[("SQLite<br/>58 tables in 3NF")]
   llm["Anthropic or an OpenAI<br/>compatible service"]
 
   hook -->|"action"| http
@@ -722,7 +728,11 @@ flowchart LR
   known -->|no| drop["Dropped"]
   known -->|yes| act{"Agent holds act<br/>on the system's room?"}
   act -->|no| halt["Task halts,<br/>supervisor is asked"]
-  act -->|yes| call["Server calls the system<br/>with the stored key"]
+  act -->|yes| gate{"System holds actions<br/>for approval?"}
+  gate -->|yes| ask["Agent asks a person,<br/>task waits"]
+  ask -->|"Approve"| call
+  ask -->|"anything else"| undone["Not done,<br/>thread says so"]
+  gate -->|no| call["Server calls the system<br/>with the stored key"]
   call --> thread["Outcome written<br/>to the thread"]
   halt -->|"access granted"| again["Agent takes<br/>the step again"]
   again --> act
@@ -831,7 +841,7 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 56 tables. One database holds many offices. The schema is in
+SQLite, one file, 58 tables. One database holds many offices. The schema is in
 third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
@@ -915,6 +925,7 @@ erDiagram
     text base_url
     text api_key_cipher
     text key_hint
+    int needs_approval
   }
   stage_rooms {
     text office_id PK
@@ -1070,6 +1081,8 @@ erDiagram
   tasks ||--o{ task_assumptions : "rests on"
   messages ||--o| message_questions : is
   message_questions ||--o{ message_question_options : offers
+  message_questions ||--o| message_held_actions : "asks approval for"
+  message_held_actions ||--o{ message_held_action_fields : "filled with"
   messages ||--o| message_answers : is
   messages ||--o| message_assumptions : is
   message_assumptions ||--o{ message_assumption_tasks : affects
@@ -1294,6 +1307,8 @@ foreign keys, so an entry survives the task or rule it describes.
   On a second request the same agent placed an order for two condensers and,
   in the same stage, booked ground freight with the carrier under the new
   order number: order SO-1001, then shipment SH-5001 with reference SO-1001.
+- Approval for actions in a connected system: the held action, the question
+  to a person, and carrying it out only on Approve.
 - Resetting the demo office to its seeded state, without signing anyone out.
 - Answering a question by picking one of the agent's choices or by typing an
   answer.
@@ -1372,6 +1387,21 @@ playbook.
   their metadata service. An address on the server's own network is allowed on
   purpose, for a model served locally, so give Manage AI providers only to
   people you would trust with that.
+- What a model is told and what it can do are kept apart. Its instructions say
+  to ask before guessing, to wait for any check a request calls for, and never
+  to go past its access. Those are requests to a model and can fail. The limits
+  that cannot fail are enforced outside it: a model is never shown what its
+  agent may not read, its reply is parsed into known fields and checked, an
+  action is carried out only if the engine finds the agent holds `act`, and a
+  system set to need approval waits for a person whatever the model says.
+- Text from people, records and outside systems is marked as data before a
+  model sees it. A request, each record, each line from a connected system and
+  each message in a thread is wrapped in an `<office_data>` tag, the model is
+  told that nothing inside the tag is an instruction, and a copy of the tag
+  typed into the text is removed so the text cannot close the wrapper. This
+  lowers the chance that a planted sentence, such as a product name reading
+  "ignore your rules", is obeyed. It does not make that impossible, which is
+  why the limits above do not depend on it.
 - Each kind of set-up change needs its own permission, and nobody can grant a
   permission, or give or invite into a role, beyond what they hold.
 - Offices are isolated on the server. Every request acts on the office of the
@@ -1515,11 +1545,11 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, and notes | `npm run agents` | 65 of 65 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, and how data is marked for a model | `npm run agents` | 75 of 75 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 54 of 54 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
-| The two sample services, connecting a system, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, and resetting the demo | `npm run systems` | 88 of 88 pass |
+| The two sample services, connecting a system, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 99 of 99 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
