@@ -10,7 +10,8 @@ import { randomUUID } from "node:crypto";
 import { AdminError, applyAdminOp, blankOffice, permissionFor, type AdminOp } from "../admin";
 import { reduce, type Action, type AgentRuntime, type EngineState } from "../engine";
 import { initialState } from "../initialState";
-import { may, PERMISSION_INFO, type Office, type Participant, type Permission } from "../model";
+import { statusReply } from "../agentState";
+import { may, PERMISSION_INFO, resolveAccess, type Office, type Participant, type Permission } from "../model";
 import { runPlaybook } from "../playbook";
 import { authorize, contextOf, mayRead, stampActor, viewFor } from "../policy";
 import type { FeedEntry, OfficeView } from "../view";
@@ -47,6 +48,7 @@ import {
   testStoredProvider,
   type ProviderInput,
 } from "./providers";
+import { buildChatSystem, chatLines, earlierTurns, recordExchange } from "./chat";
 import {
   ensureDemoSystems,
   liveRecords,
@@ -315,6 +317,7 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
     // providers or choose one for an agent.
     providers: can("manage_providers") || can("manage_people") ? providerViews(db, office.id) : [],
     providersEditable: can("manage_providers") && session.hasPassword && !isDemoOffice(office.id),
+    chats: chatLines(db, viewer.id).filter((line) => state.office.participants.some((p) => p.id === line.agentId)),
     // Addresses are for people who manage rooms, and only for systems in
     // rooms they can read.
     systems: can("manage_rooms")
@@ -660,6 +663,75 @@ export async function testProviderSettings(session: Session, providerId: string)
     // replaces the body of a 5xx reply with its own page, which hides the reason.
     throw new OfficeError(424, error instanceof Error ? error.message : "The connection test failed.");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Talking to an agent
+// ---------------------------------------------------------------------------
+
+const overriddenChat = globalThis as unknown as { __officeChat?: (system: string, turns: { content: string }[]) => Promise<string> };
+
+/** For tests: answer every AI agent's conversation with this function. */
+export function useChatReply(reply: ((system: string, turns: { content: string }[]) => Promise<string>) | undefined): void {
+  overriddenChat.__officeChat = reply;
+}
+
+/**
+ * Say something to an agent at its desk and get its answer. The person must
+ * be allowed to enter the room the agent sits in. An AI agent answers through
+ * its provider, shown only what both of them may read. A playbook agent has
+ * no model and reports where its work stands. Nothing in the office changes.
+ */
+export function talkToAgent(session: Session, agentId: string, said: string): Promise<OfficeView> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    const state = loadOffice(db, session);
+    const { office } = state;
+    const asker = viewerOf(office, session);
+    const agent = office.participants.find((p) => p.id === agentId && p.kind === "agent");
+    if (!agent) throw new OfficeError(404, "That agent is not in this office.");
+    const body = said.trim();
+    if (body.length === 0 || body.length > 600) throw new OfficeError(400, "Write a message of up to 600 characters.");
+
+    const ctx = contextOf(office, state.now);
+    const room = office.floorplan.rooms.find((r) => r.deskIds.includes(agent.deskId ?? ""));
+    if (room && resolveAccess(asker, room.id, "enter", ctx).effect !== "allow") {
+      throw new OfficeError(403, `You cannot enter ${room.name}, so you cannot talk to ${agent.displayName} at their desk.`);
+    }
+
+    let reply: string;
+    if (agent.agentType !== "ai") {
+      reply = statusReply(office, agent, asker, ctx);
+    } else {
+      const shared = office.systems
+        .filter((s) => mayRead(ctx, agent, s.roomId) && mayRead(ctx, asker, s.roomId))
+        .map((s) => s.id);
+      const live = shared.length > 0 ? await liveRecords(db, office.id, shared) : [];
+      const system = buildChatSystem(office, agent, asker, ctx, live);
+      const turns = [...earlierTurns(db, agent.id, asker.id), { role: "user" as const, content: body }];
+      try {
+        reply = overriddenChat.__officeChat
+          ? await overriddenChat.__officeChat(system, turns)
+          : await runtimeForAgent(db, office.id, agent).chat(agent.displayName, system, turns);
+      } catch (error) {
+        // Reported as 424 for the same reason as a failed connection test.
+        throw new OfficeError(424, error instanceof Error ? error.message : `${agent.displayName} could not answer.`);
+      }
+    }
+
+    transaction(db, () => {
+      recordExchange(db, agent.id, asker.id, body, reply.slice(0, 2000), state.now);
+      recordAudit(db, {
+        officeId: office.id,
+        officeClock: state.now,
+        actorId: asker.id,
+        actionType: "TALK_TO_AGENT",
+        subject: { ...NO_SUBJECT, subjectParticipantId: agent.id, roomId: room?.id ?? null },
+        notes: [`${asker.displayName} talked to ${agent.displayName}`],
+      });
+    });
+    return buildView(db, loadOffice(db, session), session);
+  });
 }
 
 // ---------------------------------------------------------------------------

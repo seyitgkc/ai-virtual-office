@@ -11,6 +11,8 @@ import {
   buildStepPrompt,
   JSON_INSTRUCTIONS,
   parseReply,
+  type ChatTurn,
+  type ConversationRuntime,
   StepSchema,
   SYSTEM_PROMPT,
   toStepResult,
@@ -118,7 +120,7 @@ function describeStatus(status: number, who: string): Error {
   return new Error(`${who}: the provider returned an error (${status}).`);
 }
 
-export class OpenAiCompatibleRuntime implements AgentRuntime {
+export class OpenAiCompatibleRuntime implements ConversationRuntime {
   readonly model: string;
   private readonly baseUrl: string;
   private readonly apiKey: string | null;
@@ -127,6 +129,30 @@ export class OpenAiCompatibleRuntime implements AgentRuntime {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.apiKey = options.apiKey;
     this.model = options.model;
+  }
+
+  async chat(name: string, system: string, turns: ChatTurn[]): Promise<string> {
+    const who = `${name} could not answer`;
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: headers(this.apiKey),
+        body: JSON.stringify({ model: this.model, messages: [{ role: "system", content: system }, ...turns] }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch {
+      throw new Error(`${who}: the provider could not be reached.`);
+    }
+    if (!response.ok) throw describeStatus(response.status, who);
+    const data = (await response.json().catch(() => null)) as
+      | { choices?: { message?: { content?: unknown; refusal?: unknown } }[] }
+      | null;
+    const message = data?.choices?.[0]?.message;
+    if (message?.refusal) throw new Error(`${name} declined to answer that.`);
+    const text = typeof message?.content === "string" ? message.content.trim() : "";
+    if (!text) throw new Error(`${who}: the provider's reply could not be read.`);
+    return text;
   }
 
   async step(input: AgentStepInput): Promise<AgentStepResult> {

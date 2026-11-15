@@ -56,6 +56,15 @@ export interface SystemView {
   keyUnreadable: boolean;
 }
 
+/** One line of a conversation between the viewer and an agent. */
+export interface ChatLine {
+  id: number;
+  agentId: string;
+  fromAgent: boolean;
+  body: string;
+  at: number;
+}
+
 /** Everything the browser receives: the office as this viewer may see it. */
 export interface OfficeView {
   office: Office;
@@ -75,6 +84,8 @@ export interface OfficeView {
   providers: ProviderView[];
   /** Whether this viewer may add or change providers here. */
   providersEditable: boolean;
+  /** What the viewer and the office's agents have said to each other. */
+  chats: ChatLine[];
   /** Connected systems with their addresses, for people who manage rooms. */
   systems: SystemView[];
   /** Whether this viewer may connect, change or disconnect systems here. */

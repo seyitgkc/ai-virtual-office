@@ -141,6 +141,19 @@ async function main(): Promise<void> {
   expect("a refusal stops the step", (await errorOf(() => runtime.step(input)))?.includes("declined"), true);
 
   mode = "strict";
+  const modeBefore = mode;
+  mode = "garbage";
+  seen.length = 0;
+  expect(
+    "in a conversation the service's plain reply is the answer",
+    await runtime.chat("Nova", "You are Nova.", [{ role: "user", content: "What are you working on?" }]),
+    "I would rather chat.",
+  );
+  expect("and no reply format is asked for", seen[0].format, undefined);
+  mode = "refuse";
+  expect("a refusal in a conversation is reported", (await errorOf(() => runtime.chat("Nova", "You are Nova.", [{ role: "user", content: "Hi" }])))?.includes("declined"), true);
+  mode = modeBefore;
+
   const keyless = new OpenAiCompatibleRuntime({ baseUrl, apiKey: null, model: "small-model" });
   seen.length = 0;
   await keyless.step(input);
@@ -207,6 +220,14 @@ async function main(): Promise<void> {
   expect("a reply wrapped in a code fence is read", (await claudeLike.step(input)).statusNote, "Checked the request");
   claudeMode = "garbage";
   expect("a reply in the wrong shape stops the step", (await errorOf(() => claudeLike.step(input)))?.includes("wrong shape"), true);
+
+  calls.length = 0;
+  expect(
+    "in a conversation the service's plain reply is the answer",
+    await claudeLike.chat("Nova", "You are Nova.", [{ role: "user", content: "What are you working on?" }]),
+    "Happy to help!",
+  );
+  expect("with the conversation's own instructions and no reply format", calls[0].system, "You are Nova.");
 
   claudeMode = "ok";
   calls.length = 0;

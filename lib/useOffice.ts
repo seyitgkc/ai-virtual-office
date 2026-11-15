@@ -128,6 +128,11 @@ export function useOffice(initial: OfficeView) {
     [send, setNotice],
   );
 
+  /** Say something to an agent. The answer arrives with the new view. */
+  const talk = useCallback(
+    (agentId: string, body: string) => send("/api/chat", { agentId, body }),
+    [send],
+  );
   const systemOp = useCallback((body: SystemOp) => send("/api/admin/systems", body), [send]);
   /** What a connected system holds right now, or null when it gave no answer. */
   const readSystem = useCallback(
@@ -221,6 +226,7 @@ export function useOffice(initial: OfficeView) {
     providerOp,
     systemOp,
     readSystem,
+    talk,
     tokenOperation,
     signOut,
   };

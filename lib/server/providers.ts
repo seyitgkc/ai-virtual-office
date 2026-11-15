@@ -11,7 +11,7 @@ import type { AgentRuntime } from "../engine";
 import type { Participant } from "../model";
 import type { ProviderKind, ProviderView } from "../view";
 import { all, get, run, type Db } from "./db";
-import { ModelRuntime, testProvider, validModelId } from "./modelRuntime";
+import { ModelRuntime, testProvider, validModelId, type ConversationRuntime } from "./modelRuntime";
 import { OpenAiCompatibleRuntime, testOpenAiCompatible } from "./openaiRuntime";
 import { seal, unseal } from "./secrets";
 
@@ -177,13 +177,13 @@ export async function testStoredProvider(db: Db, officeId: string, id: string): 
   return testOpenAiCompatible(r.base_url ?? "", key, r.default_model);
 }
 
-const cache = new Map<string, { stamp: string; runtime: AgentRuntime }>();
+const cache = new Map<string, { stamp: string; runtime: ConversationRuntime }>();
 
 /**
  * The runtime for one AI agent, from the provider it names. Throws a plain
  * sentence when the agent has no provider or the provider cannot be used.
  */
-export function runtimeForAgent(db: Db, officeId: string, agent: Participant): AgentRuntime {
+export function runtimeForAgent(db: Db, officeId: string, agent: Participant): ConversationRuntime {
   const r = agent.providerId ? row(db, officeId, agent.providerId) : undefined;
   if (!r) {
     throw new Error(
@@ -199,7 +199,7 @@ export function runtimeForAgent(db: Db, officeId: string, agent: Participant): A
   const cached = cache.get(`${r.id}:${model}`);
   if (cached && cached.stamp === stamp) return cached.runtime;
 
-  const runtime: AgentRuntime =
+  const runtime: ConversationRuntime =
     r.kind === "anthropic"
       ? new ModelRuntime({ apiKey: key!, model, baseUrl: r.base_url })
       : new OpenAiCompatibleRuntime({ baseUrl: r.base_url ?? "", apiKey: key, model });

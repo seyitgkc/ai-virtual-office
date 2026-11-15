@@ -9,8 +9,10 @@ import {
   type AgentStepResult,
 } from "../lib/engine";
 import { initialState } from "../lib/initialState";
+import { deskState, statusReply } from "../lib/agentState";
 import { resolveAccess } from "../lib/model";
 import { contextOf } from "../lib/policy";
+import { buildChatSystem } from "../lib/server/chat";
 import { buildStepPrompt, SYSTEM_PROMPT, toStepResult } from "../lib/server/modelRuntime";
 
 let failures = 0;
@@ -258,6 +260,27 @@ async function main(): Promise<void> {
   expect("and the first prompt does not", buildStepPrompt(ai.steps[0]).includes("a second time"), false);
   const scripted = await chained("playbook");
   expect("a playbook agent acts once and does not follow up", `${scripted.steps.length} ${scripted.performed.length}`, "1 1");
+
+  console.log("\n-- what a desk shows, and what an agent is shown for a conversation --");
+  const seeded = initialState.office;
+  const who = (id: string) => seeded.participants.find((p) => p.id === id)!;
+  const seededCtx = contextOf(seeded, initialState.now);
+  const quillDesk = deskState(seeded, who("p-quill"));
+  expect("a halted agent's desk says it is waiting for access", `${quillDesk.tone} ${quillDesk.task?.id}`, "permission T-1001");
+  expect("and shows what it asked for", quillDesk.detail.includes("Finance"), true);
+  expect("an agent waiting on an answer says so", deskState(seeded, who("p-vera")).tone, "question");
+  expect("an agent with no open work has nothing on the desk", deskState(seeded, who("p-iris")).tone, "idle");
+  const report = statusReply(seeded, who("p-quill"), who("p-dana"), seededCtx);
+  expect("a playbook agent answers with where its work stands", report.includes("T-1001") && report.includes("halted"), true);
+  expect("and says it follows a playbook", report.startsWith("I follow a playbook"), true);
+  const withDana = buildChatSystem(seeded, who("p-ledger"), who("p-dana"), seededCtx, []);
+  const withSam = buildChatSystem(seeded, who("p-ledger"), who("p-sam"), seededCtx, []);
+  expect("talking to someone who reads Finance, the Finance agent is shown its records", withDana.includes("dealer tier 2"), true);
+  expect("talking to someone who does not, it is not", withSam.includes("dealer tier 2"), false);
+  expect("and is told why", withSam.includes("this person cannot"), true);
+  expect("an agent that cannot read Finance is never shown it", buildChatSystem(seeded, who("p-vera"), who("p-dana"), seededCtx, []).includes("dealer tier 2"), false);
+  expect("live records it is handed are included", buildChatSystem(seeded, who("p-vera"), who("p-dana"), seededCtx, ["[Storefront, live] Product X"]).includes("[Storefront, live] Product X"), true);
+  expect("the conversation instructions rule out changing anything", withDana.includes("You cannot change anything from this conversation"), true);
 
   console.log(`\n${failures === 0 ? "all agent checks passed" : failures + " FAILED"}\n`);
   process.exit(failures === 0 ? 0 : 1);

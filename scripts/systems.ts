@@ -145,6 +145,18 @@ async function main(): Promise<void> {
   expect("and Laval is down by six", await stock("GREE-MZ-12", "Laval"), 114);
   expect("the status note is not repeated", (await thread()).filter((m) => m.kind === "status" && m.body.startsWith("Checked stock")).length, 1);
 
+  console.log("\n-- talking to an agent at its desk --");
+  const tasksBefore = JSON.stringify(service.getView(await dana()).office.tasks);
+  demo = await service.talkToAgent(await dana(), "p-ledger", "  What are you working on?  ");
+  expect("the exchange is kept for the person who had it", demo.chats.map((c) => (c.fromAgent ? "agent" : "person")).join(), "person,agent");
+  expect("what was said is stored trimmed", demo.chats[0].body, "What are you working on?");
+  expect("a playbook agent reports where its work stands", demo.chats[1].body.startsWith("I follow a playbook"), true);
+  expect("talking changes no task", JSON.stringify(demo.office.tasks), tasksBefore);
+  expect("nobody else sees the conversation", service.getView(await sam()).chats.length, 0);
+  expect("an empty message is refused", await refusal(async () => service.talkToAgent(await dana(), "p-ledger", "   ")), 400);
+  expect("so is one to a person", await refusal(async () => service.talkToAgent(await dana(), "p-sam", "Hello")), 404);
+  expect("someone who may not enter the agent's room cannot talk to it there", await refusal(async () => service.talkToAgent(await sam(), "p-ledger", "Hello")), 403);
+
   console.log("\n-- the demo can be put back as it first loaded --");
   expect("someone who does not manage the office cannot reset it", await refusal(async () => service.resetDemoOffice(await sam())), 403);
   await service.resetDemoOffice(await dana());

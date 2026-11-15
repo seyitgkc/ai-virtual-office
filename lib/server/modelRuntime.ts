@@ -325,7 +325,18 @@ export function parseReply(text: string): unknown {
   return parsed && typeof parsed === "object" && !("actions" in parsed) ? { ...parsed, actions: [] } : parsed;
 }
 
-export class ModelRuntime implements AgentRuntime {
+/** One side of a conversation, oldest first. */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** A runtime that can also hold a plain conversation, outside any task. */
+export interface ConversationRuntime extends AgentRuntime {
+  chat(who: string, system: string, turns: ChatTurn[]): Promise<string>;
+}
+
+export class ModelRuntime implements ConversationRuntime {
   readonly model: string;
   private readonly client: Anthropic;
   /** True for a compatible service at its own address. */
@@ -369,6 +380,24 @@ export class ModelRuntime implements AgentRuntime {
       throw new Error(`${who} gave an answer in the wrong shape, so the step was not taken.`);
     }
     return toStepResult(parsed.data, input);
+  }
+
+  async chat(who: string, system: string, turns: ChatTurn[]): Promise<string> {
+    let response;
+    try {
+      response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 1024,
+        system,
+        messages: turns,
+      });
+    } catch (error) {
+      throw explain(error, `${who} could not answer`);
+    }
+    if (response.stop_reason === "refusal") throw new Error(`${who} declined to answer that.`);
+    const text = response.content.map((block) => (block.type === "text" ? block.text : "")).join("").trim();
+    if (!text) throw new Error(`${who} gave an empty answer.`);
+    return text;
   }
 
   async step(input: AgentStepInput): Promise<AgentStepResult> {

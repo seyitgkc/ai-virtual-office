@@ -15,7 +15,7 @@
  *    and grants are evaluated in sequence and threads are read in sequence.
  */
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const SCHEMA = /* sql */ `
 CREATE TABLE schema_meta (
@@ -508,6 +508,19 @@ CREATE TABLE audit_notes (
 
 CREATE INDEX messages_by_task       ON messages(task_id, position);
 CREATE INDEX rules_by_participant   ON access_rules(participant_id);
+-- What a person and an agent have said to each other at the agent's desk.
+-- A conversation belongs to that pair and is not part of any task.
+CREATE TABLE chat_messages (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id   TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  person_id  TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  from_agent INTEGER NOT NULL CHECK (from_agent IN (0, 1)),
+  body       TEXT NOT NULL,
+  at         INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX chat_by_pair ON chat_messages(person_id, agent_id, id);
+
 CREATE INDEX sessions_by_user       ON sessions(user_id);
 CREATE INDEX audit_by_office        ON audit_log(office_id, id);
 CREATE INDEX tokens_by_rule         ON access_tokens(rule_id);
@@ -757,5 +770,20 @@ CREATE TABLE playbook_action_fields (
   value   TEXT NOT NULL,
   PRIMARY KEY (step_id, name)
 ) STRICT;
+`,
+  // Version 6 added conversations between a person and an agent.
+  5: /* sql */ `
+-- What a person and an agent have said to each other at the agent's desk.
+-- A conversation belongs to that pair and is not part of any task.
+CREATE TABLE chat_messages (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id   TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  person_id  TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  from_agent INTEGER NOT NULL CHECK (from_agent IN (0, 1)),
+  body       TEXT NOT NULL,
+  at         INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX chat_by_pair ON chat_messages(person_id, agent_id, id);
 `,
 };
