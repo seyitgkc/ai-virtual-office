@@ -48,6 +48,7 @@ import {
   testStoredProvider,
   type ProviderInput,
 } from "./providers";
+import { dataMarker } from "./modelRuntime";
 import {
   buildChatSystem,
   directLines,
@@ -728,7 +729,7 @@ export function sendDirectMessage(session: Session, toId: string, said: string):
           .filter((s) => mayRead(ctx, other, s.roomId) && mayRead(ctx, sender, s.roomId))
           .map((s) => s.id);
         const live = shared.length > 0 ? await liveRecords(db, office.id, shared) : [];
-        const system = buildChatSystem(office, other, sender, ctx, live);
+        const system = buildChatSystem(office, other, sender, ctx, live, dataMarker());
         const turns = [...earlierTurns(db, other.id, sender.id), { role: "user" as const, content: body }];
         try {
           reply = overriddenChat.__officeChat

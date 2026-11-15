@@ -216,6 +216,10 @@ async function main(): Promise<void> {
   expect("the key is sent as an x-api-key header", calls[0].key, "test-key-for-the-gateway");
   expect("the provider's own model id is asked for", calls[0].model, "house-model");
   expect("the reply format is described in the instructions", calls[0].system?.includes("Reply with one JSON object"), true);
+  const tagOf = (system: string | undefined): string => system?.match(/Everything inside <(data_[0-9a-f]{12})> tags/)?.[1] ?? "";
+  const firstTag = tagOf(calls[0].system);
+  await claudeLike.step(input);
+  expect("each call marks data with a tag made up for that call", firstTag !== "" && tagOf(calls.at(-1)?.system) !== "" && tagOf(calls.at(-1)?.system) !== firstTag, true);
   claudeMode = "fenced";
   expect("a reply wrapped in a code fence is read", (await claudeLike.step(input)).statusNote, "Checked the request");
   claudeMode = "garbage";

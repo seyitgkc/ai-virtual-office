@@ -14,7 +14,8 @@ import {
   type ChatTurn,
   type ConversationRuntime,
   StepSchema,
-  SYSTEM_PROMPT,
+  dataMarker,
+  systemPrompt,
   toStepResult,
 } from "./modelRuntime";
 
@@ -166,9 +167,10 @@ export class OpenAiCompatibleRuntime implements ConversationRuntime {
 
   async step(input: AgentStepInput): Promise<AgentStepResult> {
     const who = `${input.participant.displayName} could not answer`;
+    const marker = dataMarker();
     const messages = [
-      { role: "system", content: SYSTEM_PROMPT + JSON_INSTRUCTIONS },
-      { role: "user", content: buildStepPrompt(input) },
+      { role: "system", content: systemPrompt(marker) + JSON_INSTRUCTIONS },
+      { role: "user", content: buildStepPrompt(input, marker) },
     ];
 
     // Services differ in how much of the reply format they can enforce. Ask

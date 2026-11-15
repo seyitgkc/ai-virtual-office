@@ -1396,9 +1396,11 @@ playbook.
   system set to need approval waits for a person whatever the model says.
 - Text from people, records and outside systems is marked as data before a
   model sees it. A request, each record, each line from a connected system and
-  each message in a thread is wrapped in an `<office_data>` tag, the model is
-  told that nothing inside the tag is an instruction, and a copy of the tag
-  typed into the text is removed so the text cannot close the wrapper. This
+  each message in a thread is wrapped in a tag, and the model is told that
+  nothing inside the tag is an instruction. The tag's name is random and made
+  up afresh for every call, such as `<data_3f9c1a7be402>`, so text written
+  beforehand cannot contain it and cannot close the wrapper. Anything in the
+  text that looks like such a tag is removed all the same. This
   lowers the chance that a planted sentence, such as a product name reading
   "ignore your rules", is obeyed. It does not make that impossible, which is
   why the limits above do not depend on it.
@@ -1545,8 +1547,8 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, and how data is marked for a model | `npm run agents` | 75 of 75 pass |
-| Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 54 of 54 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, and how data is marked for a model | `npm run agents` | 79 of 79 pass |
+| Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 55 of 55 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
 | The two sample services, connecting a system, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 99 of 99 pass |
