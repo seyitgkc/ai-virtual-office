@@ -1214,6 +1214,9 @@ foreign keys, so an entry survives the task or rule it describes.
   could fill a three-unit order, asked to place it, halted because it lacked
   `act` on the Warehouse, and placed order SO-1001 once access was granted
   for that task. The storefront's stock at that branch went from 4 to 1.
+  On a second request the same agent placed an order for two condensers and,
+  in the same stage, booked ground freight with the carrier under the new
+  order number: order SO-1001, then shipment SH-5001 with reference SO-1001.
 - Resetting the demo office to its seeded state, without signing anyone out.
 - Answering a question by picking one of the agent's choices or by typing an
   answer.
