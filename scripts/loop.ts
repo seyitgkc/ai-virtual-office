@@ -128,7 +128,8 @@ async function main(): Promise<void> {
   expect("and stops at the review, which waits for a person", done.status, "in_review");
   expect("the agent a note was left for attended to it, though the task was not its own", steps.includes("Ledger:note"), true);
   expect("and answered with a note of its own", view.office.messages.some((m) => m.kind === "note" && m.body === "Credit is fine."), true);
-  expect("the steps ran in order", steps.join(" "), "Iris:intake Iris:intake Atlas:planning Ledger:note Vera:execution Ledger:review");
+  expect("the agent that left the note takes its step again with the reply, before the task moves on", steps.join(" "), "Iris:intake Iris:intake Atlas:planning Ledger:note Atlas:planning Vera:execution Ledger:review");
+  expect("and does not leave the same note twice", view.office.messages.filter((m) => m.kind === "note" && m.body === "Check this dealer's credit.").length, 1);
   expect("the activity log shows the agents' own steps", view.feed.some((f) => f.text.includes("moved to Review")), true);
   expect("a person cannot raise an agent's wake-up themselves", await refusal(async () => service.applyAction(await owner(), { type: "AGENT_RESUME", taskId: done.id })), 403);
 
@@ -157,7 +158,7 @@ async function main(): Promise<void> {
   await service.agentsIdle();
   view = service.getView(await owner());
   expect("and moves one stage per click", taskOf(view, "Order, by hand").stage, "planning");
-  expect("a note is still attended to", steps.join(" "), "Iris:intake Atlas:planning Ledger:note");
+  expect("a note is still attended to and answered", steps.join(" "), "Iris:intake Atlas:planning Ledger:note Atlas:planning");
 
   service.useAgentRuntime(undefined);
   db.close();

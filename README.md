@@ -748,6 +748,15 @@ output given as bare text gets a label. A reply that still cannot be read is
 asked for once more, and if the second one fails too the step is not taken and
 the message says what was wrong with it.
 
+**Staying in its own stage.** Every step's prompt lists the stages in order
+with the room that hosts each, says what each stage is for, marks the agent's
+own, and names the room every other agent works in. The agent is told to do
+its stage's part and stop, to build on what earlier stages wrote, and to leave
+a note for the agent in another room when it needs a fact or a check from
+there. It asks for access to a room only when its own step cannot be done
+without it. Without this, a large office showed every agent trying to do the
+whole request and halting at each room in turn.
+
 **Between clicks.** An agent does not only act at the moment a person clicks.
 After every action the engine names the agents that now have something in
 front of them, and the server works through that in the background:
@@ -758,6 +767,7 @@ flowchart TD
   click --> look{"Anything for<br/>an agent?"}
   look -->|"an answer to its question"| again["It takes its step again"]
   look -->|"a note on a task it does not own"| attend["It looks at the note,<br/>may act and answer"]
+  look -->|"a colleague's reply to the owner"| again
   look -->|"a finished step, and the office<br/>lets agents hand work on"| hand["The task goes to<br/>the next stage"]
   again --> look
   attend --> look
@@ -1620,12 +1630,12 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, and reading a reply that is nearly right | `npm run agents` | 96 of 96 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, and reading a reply that is nearly right | `npm run agents` | 101 of 101 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 55 of 55 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
 | The two sample services, connecting a system, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 99 of 99 pass |
-| Agents working between clicks, providers that belong to an account, and the sample office | `npm run loop` | 38 of 38 pass |
+| Agents working between clicks, providers that belong to an account, and the sample office | `npm run loop` | 39 of 39 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 

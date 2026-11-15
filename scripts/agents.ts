@@ -348,6 +348,14 @@ async function main(): Promise<void> {
   expect("the prompt marks a system that holds actions for approval", buildStepPrompt({ ...vera, surroundings: { ...vera.surroundings, systems: [{ id: "sys-shop", name: "Shop", kind: "storefront", roomId: "fulfilment", needsApproval: true, readable: true, mayAct: true }] } }).includes("It holds every action until a person approves it."), true);
   expect("and the instructions say an action is not done until the system answers", SYSTEM_PROMPT.includes("An action is not done until the thread shows the system's answer"), true);
 
+  console.log("\n-- an agent is told where its own part ends --");
+  const staged = buildStepPrompt(vera);
+  expect("the prompt lists the stages with their rooms and marks the agent's own", staged.includes('- Execution (yours now), in the room "fulfilment": Carry the work out'), true);
+  expect("and says what an earlier stage is for", staged.includes('- Intake, in the room "reception": Record what is being asked'), true);
+  expect("it names the room each other agent works in", staged.includes('p-ledger: Ledger, Finance Agent, works in the room "finance"'), true);
+  expect("the instructions keep an agent to its stage", SYSTEM_PROMPT.includes("Do the part that belongs to your stage and stop there"), true);
+  expect("and send it to a colleague before asking for a room", SYSTEM_PROMPT.includes("leave a note for the agent who works there"), true);
+
   console.log("\n-- notes from an agent --");
   let seenByNext: AgentStepInput | null = null;
   const noted = await reduce(

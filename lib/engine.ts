@@ -58,15 +58,37 @@ export interface StageSpec {
   label: string;
   /** Review is closed by a human decision, not by advancing. */
   humanGate: boolean;
+  /** What the stage is for, so an agent knows where its own part ends. */
+  purpose: string;
 }
 
 /** The stages in order. Which room hosts each one is set per office. */
 export const PIPELINE: StageSpec[] = [
-  { stage: "intake", label: "Intake", humanGate: false },
-  { stage: "planning", label: "Planning", humanGate: false },
-  { stage: "execution", label: "Execution", humanGate: false },
-  { stage: "review", label: "Review", humanGate: true },
-  { stage: "done", label: "Complete", humanGate: false },
+  {
+    stage: "intake",
+    label: "Intake",
+    humanGate: false,
+    purpose: "Record what is being asked and who it is for, and find out what is missing. Nothing is planned, priced, checked or carried out yet.",
+  },
+  {
+    stage: "planning",
+    label: "Planning",
+    humanGate: false,
+    purpose: "Decide how the work will be done: the steps, their order, and which room does each. The steps themselves are not carried out yet.",
+  },
+  {
+    stage: "execution",
+    label: "Execution",
+    humanGate: false,
+    purpose: "Carry the work out: look up what this room holds, act in its connected systems, and produce what was asked for.",
+  },
+  {
+    stage: "review",
+    label: "Review",
+    humanGate: true,
+    purpose: "Check the finished work against the request and against what this room holds, before a person decides.",
+  },
+  { stage: "done", label: "Complete", humanGate: false, purpose: "The work is closed." },
 ];
 
 /** The room that hosts a stage, or null for the final stage. */
@@ -110,8 +132,10 @@ export interface AgentSurroundings {
   rooms: { id: RoomId; name: string; purpose: string; readable: boolean; records: string[] }[];
   /** People the agent can address a question to. */
   people: { id: ParticipantId; displayName: string; title: string }[];
-  /** The other agents in the office, whom it can leave a note for. */
-  colleagues: { id: ParticipantId; displayName: string; title: string }[];
+  /** The other agents in the office, whom it can leave a note for, and the room each works in. */
+  colleagues: { id: ParticipantId; displayName: string; title: string; roomId: RoomId | null }[];
+  /** The working stages in order, with the room that hosts each. */
+  stages: { stage: WorkflowStage; label: string; purpose: string; roomId: RoomId | null }[];
   /**
    * Outside systems connected to rooms. `readable` and `mayAct` follow the
    * agent's access to the system's room.
@@ -400,6 +424,19 @@ export async function reduce(
       const task = office.tasks.find((t) => t.id === m.taskId);
       if (reader?.agentType === "ai" && task && task.closedAt === null && task.ownerId !== reader.id) {
         wake.push({ kind: "attend", taskId: task.id, participantId: reader.id, noteId: m.id });
+      }
+      // A colleague's answer to the task's owner lets the owner take its step
+      // again with that answer, before the task moves on.
+      const sender = office.participants.find((p) => p.id === m.fromId);
+      if (
+        reader?.agentType === "ai" &&
+        sender?.kind === "agent" &&
+        task &&
+        task.closedAt === null &&
+        task.ownerId === reader.id &&
+        task.status === "in_progress"
+      ) {
+        wake.push({ kind: "resume", taskId: task.id, participantId: reader.id });
       }
     }
     return { state: { ...state, office, now, seq }, emitted, notes, wake };
@@ -1057,7 +1094,13 @@ async function runAgent(
       .map((p) => ({ id: p.id, displayName: p.displayName, title: p.title })),
     colleagues: office.participants
       .filter((p) => p.kind === "agent" && p.id !== participant.id)
-      .map((p) => ({ id: p.id, displayName: p.displayName, title: p.title })),
+      .map((p) => ({ id: p.id, displayName: p.displayName, title: p.title, roomId: roomOf(office, p) })),
+    stages: PIPELINE.filter((s) => s.stage !== "done").map((s) => ({
+      stage: s.stage,
+      label: s.label,
+      purpose: s.purpose,
+      roomId: roomForStage(office, s.stage),
+    })),
     systems: office.systems.map((system) => ({
       ...system,
       readable: resolveAccess(participant, system.roomId, "read", ctx).effect === "allow",
