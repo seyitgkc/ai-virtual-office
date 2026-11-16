@@ -207,6 +207,14 @@ that need nothing unusual go straight through to review. The supervisor's job
 is the exceptions, and the office is built so they are the first thing on
 screen:
 
+- **The work list** on the left holds every task with its state. Once there
+  are more than five it gains a search box, over each task's number, title
+  and request, and four filters with counts: all, waiting for a person, moving
+  with agents, and closed.
+- **The office is framed in the space the panels leave.** The view pulls back
+  until the whole plan fits between the work list and the task panel, however
+  long the corridor has grown, and takes the full width when no task or
+  person is picked.
 - **A room outlined in amber** means an agent asked a question it could not
   answer itself. Someone picks an answer and the task continues.
 - **A room outlined in red** means an agent needed data in a room it may not
@@ -1766,7 +1774,10 @@ playbook.
   the work is cleared.
 - On a phone the interface shows one section at a time, chosen from a bar at
   the bottom, and walking is unavailable because it needs a keyboard. Settings
-  tables scroll sideways there.
+  tables scroll sideways there, and an office of more than four or five rooms
+  along its corridor is wider than the screen until the view is pinched out.
+- With a task open on a window narrower than about 1,100 pixels, the strip
+  left for the office is small and a long office is drawn small in it.
 - The demo office shows a fixed demo clock that steps forward three minutes
   per action. Other offices use real time.
 

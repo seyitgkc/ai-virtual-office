@@ -129,9 +129,20 @@ body {
 #minimap .mark.agent { transform: rotate(45deg) scale(0.85); }
 #minimap .mark.you { border-radius: 50%; background: #ffffff; }
 
-#left #tasks { flex: 0 1 auto; min-height: 90px; display: flex; flex-direction: column; }
+/* The work list takes whatever height the column has left, so it is never the
+   panel that gets squeezed down to a single task. */
+#left #tasks { flex: 1 1 auto; min-height: 170px; display: flex; flex-direction: column; }
 #inspector { top: 18px; right: 18px; width: 340px; max-height: calc(100vh - 36px); display: flex; flex-direction: column; }
-#feed { margin-top: auto; max-height: 190px; display: flex; flex-direction: column; }
+/* With nothing picked there is nothing to inspect, and the office gets the room. */
+@media (min-width: 721px) {
+  #inspector[data-empty="true"] { display: none; }
+}
+#feed { flex: 0 0 auto; max-height: 150px; display: flex; flex-direction: column; }
+/* On a short screen the introduction gives its lines to the work list. */
+@media (max-height: 860px) and (min-width: 721px) {
+  #title p, #title .legend { display: none; }
+  #feed { max-height: 120px; }
+}
 
 .task {
   width: 100%; text-align: left; display: block;
@@ -148,6 +159,17 @@ body {
 .task .t { font-size: 11.5px; margin: 2px 0 5px; line-height: 1.35; }
 
 .btn.new-request { width: 100%; margin: 0 0 9px; }
+.work-find { margin: 0 0 9px; display: flex; flex-direction: column; gap: 6px; }
+.work-find input {
+  width: 100%; font: inherit; font-size: 11.5px; color: #e8e6e1; padding: 5px 8px;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14); border-radius: 6px;
+}
+.work-filters { display: flex; gap: 4px; }
+.work-filters button {
+  font: inherit; font-size: 10px; color: rgba(232,230,225,0.6); padding: 2px 6px; cursor: pointer; white-space: nowrap;
+  background: transparent; border: 1px solid rgba(255,255,255,0.14); border-radius: 999px;
+}
+.work-filters button[aria-pressed="true"] { color: #e8e6e1; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); }
 .request-form { margin-bottom: 11px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.07); }
 .request-form label {
   display: block; margin: 0 0 3px; font-size: 9.5px;

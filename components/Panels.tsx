@@ -32,6 +32,29 @@ const STATUS: Record<TaskStatus, { label: string; accent: string }> = {
   rejected: { label: "rejected", accent: "#8a8a8a" },
 };
 
+/** The work list offers search and these filters once it holds more tasks than this. */
+const WORK_FILTER_FROM = 5;
+
+type WorkFilter = "all" | "you" | "moving" | "done";
+
+/** Ways to narrow the work list, by what a person would be looking for. */
+const WORK_FILTERS: Record<WorkFilter, { label: string; hint: string; keeps: (task: Task) => boolean }> = {
+  all: { label: "All", hint: "Every task", keeps: () => true },
+  you: {
+    label: "Waiting",
+    hint: "Tasks that wait for a person: a question, missing access or a review",
+    keeps: (task) =>
+      task.closedAt === null &&
+      (task.status === "blocked_question" || task.status === "blocked_permission" || task.status === "in_review"),
+  },
+  moving: {
+    label: "Moving",
+    hint: "Open tasks that agents are working on, or that wait for a day",
+    keeps: (task) => task.closedAt === null && (task.status === "in_progress" || task.status === "requested"),
+  },
+  done: { label: "Closed", hint: "Tasks that were completed or rejected", keeps: (task) => task.closedAt !== null },
+};
+
 /** How a task's state is shown. One that waits for a day says so in place of "in progress". */
 const statusOf = (task: Task): { label: string; accent: string } =>
   task.wait && task.closedAt === null && task.status === "in_progress"
@@ -141,11 +164,11 @@ export function TitleCard({
       </p>
       <div className="legend">
         <span>
-          <KindBadge kind="human" agentType={null} /> A person is a rounded figure.
+          <KindBadge kind="human" agentType={null} /> a person, rounded
         </span>
         <span>
-          <KindBadge kind="agent" agentType="ai" /> <KindBadge kind="agent" agentType="playbook" /> An agent is a
-          faceted figure with a ring.
+          <KindBadge kind="agent" agentType="ai" /> <KindBadge kind="agent" agentType="playbook" /> an agent,
+          faceted
         </span>
       </div>
       {isDemoOffice && (
@@ -318,6 +341,18 @@ export function TaskList({
   submitBlocked: string | null;
 }) {
   const [composing, setComposing] = useState(false);
+  const [search, setSearch] = useState("");
+  const [show, setShow] = useState<WorkFilter>("all");
+  // A handful of tasks need no finding. The controls appear once there are more.
+  const crowded = tasks.length > WORK_FILTER_FROM;
+  const wanted = search.trim().toLowerCase();
+  const listed = crowded
+    ? tasks.filter(
+        (task) =>
+          WORK_FILTERS[show].keeps(task) &&
+          (wanted === "" || `${task.id} ${task.title} ${task.detail}`.toLowerCase().includes(wanted)),
+      )
+    : tasks;
 
   return (
     <div className="panel" id="tasks">
@@ -348,7 +383,26 @@ export function TaskList({
             New request
           </button>
         )}
-        {tasks.map((task) => {
+        {crowded && (
+          <div className="work-find">
+            <input
+              type="search"
+              aria-label="Find a task"
+              placeholder="Find a task"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <div className="work-filters" role="group" aria-label="Which tasks to list">
+              {(Object.keys(WORK_FILTERS) as WorkFilter[]).map((id) => (
+                <button key={id} type="button" title={WORK_FILTERS[id].hint} aria-pressed={show === id} onClick={() => setShow(id)}>
+                  {WORK_FILTERS[id].label} {tasks.filter(WORK_FILTERS[id].keeps).length}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {crowded && listed.length === 0 && <div className="empty">No task matches.</div>}
+        {listed.map((task) => {
           const s = statusOf(task);
           return (
             <button
@@ -499,7 +553,7 @@ export function Inspector({
     );
   }
   return (
-    <div className="panel" id="inspector">
+    <div className="panel" id="inspector" data-empty="true">
       <div className="panel-head">
         <span>Inspector</span>
       </div>

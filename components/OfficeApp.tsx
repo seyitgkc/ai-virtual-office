@@ -1,6 +1,6 @@
 "use client";
 
-import { setupSteps } from "../lib/setup";
+import { setupSteps, type SetupTab } from "../lib/setup";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useOffice } from "../lib/useOffice";
@@ -123,6 +123,17 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
 
   const task = office.tasks.find((t) => t.id === selectedTaskId) ?? null;
   const participant = office.participants.find((p) => p.id === selectedPersonId) ?? null;
+  // What a new office still needs, shown until its first request is filed.
+  const setup =
+    !view.isDemoOffice && office.tasks.length === 0 && view.viewer.permissions.includes("manage_office")
+      ? {
+          steps: setupSteps(office, view.now, view.providers),
+          onOpen: (tab: SetupTab) => {
+            setSettingsTab(tab);
+            setSettingsOpen(true);
+          },
+        }
+      : null;
 
   return (
     <main className="office" data-pending={pending} data-sheet={sheet}>
@@ -141,6 +152,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         }}
         onSelectRoom={() => setSelectedPersonId(null)}
         closedRooms={closedRooms}
+        inspectorOpen={task !== null || participant !== null || setup !== null}
         onFaceParticipant={setFacedId}
         onInteract={(id) => {
           setSelectedPersonId(id);
@@ -215,17 +227,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         pending={pending}
         dispatch={dispatch}
         onTokenOperation={tokenOperation}
-        setup={
-          !view.isDemoOffice && office.tasks.length === 0 && view.viewer.permissions.includes("manage_office")
-            ? {
-                steps: setupSteps(office, view.now, view.providers),
-                onOpen: (tab) => {
-                  setSettingsTab(tab);
-                  setSettingsOpen(true);
-                },
-              }
-            : null
-        }
+        setup={setup}
         onClear={() => {
           // Back to where the selection was made.
           setSheet(selectedTaskId ? "work" : "office");

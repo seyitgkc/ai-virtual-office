@@ -17,8 +17,11 @@ import { LabelLayer, LabelProjector, type LabelSpec } from "./Labels";
 const FOV = 34;
 /** The plan has no ceiling, so on foot the space above the walls is open sky. */
 const WALK_SKY = "#a9b3bd";
-/** Screen width taken by the left column and the inspector, margins included. */
-const PANEL_WIDTH = 634;
+/** Screen width taken by the left column and by the inspector, margins included. */
+const LEFT_PANEL = 276;
+const RIGHT_PANEL = 358;
+/** Below this width the panels are sheets over the office and take no strip of their own. */
+const PHONE_WIDTH = 720;
 /** Direction from the orbit target to the camera's resting position. */
 const VIEW_DIRECTION = new Vector3(1, 28, 26.8).normalize();
 
@@ -32,21 +35,33 @@ function Framing({
   nearEdge,
   planWidth,
   touched,
+  inspectorOpen,
 }: {
   target: Vector3;
   nearEdge: Vector3;
   planWidth: number;
   touched: RefObject<boolean>;
+  /** Whether the inspector is taking its strip on the right. */
+  inspectorOpen: boolean;
 }) {
   const { camera, scene, size } = useThree();
 
   useEffect(() => {
+    const phone = size.width <= PHONE_WIDTH;
+    const left = phone ? 0 : LEFT_PANEL;
+    const right = phone || !inspectorOpen ? 0 : RIGHT_PANEL;
+    // The picture is slid sideways so its middle is the middle of the strip
+    // the panels leave free. Without this the plan sits under the wider panel.
+    if (camera instanceof PerspectiveCamera) {
+      camera.setViewOffset(size.width, size.height, (right - left) / 2, 0, size.width, size.height);
+    }
     if (touched.current) return;
-    const free = Math.max(320, size.width - PANEL_WIDTH) * 0.96;
+    const free = Math.max(240, size.width - left - right) * 0.86;
     const halfTan = Math.tan((FOV * Math.PI) / 360);
     const lead = nearEdge.clone().sub(target).dot(VIEW_DIRECTION);
     const fit = lead + (planWidth * size.height) / (2 * halfTan * free);
-    const distance = Math.min(Math.max(fit, 30), 110);
+    // Far enough back that a long corridor still fits between the panels.
+    const distance = Math.min(Math.max(fit, 30), 320);
 
     camera.position.copy(target).addScaledVector(VIEW_DIRECTION, distance);
     camera.lookAt(target);
@@ -55,7 +70,15 @@ function Framing({
       scene.fog.near = distance + 14;
       scene.fog.far = distance + 64;
     }
-  }, [camera, scene, size.width, size.height, target, nearEdge, planWidth, touched]);
+  }, [camera, scene, size.width, size.height, target, nearEdge, planWidth, touched, inspectorOpen]);
+
+  // On foot the picture is not slid: the walker looks straight ahead.
+  useEffect(
+    () => () => {
+      if (camera instanceof PerspectiveCamera) camera.clearViewOffset();
+    },
+    [camera],
+  );
 
   return null;
 }
@@ -75,7 +98,10 @@ export function Scene({
   onInteract,
   roomHighlight,
   participantAlert,
+  inspectorOpen,
 }: {
+  /** Whether the inspector is showing, which narrows the strip the office is framed in. */
+  inspectorOpen: boolean;
   office: Office;
   /** The signed-in person, whose own name tag says so. */
   viewerId: string;
@@ -201,6 +227,7 @@ export function Scene({
           nearEdge={nearEdge}
           planWidth={ext.maxX - ext.minX + 1}
           touched={cameraTouched}
+          inspectorOpen={inspectorOpen}
         />
       )}
 
