@@ -35,7 +35,7 @@ review. Everything else moves without a click.
 
 1. Open the [live demo](https://office.example.invalid) and enter as Dana, the
    operations manager. No password is needed.
-2. The dealer order **T-1001** is halted at the Finance door. Click **Grant
+2. The dealer order **T-1** is halted at the Finance door. Click **Grant
    read on Finance, for this task only**.
 3. The agent asks whether it may place the order in the storefront. Click
    **Approve**. A real order is placed in a sample storefront service, and
@@ -157,6 +157,17 @@ pricing, and a finance approval before a quote goes out.
   the one in hand, each with its result, as far as the agent's rooms let it
   read them. A person can keep a result or an answer from a thread as a
   record of a room, and from then on every agent working there is told it.
+- **A rejected task settles what it already did.** An order that was placed
+  is still an order after the task is rejected. So a task that has done
+  things in connected systems stays open when it is rejected: whoever
+  rejected it is shown what it did and asked what should happen to that. The
+  agent that did each thing carries the answer out, newest first, and says
+  what came of it. The task closes only when nothing is left standing or a
+  person says to leave it. If something cannot be taken back, the person is
+  told why and asked what next.
+- **Tasks have short numbers.** A task is T-1, T-2 and so on within its
+  office, in the panels, the activity log and what agents write. Wherever a
+  task is named in a thread or in the log, the number opens that task.
 - **AI providers of your own.** A provider can belong to your account and be
   used in every office you sit in, so a key is entered once.
 - **A sample office with AI agents.** Anyone signed in can add the demo's
@@ -255,7 +266,12 @@ screen:
   and only a human decision completes or rejects the task. A reviewer who
   finds the work unfinished writes what has to change and sends it back. The
   task returns to the room that carries work out, to whoever had it there,
-  and comes to review again once that is done.
+  and comes to review again once that is done. Rejecting a task that has
+  already placed an order, booked freight or raised an invoice does not
+  close it at once: the reviewer is asked what should happen to those, with
+  "Undo all of them" and "Leave them as they are" as ready answers and a box
+  for their own words. The task shows as rejected and being wound up until
+  the agents have done what was said.
 
 Every permission change records who made it and why. A grant made for one task
 counts only for work on that task and expires when the task closes, so an
@@ -354,7 +370,8 @@ documents can be attached to it, and it can be marked urgent.
   use is disabled, with the reason beside it.
 - *Assumptions* lists every guess recorded on the task, each with Confirm and
   That's wrong.
-- *Thread* is the message history you are allowed to read. Someone who
+- *Thread* is the message history you are allowed to read. A task named in
+  it, such as T-12, is a link that opens that task. Someone who
   manages rooms sees *Keep as a record* beside each result and answer. It
   opens the line for editing, with a choice of room, and adds it to that
   room's records, where every agent that reads the room is told it.
@@ -476,13 +493,19 @@ The office has no list of system types. Any service that answers three calls
 can be connected: `GET /v1/manifest` for the description and the operations,
 a records address named in the manifest that returns plain lines, and the
 operations themselves, each answering with a sentence that says what it did or
-why it refused. The five sample services are built this way:
+why it refused. Two optional parts of that format are what let the office
+settle a rejected task. An operation can say which other operation it takes
+back, as cancelling an order takes back placing one. And an answer can give
+the number of the record it made or took back, such as SO-1001. With both,
+the office knows from its own record what a task did that still stands, and
+an agent asked to take something back can only name a record that task made.
+The five sample services are built this way:
 
 | Service | Live records | Operations | Refuses, for example |
 | --- | --- | --- | --- |
 | Storefront | Products with list price and stock per branch, and recent orders | Place an order, cancel an order | An order the branch cannot fill in full |
 | Freight carrier | Service levels with their rates, and recent shipments | Book a shipment, cancel a shipment | A parcel above 500 kg, or a second booking for the same order |
-| Accounts ledger | Dealer accounts with tier, credit limit, balance, payment record and holds, and recent invoices | Raise an invoice, record a payment, put an account on hold or release it | An invoice on a held account or past the credit limit, an order invoiced twice, a large invoice for a dealer that pays late |
+| Accounts ledger | Dealer accounts with tier, credit limit, balance, payment record and holds, and recent invoices | Raise an invoice, void an invoice, record a payment, put an account on hold or release it | An invoice on a held account or past the credit limit, an order invoiced twice, a large invoice for a dealer that pays late |
 | Supplier portal | What the factory charges, its minimum order and case size, lead time and what it can ship now, and purchase orders | Raise a purchase order, expedite one by air, cancel one | An order below the minimum or not in whole cases. A short run ships in part and backorders the rest |
 | Service desk | Units in the field by serial number with their warranty, and tickets | Open a ticket, authorize a return, schedule a technician visit, close a ticket | A return for a unit out of warranty, a visit on a weekend or a fully booked day |
 
@@ -515,13 +538,13 @@ names what is missing and opens the Settings tab where it is done. Demo access c
 
 ### 1. A quote blocked at the Finance door
 
-If the demo has been used and T-1001 is no longer halted, open Settings, This
+If the demo has been used and T-1 is no longer halted, open Settings, This
 office, and click **Reset the demo**. That puts back the seeded people, rules
 and three tasks for every visitor. The storefront is a separate service and
-keeps the order it already holds for T-1001, so after a reset the thread
+keeps the order it already holds for T-1, so after a reset the thread
 reports that order as already placed until the storefront's own daily reset.
 
-Enter as Dana. Task **T-1001** is selected: a dealer order for six multi-zone
+Enter as Dana. Task **T-1** is selected: a dealer order for six multi-zone
 heads. It has already moved through Reception, Planning and Fulfilment,
 collecting three assumptions on the way. Quill is assembling the quote and
 needs the dealer's pricing tier, which lives in Finance. Quill's role,
@@ -591,7 +614,7 @@ and that the system will explain it. The same story runs headless under
 
 ### 3. Two people, two views
 
-1. Enter as Dana and open T-1001. The thread shows Quill's escalation, which
+1. Enter as Dana and open T-1. The thread shows Quill's escalation, which
    was addressed to Dana.
 2. Sign out and enter as Sam. The same task shows one message fewer, with a
    note that it was withheld. The grant buttons are gone, and *Advance* is
@@ -614,13 +637,13 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/rooms/finance/
 
 The reply holds Finance's records and thread for that task. The same token
 against `/api/rooms/operations/thread` is refused, because it names Finance.
-Approve T-1001 and call again: refused, because the task has closed.
+Approve T-1 and call again: refused, because the task has closed.
 
 ### 5. A task waiting on an answer
 
 **T-1002** is a branch transfer. Vera asked whether to send four units now or
 split the shipment, and the task waits in amber until someone chooses. It is
-the same halt as T-1001 with a different cause and a different fix.
+the same halt as T-1 with a different cause and a different fix.
 
 **T-1003** is already complete, so the full path from request to approval can
 be read in its thread without clicking through anything.
@@ -654,7 +677,7 @@ flowchart TB
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>64 tables in 3NF")]
+  db[("SQLite<br/>65 tables in 3NF")]
   llm["Anthropic or an OpenAI<br/>compatible service"]
 
   hook -->|"action"| http
@@ -726,6 +749,9 @@ lib/server/invites.ts     inviting people
 lib/server/providers.ts   an office's AI providers and the runtime each AI agent gets
 lib/agentState.ts         what someone at a desk is doing right now, and who is on a task
 lib/recall.ts             the closed tasks that bear on the one in hand
+lib/windup.ts             what a rejected task did that still stands, and who is asked about it
+lib/taskLabels.ts         a task's number in its office, and finding tasks named in a text
+lib/plainNames.ts         names in place of ids in what an agent writes
 lib/standing.ts           how often standing work is filed, and when next
 lib/report.ts             the counts behind the report
 lib/setup.ts              what a new office still needs
@@ -738,7 +764,7 @@ app/api/                  route handlers
 app/page.tsx              the office, for a signed-in person
 app/login, app/invite     sign-in and invite pages
 components/               3D scene, panels, settings, sign-in and invite forms
-scripts/                  ten check scripts
+scripts/                  eleven check scripts
 services/                 the five sample services, one folder each, with
                           what they share and what each says about itself
 Dockerfile, compose.yaml  container build and run of the office and the services
@@ -808,12 +834,21 @@ stateDiagram-v2
   blocked_permission --> in_progress: access granted, rule revoked or task handed over
   in_progress --> in_review: advanced into Finance
   in_review --> completed: approved
-  in_review --> rejected: rejected
+  in_review --> rejected: rejected, having done nothing in any system
+  in_review --> blocked_question: rejected, with orders or bookings still standing
+  blocked_question --> rejected: told to leave them, or everything taken back
   in_review --> in_progress: sent back to Fulfilment with a reason
   in_progress --> in_progress: waits for a day, then its owner is woken
   completed --> [*]
   rejected --> [*]
 ```
+
+A rejected task that is being wound up carries a mark of its own beside its
+status. While the mark is set it is not handed on, cannot be advanced or
+decided again, and its owner takes no further step. What it did is read from
+the lines in its thread that report each system's answer, so nothing rests on
+an agent remembering. A task halted for access cannot be advanced around the
+halt either.
 
 The engine is one function. It never changes its input, and it is
 asynchronous because it waits for the agent runtime.
@@ -911,6 +946,11 @@ each one the agent receives the last result said in a room it holds `read`
 on. A closed task whose results it may not read is left out altogether. The
 prompt says these tasks are finished and that the live records decide what
 is true now.
+
+An agent is given the ids of rooms, people and systems, because it names
+them by id when it asks for access or leaves a note. Tasks are named to it by
+number, as people see them. If an id turns up in what it writes for people,
+it is replaced by the name before the text is stored.
 
 An agent without `read` on Finance never receives Finance's records or
 messages, whichever kind of agent it is. If it needs them, it has to say so in
@@ -1128,7 +1168,7 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 64 tables. One database holds many offices. The schema is in
+SQLite, one file, 65 tables. One database holds many offices. The schema is in
 third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
@@ -1227,6 +1267,7 @@ erDiagram
     text label
     text method
     text path
+    text undoes
   }
   system_shown_rooms {
     text system_id PK
@@ -1395,6 +1436,7 @@ erDiagram
   tasks ||--o{ task_open_questions : "waits on"
   tasks ||--o{ task_assumptions : "rests on"
   tasks ||--o{ task_documents : carries
+  messages ||--o| message_system_results : "reports"
   tasks ||--o{ pending_work : "still owes"
   participants ||--o{ pending_work : "has been given"
   offices ||--o{ standing_requests : "files by itself"
@@ -1429,6 +1471,14 @@ erDiagram
     text wait_reason
     integer step_owed
     integer urgent
+    integer wind_up
+  }
+  message_system_results {
+    text message_id PK
+    text system_id
+    text operation
+    integer ok
+    text record
   }
   task_documents {
     text id PK
@@ -1634,7 +1684,7 @@ Each choice is here because it removed something to run or to explain.
 | Framework | Next.js 16, App Router, as a Node server | One project holds the page, the API and the server logic, so the demo deploys as a single container. Route handlers are plain functions, which keeps the API easy to read. |
 | Language | TypeScript 7, strict | The access model and the engine are mostly types and pure functions. Strict types catch a wrong room id or a missing field before anything runs. |
 | 3D | three.js through @react-three/fiber and drei | The scene is declared as React components next to the panels that describe it, and it re-renders from the same state. No separate game loop to keep in step with the UI. |
-| Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (64 tables in third normal form), so moving to Postgres is a change of driver. |
+| Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (65 tables in third normal form), so moving to Postgres is a change of driver. |
 | Sign-in | jose for signed tokens, Node's scrypt for passwords | Small, standard and dependency-light. No outside identity service is needed for the demo to be public. |
 | AI providers | The Anthropic SDK, and plain `fetch` for anything that speaks the OpenAI chat interface | Two connection styles cover nearly every hosted and self-hosted model, so an office is not tied to one vendor. zod checks every reply before the engine sees it. |
 | Checks | tsx running plain scripts | No test framework to learn. Each script prints what it checks in a sentence, and the Docker image refuses to build unless all of them pass. |
@@ -1684,7 +1734,7 @@ what exists, and what a real deployment would add.
   and places and cancels orders and shipments in them. In the demo office, the
   agent working a dealer order places it in the storefront once its halt for
   Finance is cleared, and the storefront's stock goes down. This was run on
-  the deployed site: the grant on T-1001 produced order SO-1001 for six heads
+  the deployed site: the grant on T-1 produced order SO-1001 for six heads
   from Laval, and the storefront's stock there went from 120 to 114.
 - An AI agent using a connected system, on the deployed site. An agent on a
   DeepSeek model read the storefront's live stock, saw that one branch alone
@@ -1835,6 +1885,16 @@ playbook.
   only as a note while it takes a step on a task.
   An AI agent reads what its rooms and their connected systems hold and
   replies. It cannot search a system or page through it.
+- Winding up a rejected task rests on what each system says about itself. A
+  system that does not say which operation takes another back, or gives no
+  record numbers, leaves its part to the person. A payment recorded in the
+  sample ledger cannot be taken back by anyone here. A playbook agent takes
+  back only where the operation needs the record's number and nothing else,
+  and it cannot follow an answer given in a person's own words. A rejection
+  takes no reason: the reviewer's words go into the answer about what the
+  task did, or into "Send back".
+- A task's number is its place among the office's tasks. Clearing all work
+  starts the count again.
 - A connected system has to describe itself in the format the sample services
   use. No existing ordering, accounting or carrier system does, so each would
   need a small adapter in front of it, and none has been tried. A playbook's
@@ -1911,7 +1971,7 @@ Requires Node 24 or later, for the built-in SQLite module.
 ```bash
 npm install
 npm run dev       # http://localhost:3000
-npm run verify    # type check, then all ten check scripts
+npm run verify    # type check, then all eleven check scripts
 npm run services  # the five sample services, on ports 8081 to 8085
 npm run build     # production server in .next/standalone
 ```
@@ -1996,9 +2056,9 @@ fresh filesystem.
 ## Verification
 
 Every script runs under Node and nothing leaves the machine. Six use an
-in-memory database and three a temporary database file. One needs no database
-and starts a stand-in model service on a local port, and one starts the two
-sample services the same way.
+in-memory database and three a temporary database file. Two need no
+database: one of them starts a stand-in model service on a local port. One
+of the three with a database file starts sample services the same way.
 
 | What | Command | Result |
 | --- | --- | --- |
@@ -2006,12 +2066,13 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 48 of 48 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, a need passed to a colleague, documents on a task, earlier work shown within an agent's access, records kept from a thread, and the report | `npm run agents` | 179 of 179 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, a need passed to a colleague, documents on a task, earlier work shown within an agent's access, records kept from a thread, the report, ids replaced by names in what an agent writes, and tasks named by number | `npm run agents` | 200 of 200 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 56 of 56 pass |
 | Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, and an office built from nothing | `npm run admin` | 101 of 101 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 87 of 87 pass |
-| The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 152 of 152 pass |
-| Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, work that is written down and picked up after a failure or a restart, urgent work first, standing work, who is on a task, providers that belong to an account, and the sample office | `npm run loop` | 103 of 103 pass |
+| The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, an invoice voided, a rejected task whose order is cancelled in the storefront, and resetting the demo | `npm run systems` | 171 of 171 pass |
+| Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, work that is written down and picked up after a failure or a restart, urgent work first, standing work, who is on a task, a rejected task wound up between clicks and after a restart, providers that belong to an account, and the sample office | `npm run loop` | 118 of 118 pass |
+| A rejected task that had placed orders: the question to the person, each thing taken back by the agent that did it, refusals, an agent stopped from naming another task's record, playbook agents, and systems that hold actions for approval | `npm run windup` | 56 of 56 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
