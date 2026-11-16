@@ -141,6 +141,22 @@ pricing, and a finance approval before a quote goes out.
   and the reason, stays with its owner, and is not handed on. On the day the
   office wakes the agent, which reads the live records and finishes the job.
   A person can end a wait early with one click.
+- **Work that survives a failure and a restart.** What each agent has been
+  given is written down before it starts. A step that fails is tried again,
+  up to three times, and a task is not handed on while a colleague still has
+  a part of it to do. After a restart the office picks up from what was
+  written down.
+- **Text documents on a request.** A purchase order, a price list or a saved
+  email can be attached when a request is filed or added later, up to five
+  per task. Every agent that works the task is shown them, marked as data.
+- **Standing work.** A request the office files by itself every day, every
+  weekday or every week, such as a stock check on Monday morning. It is set
+  up in Settings, can be paused, and can be filed at once with one click.
+- **What the office learned on earlier work.** An agent taking a step is
+  shown the closed tasks that share an account, part or order number with
+  the one in hand, each with its result, as far as the agent's rooms let it
+  read them. A person can keep a result or an answer from a thread as a
+  record of a room, and from then on every agent working there is told it.
 - **AI providers of your own.** A provider can belong to your account and be
   used in every office you sit in, so a key is entered once.
 - **A sample office with AI agents.** Anyone signed in can add the demo's
@@ -175,8 +191,11 @@ pricing, and a finance approval before a quote goes out.
   playbook agent reports where its work stands. A message changes nothing in
   the office.
 - **Notes from agents.** While it works on a task, an agent can leave a note
-  for one person or one other agent when they should know something the
-  handoff and the outputs do not say. A note blocks nothing.
+  of up to 120 words for one person or one other agent when they should know
+  something the handoff and the outputs do not say. A note blocks nothing.
+  An agent that is left a note looks at it soon after and may do its own
+  part. The task panel says who is working on a task at the moment and who
+  has it waiting behind other work.
 - **An inbox.** One place for what is waiting on you, the notes agents left
   you, what agents wrote to each other, and your conversations, with a count
   of what is new.
@@ -320,16 +339,25 @@ figures. Agents are faceted and carry a slowly turning ring. A pulsing marker
 above a figure means that figure owns a halted task.
 
 **Work in the office** (left). Every task with its status. Click one to open it.
-**New request** files a new dealer request into Reception and opens it.
+**New request** files a new dealer request into Reception and opens it. Text
+documents can be attached to it, and it can be marked urgent.
 
 **Inspector** (right), with a task selected:
 
+- A line under the task's details names the agent working on it at the
+  moment, any colleague answering a note on it, and agents that have it
+  waiting behind other work.
+- *Documents* lists the text documents attached to the task. Each opens in
+  place, and more can be added while the task is open.
 - *Your move* lists what you can do at this moment. The buttons change with
   the state of the task and with your own permissions. A control you may not
   use is disabled, with the reason beside it.
 - *Assumptions* lists every guess recorded on the task, each with Confirm and
   That's wrong.
-- *Thread* is the message history you are allowed to read.
+- *Thread* is the message history you are allowed to read. Someone who
+  manages rooms sees *Keep as a record* beside each result and answer. It
+  opens the line for editing, with a choice of room, and adds it to that
+  room's records, where every agent that reads the room is told it.
 
 **Inspector**, with a person or agent selected (click a figure in the scene):
 role, what they can do, whether a live model backs them, and a table of rooms
@@ -356,8 +384,9 @@ belong to your account, whichever office you are in, come after.
 | --- | --- | --- |
 | General | Manage the office | Rename the office. Choose whether agents hand work on by themselves. Clear all work, or remove the office. In the demo office: reset it to how it first loaded. |
 | Rooms | Manage rooms | Rename a room or change its purpose. Add a room, which takes the next free place along the corridor while the corridor lengthens to make space, or build it against a wall of a room you choose. Either way a door joins the two. A room can be marked as a corridor: every role may walk it, nobody has a desk there and no stage is hosted there. Remove an empty room. Choose which room hosts each workflow stage. |
-| Records | Manage rooms | Edit the records kept in each room you can read, one fact per line. |
+| Records | Manage rooms | Edit the records kept in each room you can read, one fact per line. A line from a task's thread can also be kept as a record straight from the task panel. |
 | Connected systems | Manage rooms | See each connected system with the room it is operated from and what agents can do in it. Show what it holds right now. Connect a system, reword what agents are told about it, choose further rooms that are shown its records, and choose whether each action waits for approval. |
+| Standing work | Manage the office | Set up a request the office files by itself every day, every weekday or every week, with its title, details and whether it is urgent. Pause one, remove one, or file it now. Not available in the demo office. |
 | People and agents | Manage people and agents | Add an AI agent or a playbook agent with a desk and a role. An agent added with no name is given one that nobody in the office has. Choose an agent's provider and model, or write its playbook. Rename anyone, change their role, or move their desk. Remove someone who has no history. |
 | Roles and access | Manage roles | Three parts under one page. Roles: add, rename or remove a role. Permissions: tick what each role held by people may do. Room access: Tick allow or deny for each scope in each room, or set a whole row in one choice: work here, look in, walk through, keep out or not set. |
 | Access rules | Manage access | See every individual rule in a table and revoke one. Add rules for a person or agent by ticking cells and giving a reason. |
@@ -625,7 +654,7 @@ flowchart TB
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>61 tables in 3NF")]
+  db[("SQLite<br/>64 tables in 3NF")]
   llm["Anthropic or an OpenAI<br/>compatible service"]
 
   hook -->|"action"| http
@@ -695,7 +724,11 @@ lib/server/secrets.ts     encryption for stored API keys
 lib/server/accessTokens.ts   scoped permission tokens
 lib/server/invites.ts     inviting people
 lib/server/providers.ts   an office's AI providers and the runtime each AI agent gets
-lib/agentState.ts         what someone at a desk is doing right now
+lib/agentState.ts         what someone at a desk is doing right now, and who is on a task
+lib/recall.ts             the closed tasks that bear on the one in hand
+lib/standing.ts           how often standing work is filed, and when next
+lib/report.ts             the counts behind the report
+lib/setup.ts              what a new office still needs
 lib/server/chat.ts        direct messages, read state, and what a model is shown for a conversation
 lib/sampleOffice.ts       the demo's distributor as an office of one's own, with AI agents
 lib/server/systems.ts     connected systems: storage, live records, carrying out operations
@@ -870,6 +903,14 @@ flowchart LR
   rt --> clean["Validate and trim<br/>the reply"]
   clean --> engine["Engine applies it"]
 ```
+
+The same gate decides two more things an agent is given. Documents attached
+to the task go to every agent that works it. Closed tasks that share an
+account, part or order number with the task in hand are looked up, and for
+each one the agent receives the last result said in a room it holds `read`
+on. A closed task whose results it may not read is left out altogether. The
+prompt says these tasks are finished and that the live records decide what
+is true now.
 
 An agent without `read` on Finance never receives Finance's records or
 messages, whichever kind of agent it is. If it needs them, it has to say so in
@@ -1062,6 +1103,7 @@ last reason, until `r-02` is revoked.
 | `POST /api/office/actions` | signed in | Apply one action |
 | `POST /api/admin` | the permission for that change | Apply one set-up change |
 | `POST /api/admin/providers` | Manage AI providers, password account. For one's own: a password account | Add, change, remove or test an AI provider of the office, or of the signed-in account |
+| `POST /api/admin/standing` | Manage the office | Add, change, pause, resume or remove standing work, or file one now |
 | `POST /api/admin/systems` | Manage rooms, and read on the room | Read a connected system's live records. With a password account: connect, change or disconnect one |
 | `POST /api/chat` | signed in. For an agent: may enter its room | Send a direct message to a person or an agent, or mark a conversation or a note as opened |
 | `POST /api/offices` | signed in | Add an empty or a sample office, switch to another, or remove one. In the demo, with Manage the office: reset it |
@@ -1086,7 +1128,7 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 61 tables. One database holds many offices. The schema is in
+SQLite, one file, 64 tables. One database holds many offices. The schema is in
 third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
@@ -1352,6 +1394,11 @@ erDiagram
   tasks ||--o{ task_events : history
   tasks ||--o{ task_open_questions : "waits on"
   tasks ||--o{ task_assumptions : "rests on"
+  tasks ||--o{ task_documents : carries
+  tasks ||--o{ pending_work : "still owes"
+  participants ||--o{ pending_work : "has been given"
+  offices ||--o{ standing_requests : "files by itself"
+  standing_requests o|--o| tasks : "last filed"
   messages ||--o| message_questions : is
   message_questions ||--o{ message_question_options : offers
   message_questions ||--o| message_held_actions : "asks approval for"
@@ -1382,6 +1429,36 @@ erDiagram
     text wait_reason
     integer step_owed
     integer urgent
+  }
+  task_documents {
+    text id PK
+    text task_id FK
+    int position
+    text name
+    text body
+    text added_by FK
+    int added_at
+  }
+  pending_work {
+    text participant_id PK
+    text task_id PK
+    text kind PK
+    text note_id PK
+    integer after_action
+    int tries
+    int created_at
+  }
+  standing_requests {
+    text id PK
+    text office_id FK
+    text title
+    text detail
+    integer urgent
+    text every
+    int next_at
+    text created_by FK
+    text last_task_id FK
+    integer active
   }
   messages {
     text id PK
@@ -1557,7 +1634,7 @@ Each choice is here because it removed something to run or to explain.
 | Framework | Next.js 16, App Router, as a Node server | One project holds the page, the API and the server logic, so the demo deploys as a single container. Route handlers are plain functions, which keeps the API easy to read. |
 | Language | TypeScript 7, strict | The access model and the engine are mostly types and pure functions. Strict types catch a wrong room id or a missing field before anything runs. |
 | 3D | three.js through @react-three/fiber and drei | The scene is declared as React components next to the panels that describe it, and it re-renders from the same state. No separate game loop to keep in step with the UI. |
-| Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (61 tables in third normal form), so moving to Postgres is a change of driver. |
+| Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (64 tables in third normal form), so moving to Postgres is a change of driver. |
 | Sign-in | jose for signed tokens, Node's scrypt for passwords | Small, standard and dependency-light. No outside identity service is needed for the demo to be public. |
 | AI providers | The Anthropic SDK, and plain `fetch` for anything that speaks the OpenAI chat interface | Two connection styles cover nearly every hosted and self-hosted model, so an office is not tied to one vendor. zod checks every reply before the engine sees it. |
 | Checks | tsx running plain scripts | No test framework to learn. Each script prints what it checks in a sentence, and the Docker image refuses to build unless all of them pass. |
@@ -1570,7 +1647,7 @@ what exists, and what a real deployment would add.
 
 | Area | In this repository | A production version would add |
 | --- | --- | --- |
-| Orchestration | The engine applies one action at a time. After each one the work it leaves goes onto the queues of the agents concerned, who work through them side by side. Models and connected systems are asked outside the turn that changes the office. | A durable job queue, so work in flight survives a restart and several servers can share it. Today that queue lives in one server's memory. |
+| Orchestration | The engine applies one action at a time. After each one the work it leaves goes onto the queues of the agents concerned, who work through them side by side. Models and connected systems are asked outside the turn that changes the office. | A job queue several servers can share. Today each agent's queue lives in one server's memory, with every item also written to the database so that it survives a restart. |
 | State updates | Every change goes through the server, is checked against the person's permissions, stored, and written to the audit log. Browsers re-read every five seconds, or every second and a half while agents work. | Updates pushed to the browser over a WebSocket or server-sent events, so a change shows the moment it happens. |
 | Persistence | SQLite, with migrations that bring an older database forward on start. | Postgres, for more than one server process, point-in-time backups and row-level locking. The schema carries over as it is. |
 | Real AI | Working today: several providers per office or per account, a model per agent, structured replies that are validated, a retry on an unreadable reply, and limits enforced outside the model. | Streaming, so a long step shows progress. Per-office spending limits and usage reports. Tools an agent can call during a step, in place of a fixed snapshot of each system. |
@@ -1762,11 +1839,20 @@ playbook.
   use. No existing ordering, accounting or carrier system does, so each would
   need a small adapter in front of it, and none has been tried. A playbook's
   action has fixed field values.
-- The agents' queues are held in the server's memory. What survives a restart
-  is stored with each task: whether its owner still owes a step, and whether
-  it waits for a day. Within a minute of starting, the office asks again each
-  agent that owes a step and hands on each task that is finished at its stage,
-  up to three times per task. After that a person moves it on with Advance.
+- The agents' queues are held in the server's memory, and each item on them
+  is also written to the database until it is done. After a restart the
+  office reads them back within a minute. An item that fails three times is
+  left for a person, and any action a person takes on the task starts the
+  count again.
+- Earlier work is found by shared account, part and order numbers and by
+  uncommon words in the title and details. It is not a search by meaning.
+  At most three closed tasks are shown, each cut to its last result.
+- Standing work is filed when the server's clock passes the time, checked
+  once a minute. If the server was down at that time, one request is filed
+  when it comes back and the missed ones are skipped. The demo office has
+  none.
+- A document is text only, read in the browser and stored whole. Long
+  documents are shortened in what an agent is shown, with a line saying so.
 - An agent that is asked again because the task changed while it was thinking
   costs a second model call.
 - A wait is stored with the task, so it survives a restart. The office looks
@@ -1806,13 +1892,13 @@ of a human one.
 
 | A real office has | Here |
 | --- | --- |
-| Memory across jobs: who paid late, which branch miscounts | Each task starts from the records and its own thread. Nothing learned on one job carries to the next unless a person writes it into a room's records. |
-| Initiative: someone notices stock running low and starts the work | Agents move only when a request is filed or a note reaches them. |
+| Memory across jobs: who paid late, which branch miscounts | An agent is shown up to three closed tasks that share an account, part or order number with the one in hand, each with its result, and a person can keep a line from a thread as a room record in one click. Agents do not write records themselves, and earlier work is matched on shared numbers and uncommon words, so a related job described in different terms is missed. |
+| Initiative: someone notices stock running low and starts the work | The office files standing work by itself on a schedule a person sets, such as a stock check every Monday. Agents still do not decide for themselves that something needs doing. |
 | Time: due dates, a reminder on Friday, a job that waits for a delivery | A task can wait for one day at a time and is picked up again then. There are no due dates, no reminders to people and no working hours, and an agent takes the day from the thread or the records and cannot look ahead in a calendar. |
-| Conversation: two rooms talk a problem through | Agents leave each other notes of up to 60 words on a task. They cannot meet, and a reviewer cannot ask the worker a question without sending the work back. |
-| Parallel work: Finance and Purchasing on the same order at once | A task has one owner in one room. Colleagues help through notes, which is where most faults found in testing came from. |
+| Conversation: two rooms talk a problem through | Agents leave each other notes of up to 120 words on a task and answer them in turn. They cannot meet, and a reviewer cannot ask the worker a question without sending the work back. |
+| Parallel work: Finance and Purchasing on the same order at once | A task has one owner in one room. Colleagues do their parts at the same time through notes, each from its own queue. Those parts are written down, tried again when they fail, and the task is not handed on until they are done. The task panel names who is on it. There is still no second owner. |
 | Priority and load: this one is urgent, that desk is swamped | A person can mark a task urgent, and agents take urgent work first. The report and the status line show what each agent is on and how much waits behind it. There is no finer order than urgent or not, no due date, and work is not moved from a busy agent to a free one. |
-| Documents: a purchase order as a PDF, an email from the dealer | A request is a title and a paragraph. Nothing can be attached, and nothing is sent outside the office. |
+| Documents: a purchase order as a PDF, an email from the dealer | Up to five text documents of 20,000 characters each can be attached to a task: text, CSV, Markdown, a saved email. PDFs, images and spreadsheets are turned away, and nothing is sent outside the office. |
 | A different path for different work | Every task passes all four stages. A stage with nothing to do says so in a line and passes it on. |
 | Reporting: how did we do last month | A report counts everything since the office began. It cannot be narrowed to a period, compared with an earlier one, or exported. |
 
@@ -1918,14 +2004,14 @@ sample services the same way.
 | --- | --- | --- |
 | Access precedence, expiry, read gating, walking the hall and through doors, doorways closed to someone who may not enter, desk placement | `npm run check` | 36 of 36 pass |
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
-| Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
+| Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 48 of 48 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, and a need passed to a colleague | `npm run agents` | 155 of 155 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, a need passed to a colleague, documents on a task, earlier work shown within an agent's access, records kept from a thread, and the report | `npm run agents` | 179 of 179 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 56 of 56 pass |
-| Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, and an office built from nothing | `npm run admin` | 93 of 93 pass |
-| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
+| Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, and an office built from nothing | `npm run admin` | 101 of 101 pass |
+| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 87 of 87 pass |
 | The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 152 of 152 pass |
-| Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, providers that belong to an account, and the sample office | `npm run loop` | 71 of 71 pass |
+| Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, work that is written down and picked up after a failure or a restart, urgent work first, standing work, who is on a task, providers that belong to an account, and the sample office | `npm run loop` | 102 of 102 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
