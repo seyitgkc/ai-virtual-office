@@ -228,6 +228,10 @@ Your reply:
 /** The standing instructions with the fixed marker. Each real call makes its own. */
 export const SYSTEM_PROMPT = systemPrompt(FIXED_MARKER);
 
+/** How much of the attached documents an agent is shown: in all, and of any one. */
+const DOCUMENT_BUDGET = 24_000;
+const DOCUMENT_SHARE = 12_000;
+
 const clock = (ms: number): string =>
   new Date(ms).toLocaleTimeString("en-CA", {
     hour: "2-digit",
@@ -251,6 +255,27 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
   lines.push("");
   lines.push(`Task ${task.id}: ${asData("title", task.title)}`);
   lines.push(`Request: ${asData("request", task.detail)}`);
+  // What came with the request goes to every agent that works the task, as
+  // the request itself does. A long document is cut, and the agent is told.
+  if (task.documents && task.documents.length > 0) {
+    lines.push("Documents attached to the request:");
+    let room = DOCUMENT_BUDGET;
+    for (const d of task.documents) {
+      const shown = d.body.slice(0, Math.max(0, Math.min(room, DOCUMENT_SHARE)));
+      room -= shown.length;
+      if (shown.length === 0) {
+        lines.push(
+          `- ${asData("document_name", d.name)} (${d.body.length} characters long; not shown here, because the documents before it took the space. Do not assume anything about what it says.)`,
+        );
+        continue;
+      }
+      const cut =
+        shown.length < d.body.length
+          ? ` (${d.body.length} characters long; only the first ${shown.length} are shown here, so do not assume anything about the rest)`
+          : "";
+      lines.push(`- ${asData("document_name", d.name)}${cut}: ${asData("document", shown)}`);
+    }
+  }
   lines.push(`Your step: ${stageSpec(stage).label}, working in the room "${task.roomId}".`);
   if (input.now !== undefined) {
     const today = new Date(input.now);

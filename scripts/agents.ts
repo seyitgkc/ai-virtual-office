@@ -343,6 +343,32 @@ async function main(): Promise<void> {
   expect("the person who asked for the work may mark it urgent", asks("p-sam"), true);
   expect("an untrusted request carries the mark only as a plain yes", JSON.stringify(parseAction({ type: "SUBMIT_REQUEST", title: "A", detail: "B", urgent: "yes" })).includes("urgent"), false);
 
+  console.log("\n-- documents that come with a request --");
+  const email = "From: orders@northline.example\nPlease send 6 x GREE-MZ-12 to Richmond Hill by Friday.";
+  let papers = (await reduce(withAi, { type: "SUBMIT_REQUEST", title: "Order 4830", detail: "See the dealer's email.", requestedById: "p-sam", documents: [{ name: "dealer-email.txt", body: email }] }, calm)).state;
+  const papersId = papers.office.tasks.at(-1)!.id;
+  const papersTask = () => papers.office.tasks.find((t) => t.id === papersId)!;
+  expect("a request can carry a document", papersTask().documents?.map((d) => `${d.name} ${d.body.length}`).join(), `dealer-email.txt ${email.length}`);
+  const shownDoc = buildStepPrompt(calm.inputs.at(-1)!);
+  expect("the agent is shown it, marked as data", shownDoc.includes('<office_data kind="document">From: orders@northline.example'), true);
+  for (let i = 0; i < 2; i++) papers = (await reduce(papers, { type: "ADVANCE", taskId: papersId }, calm)).state;
+  expect("and so is the agent at a later stage, in another room", buildStepPrompt(calm.inputs.at(-1)!).includes("Please send 6 x GREE-MZ-12"), true);
+  const addedDoc = await reduce(papers, { type: "ADD_DOCUMENT", taskId: papersId, name: "serials.csv", body: "serial\nGMZ12-204551", byId: "p-sam" }, calm);
+  papers = addedDoc.state;
+  expect("a document can be added later", papersTask().documents?.map((d) => d.name).join(), "dealer-email.txt,serials.csv");
+  expect("the thread says who added it", papers.office.messages.at(-1)!.body, 'Sam Okafor attached the document "serials.csv".');
+  expect("and whoever has the task is woken to read it", addedDoc.wake.some((w) => w.kind === "resume" && w.participantId === papersTask().ownerId), true);
+  const long = "x".repeat(20_000);
+  const capped = buildStepPrompt({ ...calm.inputs.at(-1)!, task: { ...papersTask(), documents: [1, 2, 3].map((n) => ({ id: `d${n}`, name: `long-${n}.txt`, body: long, addedById: "p-sam", at: 0 })) } });
+  expect("a long document is cut and the agent is told how much it was shown", capped.includes("(20000 characters long; only the first 12000 are shown here, so do not assume anything about the rest)"), true);
+  expect("and a document there is no space left for is named as not shown", capped.includes("long-3.txt</office_data> (20000 characters long; not shown here, because the documents before it took the space."), true);
+  expect("a file that is not text is refused whole", parseAction({ type: "SUBMIT_REQUEST", title: "A", detail: "B", documents: [{ name: "scan.pdf", body: "%PDF\u0000\u0001" }] }), null);
+  expect("and so is one that is too long", parseAction({ type: "ADD_DOCUMENT", taskId: "T-1", name: "big.txt", body: "y".repeat(20_001) }), null);
+  expect("a plain one is accepted", parseAction({ type: "ADD_DOCUMENT", taskId: "T-1", name: "note.txt", body: "Two lines\nof text." })?.type, "ADD_DOCUMENT");
+  let full = papers;
+  for (let n = 0; n < 5; n++) full = (await reduce(full, { type: "ADD_DOCUMENT", taskId: papersId, name: `more-${n}.txt`, body: "text", byId: "p-sam" }, calm)).state;
+  expect("a task carries five documents at most", full.office.tasks.find((t) => t.id === papersId)!.documents?.length, 5);
+
   console.log("\n-- the report --");
   const demo = workReport(initialState.office);
   expect("the demo's three tasks are counted", `${demo.filed} filed, ${demo.open} open, ${demo.completed} completed`, "3 filed, 2 open, 1 completed");

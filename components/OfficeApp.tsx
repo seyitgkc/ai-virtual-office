@@ -198,8 +198,15 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           intakeRoomName={
             office.floorplan.rooms.find((r) => r.id === office.stageRooms.intake)?.name ?? "the office"
           }
-          onSubmit={(title, detail, urgent) =>
-            dispatch({ type: "SUBMIT_REQUEST", title, detail, requestedById: viewer.id, ...(urgent ? { urgent: true } : {}) })
+          onSubmit={(title, detail, urgent, documents) =>
+            dispatch({
+              type: "SUBMIT_REQUEST",
+              title,
+              detail,
+              requestedById: viewer.id,
+              ...(urgent ? { urgent: true } : {}),
+              ...(documents.length > 0 ? { documents } : {}),
+            })
           }
         />
         {mode === "walk" ? (

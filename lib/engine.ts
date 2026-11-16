@@ -35,7 +35,9 @@ import {
   type ParticipantId,
   type QuestionMessage,
   type RoomId,
+  DOCUMENT_LIMITS,
   type Task,
+  type TaskDocument,
   type TaskId,
   type TaskStatus,
   type WorkflowStage,
@@ -279,7 +281,16 @@ export interface EngineState {
 }
 
 export type Action =
-  | { type: "SUBMIT_REQUEST"; title: string; detail: string; requestedById: ParticipantId; urgent?: boolean }
+  | {
+      type: "SUBMIT_REQUEST";
+      title: string;
+      detail: string;
+      requestedById: ParticipantId;
+      urgent?: boolean;
+      documents?: { name: string; body: string }[];
+    }
+  /** A person adds a document to a task that is still open. */
+  | { type: "ADD_DOCUMENT"; taskId: TaskId; name: string; body: string; byId: ParticipantId }
   /** A person marks a task urgent, or takes the mark off. */
   | { type: "SET_URGENT"; taskId: TaskId; urgent: boolean; byId: ParticipantId }
   | { type: "ADVANCE"; taskId: TaskId }
@@ -523,6 +534,17 @@ export async function reduce(
         createdAt: now,
         closedAt: null,
         ...(action.urgent ? { urgent: true } : {}),
+        ...(action.documents && action.documents.length > 0
+          ? {
+              documents: action.documents.slice(0, DOCUMENT_LIMITS.perTask).map((d) => ({
+                id: nextId("d"),
+                name: d.name.trim().slice(0, DOCUMENT_LIMITS.name),
+                body: d.body.slice(0, DOCUMENT_LIMITS.characters),
+                addedById: action.requestedById,
+                at: now,
+              })),
+            }
+          : {}),
       };
 
       const request: Message = {
@@ -975,6 +997,54 @@ export async function reduce(
     }
 
     // -- the review gate ----------------------------------------------------
+    case "ADD_DOCUMENT": {
+      const task = findTask(office, action.taskId);
+      const by = findParticipant(office, action.byId);
+      const held = task.documents ?? [];
+      if (task.closedAt !== null) {
+        notes.push(`${task.id} is closed, so nothing can be added to it`);
+        return done();
+      }
+      if (held.length >= DOCUMENT_LIMITS.perTask) {
+        notes.push(`${task.id} already carries ${DOCUMENT_LIMITS.perTask} documents, which is the most a task can`);
+        return done();
+      }
+      const name = action.name.trim().slice(0, DOCUMENT_LIMITS.name);
+      const added: TaskDocument = {
+        id: nextId("d"),
+        name,
+        body: action.body.slice(0, DOCUMENT_LIMITS.characters),
+        addedById: by.id,
+        at: now,
+      };
+      const said: Message = {
+        id: nextId("m"),
+        kind: "status",
+        taskId: task.id,
+        fromId: by.id,
+        audience: { to: "room", id: task.roomId },
+        roomId: task.roomId,
+        at: now,
+        body: `${by.displayName} attached the document "${name}".`,
+      };
+      emitted.push(said);
+      office = {
+        ...replaceTask(office, {
+          ...task,
+          documents: [...held, added],
+          history: [...task.history, { at: now, summary: `${by.displayName} attached "${name}"`, messageId: said.id }],
+        }),
+        messages: [...office.messages, said],
+      };
+      notes.push(`${by.displayName} attached "${name}" to ${task.id}`);
+      // Whoever has the task reads what was added before the task moves on.
+      const owner = office.participants.find((p) => p.id === task.ownerId);
+      if (owner?.agentType === "ai" && task.status === openStatus(task.stage)) {
+        wake.push({ kind: "resume", taskId: task.id, participantId: owner.id });
+      }
+      return done();
+    }
+
     case "SET_URGENT": {
       const task = findTask(office, action.taskId);
       const by = findParticipant(office, action.byId);

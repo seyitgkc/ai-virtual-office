@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -353,6 +353,18 @@ CREATE TABLE tasks (
   -- 1 when a person marked the task urgent, which puts it ahead on every queue.
   urgent       INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
   CHECK ((wait_until IS NULL) = (wait_reason IS NULL))
+) STRICT;
+
+-- Text documents attached to a task, in the order they were added.
+CREATE TABLE task_documents (
+  id        TEXT PRIMARY KEY,
+  task_id   TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  position  INTEGER NOT NULL,
+  name      TEXT NOT NULL,
+  body      TEXT NOT NULL,
+  added_by  TEXT NOT NULL REFERENCES participants(id),
+  added_at  INTEGER NOT NULL,
+  UNIQUE (task_id, position)
 ) STRICT;
 
 -- What an agent has been given and has not finished: taking its step on a
@@ -1152,6 +1164,20 @@ CREATE TABLE pending_work (
   tries          INTEGER NOT NULL DEFAULT 0,
   created_at     INTEGER NOT NULL,
   PRIMARY KEY (participant_id, task_id, kind, note_id)
+) STRICT;
+`,
+  // Version 17 lets a task carry text documents.
+  16: /* sql */ `
+-- Text documents attached to a task, in the order they were added.
+CREATE TABLE task_documents (
+  id        TEXT PRIMARY KEY,
+  task_id   TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  position  INTEGER NOT NULL,
+  name      TEXT NOT NULL,
+  body      TEXT NOT NULL,
+  added_by  TEXT NOT NULL REFERENCES participants(id),
+  added_at  INTEGER NOT NULL,
+  UNIQUE (task_id, position)
 ) STRICT;
 `,
 };

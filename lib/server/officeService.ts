@@ -436,6 +436,7 @@ function auditSubject(action: Action, before: Office, after: Office): AuditSubje
     case "DECIDE":
     case "WAKE_TASK":
     case "SET_URGENT":
+    case "ADD_DOCUMENT":
       taskId = action.taskId;
       break;
     case "REASSIGN":

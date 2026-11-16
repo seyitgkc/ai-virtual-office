@@ -620,6 +620,22 @@ export interface TaskEvent {
   decision?: AccessDecision;
 }
 
+/**
+ * A text document that came with a request or was added to it later: a
+ * dealer's email, a list of serial numbers, a page of terms. It goes wherever
+ * the request goes, so every agent that works the task is shown it.
+ */
+export interface TaskDocument {
+  id: string;
+  name: string;
+  body: string;
+  addedById: ParticipantId;
+  at: number;
+}
+
+/** How many documents a task can carry, and how long each may be. */
+export const DOCUMENT_LIMITS = { perTask: 5, characters: 20_000, name: 80 } as const;
+
 export interface Task {
   id: TaskId;
   title: string;
@@ -649,6 +665,8 @@ export interface Task {
   owed?: boolean;
   /** Set by a person. An urgent task is taken ahead of the others on every agent's queue. */
   urgent?: boolean;
+  /** Documents attached to the request, in the order they were added. */
+  documents?: TaskDocument[];
 }
 
 // ---------------------------------------------------------------------------

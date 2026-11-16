@@ -11,6 +11,7 @@
 import {
   canOwnWorkIn,
   canRead,
+  DOCUMENT_LIMITS,
   may,
   resolveAccess,
   type AccessContext,
@@ -64,6 +65,18 @@ export function authorize(
     case "WAKE_TASK": {
       const task = office.tasks.find((t) => t.id === action.taskId);
       return task ? mayActIn(office, ctx, actor, task.roomId) : no("No such task.");
+    }
+
+    // A document can be added by whoever asked for the work, or by anyone who
+    // could move it on.
+    case "ADD_DOCUMENT": {
+      const task = office.tasks.find((t) => t.id === action.taskId);
+      if (!task) return no("No such task.");
+      if (task.closedAt !== null) return no("That task is closed.");
+      if ((task.documents ?? []).length >= DOCUMENT_LIMITS.perTask) {
+        return no(`A task can carry ${DOCUMENT_LIMITS.perTask} documents, and this one already does.`);
+      }
+      return task.requestedById === actor.id ? yes : mayActIn(office, ctx, actor, task.roomId);
     }
 
     // Whoever asked for the work may say it is urgent. So may anyone who
@@ -132,6 +145,7 @@ export function stampActor(action: Action, actorId: string): Action {
     case "DECIDE":
     case "WAKE_TASK":
     case "SET_URGENT":
+    case "ADD_DOCUMENT":
       return { ...action, byId: actorId };
     case "ADVANCE":
     case "AGENT_RESUME":
@@ -141,6 +155,27 @@ export function stampActor(action: Action, actorId: string): Action {
 }
 
 const SCOPES: AccessScope[] = ["enter", "read", "act"];
+
+/**
+ * Documents as they arrive from a browser: a few named pieces of plain text.
+ * Returns null when any of them is not that, so the whole request is refused
+ * and nothing is quietly dropped.
+ */
+function documents(value: unknown): { name: string; body: string }[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > DOCUMENT_LIMITS.perTask) return null;
+  const read: { name: string; body: string }[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") return null;
+    const { name, body } = item as Record<string, unknown>;
+    if (typeof name !== "string" || name.trim().length === 0 || name.length > DOCUMENT_LIMITS.name) return null;
+    if (typeof body !== "string" || body.trim().length === 0 || body.length > DOCUMENT_LIMITS.characters) return null;
+    // A file that is not text shows itself by the characters text never holds.
+    if (/[\u0000-\u0008\u000e-\u001f]/.test(body)) return null;
+    read.push({ name: name.trim(), body });
+  }
+  return read;
+}
 const text = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.trim().length > 0 && value.length <= max;
 
@@ -153,13 +188,14 @@ export function parseAction(input: unknown): Action | null {
   const a = input as Record<string, unknown>;
   switch (a.type) {
     case "SUBMIT_REQUEST":
-      return text(a.title, 120) && text(a.detail, 600)
+      return text(a.title, 120) && text(a.detail, 2000) && (a.documents === undefined || documents(a.documents) !== null)
         ? {
             type: "SUBMIT_REQUEST",
             title: a.title.trim(),
             detail: a.detail.trim(),
             requestedById: "",
             ...(a.urgent === true ? { urgent: true } : {}),
+            ...((documents(a.documents) ?? []).length > 0 ? { documents: documents(a.documents)! } : {}),
           }
         : null;
     case "ADVANCE":
@@ -215,6 +251,10 @@ export function parseAction(input: unknown): Action | null {
         : null;
     case "WAKE_TASK":
       return text(a.taskId, 40) ? { type: "WAKE_TASK", taskId: a.taskId, byId: "" } : null;
+    case "ADD_DOCUMENT":
+      return text(a.taskId, 40) && documents([{ name: a.name, body: a.body }]) !== null
+        ? { type: "ADD_DOCUMENT", taskId: a.taskId, ...documents([{ name: a.name, body: a.body }])![0], byId: "" }
+        : null;
     case "SET_URGENT":
       return text(a.taskId, 40) && typeof a.urgent === "boolean"
         ? { type: "SET_URGENT", taskId: a.taskId, urgent: a.urgent, byId: "" }

@@ -67,6 +67,26 @@ async function main(): Promise<void> {
     requestedById: "p-dana",
   });
   const task = () => state.office.tasks[state.office.tasks.length - 1];
+  await apply("submit an urgent request with two documents", {
+    type: "SUBMIT_REQUEST",
+    title: "Dealer order 4503: see the email",
+    detail: "The dealer's email and their serial list are attached.",
+    requestedById: "p-dana",
+    urgent: true,
+    documents: [
+      { name: "dealer-email.txt", body: "From: orders@northline.example\nSix heads, by Friday." },
+      { name: "serials.csv", body: "serial\nGMZ12-204551\nGMZ12-204552" },
+    ],
+  });
+  expect("its documents are stored in order", (all(db, "SELECT name FROM task_documents ORDER BY position") as { name: string }[]).map((d) => d.name).join(), "dealer-email.txt,serials.csv");
+  await apply("add a third document", { type: "ADD_DOCUMENT", taskId: task().id, name: "terms.md", body: "Net 30.", byId: "p-dana" });
+  await apply("take the urgent mark off", { type: "SET_URGENT", taskId: task().id, urgent: false, byId: "p-dana" });
+  await apply("submit a request", {
+    type: "SUBMIT_REQUEST",
+    title: "Dealer order 4504: 4x multi-zone heads",
+    detail: "Four multi-zone heads with dealer pricing.",
+    requestedById: "p-dana",
+  });
   await apply("answer the intake question", {
     type: "ANSWER_QUESTION",
     questionId: task().openQuestionIds[0],

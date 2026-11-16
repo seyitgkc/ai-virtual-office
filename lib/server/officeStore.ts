@@ -469,6 +469,23 @@ function writeTask(db: Db, officeId: string, task: Task): void {
     );
   }
 
+  // A task's documents only ever grow, so the ones not stored yet are added.
+  const kept = new Set(all<{ id: string }>(db, "SELECT id FROM task_documents WHERE task_id = ?", task.id).map((d) => d.id));
+  (task.documents ?? []).forEach((d, position) => {
+    if (kept.has(d.id)) return;
+    run(
+      db,
+      "INSERT INTO task_documents (id, task_id, position, name, body, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      d.id,
+      task.id,
+      position,
+      d.name,
+      d.body,
+      d.addedById,
+      d.at,
+    );
+  });
+
   const decisionPrefix = `task:${task.id}:`;
   run(db, "DELETE FROM task_events WHERE task_id = ?", task.id);
   deleteDecisionsWithPrefix(db, decisionPrefix);
@@ -1275,6 +1292,13 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     }>(db, "SELECT * FROM task_events ORDER BY task_id, position"),
     (e) => e.task_id,
   );
+  const documents = groupBy(
+    all<{ id: string; task_id: string; name: string; body: string; added_by: string; added_at: number }>(
+      db,
+      "SELECT id, task_id, name, body, added_by, added_at FROM task_documents ORDER BY task_id, position",
+    ),
+    (d) => d.task_id,
+  );
   const openQuestions = groupBy(
     all<{ task_id: string; message_id: string }>(
       db,
@@ -1328,6 +1352,9 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     ...(t.wait_until !== null ? { wait: { until: t.wait_until, reason: t.wait_reason ?? "" } } : {}),
     ...(t.step_owed === 1 ? { owed: true } : {}),
     ...(t.urgent === 1 ? { urgent: true } : {}),
+    ...(documents.has(t.id)
+      ? { documents: documents.get(t.id)!.map((d) => ({ id: d.id, name: d.name, body: d.body, addedById: d.added_by, at: d.added_at })) }
+      : {}),
   }));
 
   // -- messages

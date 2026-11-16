@@ -4,6 +4,7 @@ import type { SetupStep, SetupTab } from "../lib/setup";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ALL_SCOPES,
+  DOCUMENT_LIMITS,
   hasConflict,
   may,
   resolveAccess,
@@ -269,6 +270,64 @@ function SendBackBox({ disabled, onSend }: { disabled: boolean; onSend: (comment
   );
 }
 
+/**
+ * Read files a person picked as text. A file that is too long, empty or not
+ * text is turned away with the reason, so nothing reaches the office cut or
+ * garbled.
+ */
+async function readDocuments(files: FileList | null): Promise<{ read: { name: string; body: string }[]; problem: string | null }> {
+  const read: { name: string; body: string }[] = [];
+  for (const file of Array.from(files ?? [])) {
+    const body = await file.text();
+    const name = file.name.slice(0, DOCUMENT_LIMITS.name);
+    if (body.trim().length === 0) return { read, problem: `${file.name} is empty.` };
+    if (/[\u0000-\u0008\u000e-\u001f]/.test(body)) {
+      return { read, problem: `${file.name} is not a text file. Text, CSV, Markdown and saved emails can be attached.` };
+    }
+    if (body.length > DOCUMENT_LIMITS.characters) {
+      return { read, problem: `${file.name} is ${body.length.toLocaleString("en-CA")} characters long. The most a document can be is ${DOCUMENT_LIMITS.characters.toLocaleString("en-CA")}.` };
+    }
+    read.push({ name, body });
+  }
+  return { read, problem: null };
+}
+
+/** A control for picking text files, with whatever went wrong said beneath it. */
+function DocumentPicker({
+  label,
+  room,
+  onPicked,
+}: {
+  label: string;
+  /** How many more documents can still be added. */
+  room: number;
+  onPicked: (documents: { name: string; body: string }[]) => void;
+}) {
+  const [problem, setProblem] = useState<string | null>(null);
+  return (
+    <div className="document-picker">
+      <label className="btn">
+        {label}
+        <input
+          type="file"
+          multiple
+          accept=".txt,.csv,.md,.eml,.log,.json,.tsv,text/*"
+          onChange={(e) => {
+            const input = e.currentTarget;
+            void readDocuments(input.files).then(({ read, problem: found }) => {
+              const fits = read.slice(0, room);
+              setProblem(found ?? (read.length > room ? `Only ${room} more can be attached, so the rest were left out.` : null));
+              if (fits.length > 0) onPicked(fits);
+              input.value = "";
+            });
+          }}
+        />
+      </label>
+      {problem && <div className="document-problem">{problem}</div>}
+    </div>
+  );
+}
+
 const SAMPLE_REQUEST = {
   title: "Dealer order 4502: 4x multi-zone heads",
   detail:
@@ -284,12 +343,13 @@ function RequestForm({
   /** Start from the demo's sample order. Only the demo office does. */
   sample: boolean;
   intakeRoomName: string;
-  onSubmit: (title: string, detail: string, urgent: boolean) => void;
+  onSubmit: (title: string, detail: string, urgent: boolean, documents: { name: string; body: string }[]) => void;
   onCancel: () => void;
 }) {
   const [title, setTitle] = useState(sample ? SAMPLE_REQUEST.title : "");
   const [detail, setDetail] = useState(sample ? SAMPLE_REQUEST.detail : "");
   const [urgent, setUrgent] = useState(false);
+  const [attached, setAttached] = useState<{ name: string; body: string }[]>([]);
   const ready = title.trim().length > 0 && detail.trim().length > 0;
 
   return (
@@ -297,7 +357,7 @@ function RequestForm({
       className="request-form"
       onSubmit={(e) => {
         e.preventDefault();
-        if (ready) onSubmit(title.trim(), detail.trim(), urgent);
+        if (ready) onSubmit(title.trim(), detail.trim(), urgent, attached);
       }}
     >
       <label htmlFor="request-title">Title</label>
@@ -313,10 +373,32 @@ function RequestForm({
         id="request-detail"
         value={detail}
         rows={4}
-        maxLength={400}
+        maxLength={2000}
         placeholder={sample ? undefined : "What is needed, and anything the office should know"}
         onChange={(e) => setDetail(e.target.value)}
       />
+      {attached.length > 0 && (
+        <ul className="document-list">
+          {attached.map((d, index) => (
+            <li key={`${d.name}-${index}`}>
+              <span>
+                {d.name}
+                <span className="document-size">{d.body.length.toLocaleString("en-CA")} characters</span>
+              </span>
+              <button type="button" className="btn" onClick={() => setAttached(attached.filter((_, i) => i !== index))}>
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {attached.length < DOCUMENT_LIMITS.perTask && (
+        <DocumentPicker
+          label="Attach a text document"
+          room={DOCUMENT_LIMITS.perTask - attached.length}
+          onPicked={(more) => setAttached([...attached, ...more])}
+        />
+      )}
       <label className="urgent-box">
         <input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} />
         Urgent. Agents take it ahead of their other work.
@@ -352,7 +434,7 @@ export function TaskList({
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** Resolves to whether the request was accepted. */
-  onSubmit: (title: string, detail: string, urgent: boolean) => Promise<boolean>;
+  onSubmit: (title: string, detail: string, urgent: boolean, documents: { name: string; body: string }[]) => Promise<boolean>;
   /** Why this viewer cannot file a request, or null when they can. */
   submitBlocked: string | null;
 }) {
@@ -384,9 +466,9 @@ export function TaskList({
           <RequestForm
             sample={isDemoOffice}
             intakeRoomName={intakeRoomName}
-            onSubmit={(title, detail, urgent) => {
+            onSubmit={(title, detail, urgent, documents) => {
               // The form stays open with its text when the request is refused.
-              void onSubmit(title, detail, urgent).then((accepted) => {
+              void onSubmit(title, detail, urgent, documents).then((accepted) => {
                 if (accepted) setComposing(false);
               });
             }}
@@ -645,6 +727,7 @@ function TaskInspector({
   const mayDecide = may(office, viewer, "decide_reviews");
   const mayAdvance = authorize(office, ctx, viewer, { type: "ADVANCE", taskId: task.id });
   const mayMark = authorize(office, ctx, viewer, { type: "SET_URGENT", taskId: task.id, urgent: true, byId: viewer.id });
+  const mayAttach = authorize(office, ctx, viewer, { type: "ADD_DOCUMENT", taskId: task.id, name: "-", body: "-", byId: viewer.id });
 
   const target = nextStage(task.stage);
   const targetRoom = target ? (roomForStage(office, target) ?? task.roomId) : null;
@@ -723,6 +806,32 @@ function TaskInspector({
             </div>
           </div>
         </div>
+
+        {((task.documents?.length ?? 0) > 0 || (task.closedAt === null && mayAttach.allowed)) && (
+          <div className="sec">
+            <h3>Documents ({task.documents?.length ?? 0})</h3>
+            {(task.documents ?? []).map((d) => (
+              <details key={d.id} className="document">
+                <summary>
+                  {d.name}
+                  <span className="document-size">
+                    {d.body.length.toLocaleString("en-CA")} characters, from {name(d.addedById)}
+                  </span>
+                </summary>
+                <pre>{d.body}</pre>
+              </details>
+            ))}
+            {task.closedAt === null && mayAttach.allowed && (
+              <DocumentPicker
+                label="Attach a text document"
+                room={DOCUMENT_LIMITS.perTask - (task.documents?.length ?? 0)}
+                onPicked={(more) => {
+                  for (const d of more) dispatch({ type: "ADD_DOCUMENT", taskId: task.id, name: d.name, body: d.body, byId: supervisor.id });
+                }}
+              />
+            )}
+          </div>
+        )}
 
         {/* ---- what a human can do about it right now ---- */}
         <div className="sec">
