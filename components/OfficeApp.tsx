@@ -41,6 +41,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     officeOp,
     providerOp,
     systemOp,
+    standingOp,
     readSystem,
     talk,
     markOpened,
@@ -326,6 +327,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           officeOp={officeOp}
           providerOp={providerOp}
           systemOp={systemOp}
+          standingOp={standingOp}
           readSystem={readSystem}
           initialTab={settingsTab}
           onClose={() => setSettingsOpen(false)}

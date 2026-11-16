@@ -322,6 +322,44 @@ async function main(): Promise<void> {
   expect("and all four reach review", ["Queue one", "Queue two", "Queue three", "Queue rush"].every((t) => taskOf(view, t).stage === "review"), true);
   slowFor = () => 0;
 
+  console.log("\n-- standing work the office files by itself --");
+  const { nextAfter } = await import("../lib/standing");
+  const monday = Date.parse("2026-11-16T14:00:00Z");
+  const friday = Date.parse("2026-11-20T14:00:00Z");
+  const iso = (at: number) => new Date(at).toISOString().slice(0, 16);
+  expect("a daily request is next due a day later, at the same time", iso(nextAfter(monday, "day", monday)), "2026-11-17T14:00");
+  expect("a weekday one passes over the weekend", iso(nextAfter(friday, "weekday", friday)), "2026-11-23T14:00");
+  expect("a weekly one keeps its day", iso(nextAfter(monday, "week", monday + 9 * 86_400_000)), "2026-11-30T14:00");
+  expect("one long overdue is due at its next turn, with nothing made up for", iso(nextAfter(monday, "day", monday + 30.5 * 86_400_000)), "2026-12-17T14:00");
+
+  steps.length = 0;
+  const soon = Date.now() + 3_600_000;
+  view = await service.saveStandingRequest(await owner(), { title: "Morning stock check", detail: "Look at stock and reorder what is short.", urgent: false, every: "day", firstAt: soon });
+  const standing = async () => service.getView(await owner()).standing[0];
+  expect("it is listed with when it is next due", `${view.standing.length} ${view.standing[0].nextAt === soon} ${view.standing[0].filedAs}`, "1 true Alex Kim");
+  expect("someone who does not manage the office cannot set one up", await refusal(async () => service.saveStandingRequest(await dana(), { title: "No", detail: "No.", urgent: false, every: "day", firstAt: soon })), 403);
+  expect("nothing is filed before its time", await service.fileDueStanding(soon - 1000), 0);
+  expect("when its time comes the office files it", await service.fileDueStanding(soon + 1000), 1);
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  const filedTask = view.office.tasks.find((t) => t.title === "Morning stock check")!;
+  expect("as an ordinary task, in the name of whoever set it up", `${filedTask.requestedById === view.viewer.participantId} ${filedTask.stage}`, "true review");
+  expect("which the agents carried through", steps.includes("Iris:intake") && steps.includes("Ledger:review"), true);
+  expect("the log says the office filed it", view.feed.some((f) => f.text.includes(`The office filed the standing request "Morning stock check" as ${filedTask.id}, for Alex Kim`)), true);
+  expect("its next turn is a day on", (await standing()).nextAt, soon + 86_400_000);
+  expect("it is not filed again while the last one is still open", await service.fileDueStanding(soon + 86_400_000 + 1000), 0);
+  expect("and the log says why", service.getView(await owner()).feed.some((f) => f.text.includes(`was not filed: the last one, ${filedTask.id}, is still open.`)), true);
+  expect("its turn moved on all the same, so it is not tried every minute", (await standing()).nextAt, soon + 2 * 86_400_000);
+  await service.applyAction(await owner(), { type: "DECIDE", taskId: filedTask.id, byId: "", verdict: "approved" });
+  expect("once that one is closed it is filed again", await service.fileDueStanding(soon + 2 * 86_400_000 + 1000), 1);
+  await service.agentsIdle();
+  view = await service.changeStandingRequest(await owner(), (await standing()).id, "pause");
+  expect("a paused one is not filed", await service.fileDueStanding(soon + 30 * 86_400_000), 0);
+  view = await service.fileStandingNow(await owner(), view.standing[0].id).catch(() => view);
+  expect("filing by hand is refused while the last one is open, and says so", await refusal(async () => service.fileStandingNow(await owner(), view.standing[0].id)), 409);
+  view = await service.changeStandingRequest(await owner(), view.standing[0].id, "remove");
+  expect("and it can be removed", view.standing.length, 0);
+
   console.log("\n-- with the setting off, a person moves each task on --");
   await service.applyAdminOperation(await owner(), { type: "SET_AUTO_HANDOFF", on: false });
   steps.length = 0;

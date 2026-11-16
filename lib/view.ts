@@ -1,4 +1,5 @@
 import type { AccessScope, Office, Permission, TaskId } from "./model";
+import type { StandingView } from "./standing";
 
 export interface FeedEntry {
   id: number;
@@ -116,6 +117,10 @@ export interface OfficeView {
   systems: SystemView[];
   /** Whether this viewer may connect, change or disconnect systems here. */
   systemsEditable: boolean;
+  /** Requests the office files by itself, for people who manage the office. */
+  standing: StandingView[];
+  /** Whether this viewer may set up standing work here. */
+  standingEditable: boolean;
   /** The signed-in account, as distinct from the seat in this office. */
   account: { email: string; displayName: string; isDemo: boolean };
   /** Every office this account has a seat in. */

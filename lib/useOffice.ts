@@ -40,6 +40,11 @@ export type SystemOp =
     }
   | { operation: "remove"; id: string };
 
+/** A change to the requests an office files by itself. */
+export type StandingOp =
+  | { operation: "save"; id?: string; title: string; detail: string; urgent: boolean; every: string; firstAt: number }
+  | { operation: "remove" | "pause" | "resume" | "file"; id: string };
+
 export type OfficeOp =
   | { operation: "create"; name: string }
   | { operation: "create_sample"; providerId: string }
@@ -153,6 +158,7 @@ export function useOffice(initial: OfficeView) {
     [send],
   );
   const systemOp = useCallback((body: SystemOp) => send("/api/admin/systems", body), [send]);
+  const standingOp = useCallback((body: StandingOp) => send("/api/admin/standing", body), [send]);
   /** What a connected system holds right now, or null when it gave no answer. */
   const readSystem = useCallback(
     async (id: string): Promise<string[] | null> => {
@@ -244,6 +250,7 @@ export function useOffice(initial: OfficeView) {
     officeOp,
     providerOp,
     systemOp,
+    standingOp,
     readSystem,
     talk,
     markOpened,

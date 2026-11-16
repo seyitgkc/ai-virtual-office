@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -365,6 +365,24 @@ CREATE TABLE task_documents (
   added_by  TEXT NOT NULL REFERENCES participants(id),
   added_at  INTEGER NOT NULL,
   UNIQUE (task_id, position)
+) STRICT;
+
+-- Requests the office files by itself on a rhythm, in the name of whoever set
+-- them up. last_task_id is the task it filed last, kept so that it is not
+-- filed again while that one is still open.
+CREATE TABLE standing_requests (
+  id            TEXT PRIMARY KEY,
+  office_id     TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  position      INTEGER NOT NULL,
+  title         TEXT NOT NULL,
+  detail        TEXT NOT NULL,
+  urgent        INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
+  every         TEXT NOT NULL CHECK (every IN ('day', 'weekday', 'week')),
+  next_at       INTEGER NOT NULL,
+  created_by    TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  last_task_id  TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  last_filed_at INTEGER,
+  active        INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
 ) STRICT;
 
 -- What an agent has been given and has not finished: taking its step on a
@@ -1178,6 +1196,26 @@ CREATE TABLE task_documents (
   added_by  TEXT NOT NULL REFERENCES participants(id),
   added_at  INTEGER NOT NULL,
   UNIQUE (task_id, position)
+) STRICT;
+`,
+  // Version 18 adds requests the office files by itself on a rhythm.
+  17: /* sql */ `
+-- Requests the office files by itself on a rhythm, in the name of whoever set
+-- them up. last_task_id is the task it filed last, kept so that it is not
+-- filed again while that one is still open.
+CREATE TABLE standing_requests (
+  id            TEXT PRIMARY KEY,
+  office_id     TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  position      INTEGER NOT NULL,
+  title         TEXT NOT NULL,
+  detail        TEXT NOT NULL,
+  urgent        INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
+  every         TEXT NOT NULL CHECK (every IN ('day', 'weekday', 'week')),
+  next_at       INTEGER NOT NULL,
+  created_by    TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  last_task_id  TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  last_filed_at INTEGER,
+  active        INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
 ) STRICT;
 `,
 };

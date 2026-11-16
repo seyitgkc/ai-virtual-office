@@ -4,14 +4,15 @@ import { useState } from "react";
 import { CONFIGURABLE_STAGES, type AdminOp } from "../lib/admin";
 import { stageSpec, type Action } from "../lib/engine";
 import type { Office, Participant, Permission, Wall } from "../lib/model";
-import type { OfficeOp, ProviderOp, SystemOp } from "../lib/useOffice";
+import type { OfficeOp, ProviderOp, StandingOp, SystemOp } from "../lib/useOffice";
 import type { OfficeView } from "../lib/view";
 import { RolesTab, RulesTab } from "./SettingsAccess";
 import { PeopleTab, ProvidersTab } from "./SettingsAgents";
 import { RecordsTab } from "./SettingsRecords";
+import { StandingTab } from "./SettingsStanding";
 import { ConfirmButton, SavedField, Section } from "./settingsParts";
 
-type Tab = "offices" | "own-providers" | "office" | "rooms" | "records" | "systems" | "people" | "roles" | "rules" | "providers";
+type Tab = "offices" | "own-providers" | "office" | "rooms" | "records" | "systems" | "standing" | "people" | "roles" | "rules" | "providers";
 
 /**
  * Each page of Settings: where it sits in the list, the permission that opens
@@ -24,6 +25,7 @@ const PAGES: { id: Tab; label: string; group: "office" | "account"; needs: Permi
   { id: "rooms", label: "Rooms", group: "office", needs: "manage_rooms", about: "The rooms along the corridor, and which room hosts each stage of the work." },
   { id: "records", label: "Records", group: "office", needs: "manage_rooms", about: "Facts kept in each room, shown to whoever may read that room." },
   { id: "systems", label: "Connected systems", group: "office", needs: "manage_rooms", about: "Outside systems agents read from and act in, each operated from one room." },
+  { id: "standing", label: "Standing work", group: "office", needs: "manage_office", about: "Requests the office files by itself, every day, weekday or week." },
   { id: "people", label: "People and agents", group: "office", needs: "manage_people", about: "Who works here, in which room, and in which role." },
   { id: "roles", label: "Roles and access", group: "office", needs: "manage_roles", about: "What each role may do, and which rooms it may enter, read and act in." },
   { id: "rules", label: "Access rules", group: "office", needs: "manage_access", about: "Exceptions for one person or agent, which outrank their role." },
@@ -58,10 +60,12 @@ export function Settings({
   officeOp,
   providerOp,
   systemOp,
+  standingOp,
   readSystem,
   initialTab,
   onClose,
 }: {
+  standingOp: (op: StandingOp) => Promise<boolean>;
   /** The tab to open on, when the person was sent here for one thing. */
   initialTab?: string;
   view: OfficeView;
@@ -135,6 +139,7 @@ export function Settings({
           {(open === "records" || open === "systems") && (
             <RecordsTab part={open} view={view} viewer={viewer} adminOp={adminOp} systemOp={systemOp} readSystem={readSystem} />
           )}
+          {open === "standing" && <StandingTab view={view} standingOp={standingOp} />}
           {open === "people" && (
             <PeopleTab office={office} viewer={viewer} providers={view.providers} adminOp={adminOp} />
           )}

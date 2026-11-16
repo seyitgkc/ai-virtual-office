@@ -7,6 +7,7 @@
  * the engine, then write the changes and an audit entry in one transaction.
  */
 import { randomUUID } from "node:crypto";
+import { EVERY, nextAfter, type Every, type StandingView } from "../standing";
 import { AdminError, applyAdminOp, blankOffice, permissionFor, type AdminOp } from "../admin";
 import {
   nextStage,
@@ -377,6 +378,8 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
       ? systemViews(db, office.id).filter((s) => mayRead({ ...ctx, forTask: null }, viewer, s.roomId))
       : [],
     systemsEditable: can("manage_rooms") && session.hasPassword && !isDemoOffice(office.id),
+    standing: can("manage_office") ? standingViews(db, office) : [],
+    standingEditable: can("manage_office") && !isDemoOffice(office.id),
     // Token details are for people who manage access and for the holder.
     accessTokens: listAccessTokens(db, office.id)
       .filter((t) => can("manage_access") || t.participantId === viewer.id)
@@ -768,6 +771,7 @@ function startClock(): void {
     try {
       wakeDueTasks();
       carryOnIdleWork();
+      void fileDueStanding();
     } catch (error) {
       console.error("Waking waiting tasks failed.", error);
     }
@@ -1599,6 +1603,265 @@ export function markOpened(session: Session, target: { otherId?: string; noteId?
     markNoteRead(db, viewer.id, note.id);
   }
   return buildView(db, state, session);
+}
+
+// ---------------------------------------------------------------------------
+// Standing work
+//
+// A request the office files by itself on a rhythm, in the name of the
+// person who set it up. From there it is an ordinary task. One is not filed
+// while the last one it filed is still open, so slow work does not pile up.
+// ---------------------------------------------------------------------------
+
+interface StandingRow {
+  id: string;
+  office_id: string;
+  title: string;
+  detail: string;
+  urgent: number;
+  every: Every;
+  next_at: number;
+  created_by: string;
+  last_task_id: string | null;
+  last_filed_at: number | null;
+  active: number;
+}
+
+const STANDING_LIMIT = 20;
+
+function standingViews(db: Db, office: Office): StandingView[] {
+  return all<StandingRow>(db, "SELECT * FROM standing_requests WHERE office_id = ? ORDER BY position", office.id).map((r) => ({
+    id: r.id,
+    title: r.title,
+    detail: r.detail,
+    urgent: r.urgent === 1,
+    every: r.every,
+    nextAt: r.next_at,
+    active: r.active === 1,
+    filedAs: office.participants.find((p) => p.id === r.created_by)?.displayName ?? "Someone who has left",
+    lastTaskId: r.last_task_id,
+    lastFiledAt: r.last_filed_at,
+  }));
+}
+
+export interface StandingInput {
+  id?: string;
+  title: string;
+  detail: string;
+  urgent: boolean;
+  every: string;
+  /** When it is first due. */
+  firstAt: number;
+}
+
+/** The person and office for work on standing requests, or a refusal. */
+function standingManager(db: Db, session: Session): { state: EngineState; actor: Participant } {
+  const state = loadOffice(db, session);
+  const actor = requirePermission(state, session, "manage_office");
+  if (isDemoOffice(state.office.id)) throw new OfficeError(403, "The demo office is shared, so it has no standing work.");
+  return { state, actor };
+}
+
+/** Add a standing request, or change one. It is filed in the name of whoever saved it. */
+export function saveStandingRequest(session: Session, input: StandingInput): Promise<OfficeView> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    const { state, actor } = standingManager(db, session);
+    const title = input.title.trim();
+    const detail = input.detail.trim();
+    if (title.length < 2 || title.length > 120) throw new OfficeError(400, "Give it a title of 2 to 120 characters.");
+    if (detail.length < 2 || detail.length > 2000) throw new OfficeError(400, "Say what is wanted, in up to 2,000 characters.");
+    if (!EVERY.some((e) => e.id === input.every)) throw new OfficeError(400, "Choose how often it is filed.");
+    const every = input.every as Every;
+    if (!Number.isFinite(input.firstAt) || input.firstAt > Date.now() + 366 * 86_400_000) {
+      throw new OfficeError(400, "Choose when it is first due, within the next year.");
+    }
+    // A first time that has already passed moves to its next turn, so saving
+    // never files something at once by surprise.
+    const nextAt = input.firstAt > Date.now() ? input.firstAt : nextAfter(input.firstAt, every, Date.now());
+
+    const existing = input.id
+      ? get<StandingRow>(db, "SELECT * FROM standing_requests WHERE id = ? AND office_id = ?", input.id, state.office.id)
+      : undefined;
+    if (input.id && !existing) throw new OfficeError(404, "That standing request does not exist in this office.");
+    if (!existing) {
+      const held = get<{ n: number }>(db, "SELECT COUNT(*) AS n FROM standing_requests WHERE office_id = ?", state.office.id)?.n ?? 0;
+      if (held >= STANDING_LIMIT) throw new OfficeError(400, `An office can hold ${STANDING_LIMIT} standing requests.`);
+    }
+    transaction(db, () => {
+      if (existing) {
+        run(
+          db,
+          "UPDATE standing_requests SET title = ?, detail = ?, urgent = ?, every = ?, next_at = ?, created_by = ? WHERE id = ?",
+          title,
+          detail,
+          input.urgent ? 1 : 0,
+          every,
+          nextAt,
+          actor.id,
+          existing.id,
+        );
+      } else {
+        run(
+          db,
+          `INSERT INTO standing_requests (id, office_id, position, title, detail, urgent, every, next_at, created_by, active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+          `st-${randomUUID().slice(0, 8)}`,
+          state.office.id,
+          get<{ next: number }>(db, "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM standing_requests")?.next ?? 0,
+          title,
+          detail,
+          input.urgent ? 1 : 0,
+          every,
+          nextAt,
+          actor.id,
+        );
+      }
+      recordAudit(db, {
+        officeId: state.office.id,
+        officeClock: state.now,
+        actorId: actor.id,
+        actionType: existing ? "UPDATE_STANDING" : "ADD_STANDING",
+        subject: NO_SUBJECT,
+        notes: [`${actor.displayName} ${existing ? "changed" : "set up"} the standing request "${title}"`],
+      });
+    });
+    return buildView(db, loadOffice(db, session), session);
+  });
+}
+
+/** Remove a standing request, or pause it and take it up again. */
+export function changeStandingRequest(session: Session, id: string, change: "remove" | "pause" | "resume"): Promise<OfficeView> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    const { state, actor } = standingManager(db, session);
+    const row = get<StandingRow>(db, "SELECT * FROM standing_requests WHERE id = ? AND office_id = ?", id, state.office.id);
+    if (!row) throw new OfficeError(404, "That standing request does not exist in this office.");
+    transaction(db, () => {
+      if (change === "remove") run(db, "DELETE FROM standing_requests WHERE id = ?", id);
+      else if (change === "pause") run(db, "UPDATE standing_requests SET active = 0 WHERE id = ?", id);
+      // Taken up again, it waits for its next turn. What it missed is not filed late.
+      else run(db, "UPDATE standing_requests SET active = 1, next_at = ? WHERE id = ?", nextAfter(row.next_at, row.every, Date.now()), id);
+      recordAudit(db, {
+        officeId: state.office.id,
+        officeClock: state.now,
+        actorId: actor.id,
+        actionType: "CHANGE_STANDING",
+        subject: NO_SUBJECT,
+        notes: [
+          `${actor.displayName} ${change === "remove" ? "removed" : change === "pause" ? "paused" : "took up again"} the standing request "${row.title}"`,
+        ],
+      });
+    });
+    return buildView(db, loadOffice(db, session), session);
+  });
+}
+
+/** File a standing request now, whatever its rhythm says. Its next turn stays where it was. */
+export async function fileStandingNow(session: Session, id: string): Promise<OfficeView> {
+  const db = officeDatabase();
+  const officeId = await inTurn(async () => {
+    const { state } = standingManager(db, session);
+    const row = get<StandingRow>(db, "SELECT * FROM standing_requests WHERE id = ? AND office_id = ?", id, state.office.id);
+    if (!row) throw new OfficeError(404, "That standing request does not exist in this office.");
+    return state.office.id;
+  });
+  const filed = await fileStanding(officeId, id, Date.now(), true);
+  if (!filed.ok) throw new OfficeError(409, `It was not filed: ${filed.reason}`);
+  return getView(session);
+}
+
+/**
+ * File every standing request whose turn has come. Called on the clock, and
+ * by the checks with a time of their own. Returns how many it filed.
+ */
+export async function fileDueStanding(now: number = Date.now()): Promise<number> {
+  const db = officeDatabase();
+  const due = all<{ id: string; office_id: string }>(
+    db,
+    "SELECT id, office_id FROM standing_requests WHERE active = 1 AND next_at <= ? AND office_id <> ? ORDER BY next_at",
+    now,
+    DEMO_OFFICE_ID,
+  );
+  let filed = 0;
+  for (const row of due) {
+    const outcome = await fileStanding(row.office_id, row.id, now, false).catch((error) => {
+      console.error("A standing request could not be filed.", error);
+      return { ok: false as const, reason: "" };
+    });
+    if (outcome.ok) filed++;
+  }
+  return filed;
+}
+
+/**
+ * File one standing request as a task, in its own turn. On the clock its
+ * next turn is set whether or not it was filed, so nothing is tried twice.
+ */
+function fileStanding(
+  officeId: string,
+  id: string,
+  now: number,
+  byHand: boolean,
+): Promise<{ ok: true; taskId: string } | { ok: false; reason: string }> {
+  return inTurn(async (): Promise<{ ok: true; taskId: string } | { ok: false; reason: string }> => {
+    const db = officeDatabase();
+    const row = get<StandingRow>(db, "SELECT * FROM standing_requests WHERE id = ? AND office_id = ?", id, officeId);
+    const loaded = loadEngineState(db, officeId);
+    if (!row || !loaded) return { ok: false, reason: "that standing request no longer exists." };
+    const before = loaded.clockStepMinutes === 0 ? { ...loaded, now: Date.now() } : loaded;
+    const next = byHand ? row.next_at : nextAfter(row.next_at, row.every, now);
+    const skip = (reason: string, deactivate = false): { ok: false; reason: string } => {
+      transaction(db, () => {
+        run(db, "UPDATE standing_requests SET next_at = ?, active = ? WHERE id = ?", next, deactivate ? 0 : row.active, id);
+        recordAudit(db, {
+          officeId,
+          officeClock: before.now,
+          actorId: row.created_by,
+          actionType: "STANDING_SKIPPED",
+          subject: NO_SUBJECT,
+          notes: [`The standing request "${row.title}" was not filed: ${reason}`],
+        });
+      });
+      return { ok: false, reason };
+    };
+
+    const last = row.last_task_id ? before.office.tasks.find((t) => t.id === row.last_task_id) : undefined;
+    if (last && last.closedAt === null) return skip(`the last one, ${last.id}, is still open.`);
+    const filer = before.office.participants.find((p) => p.id === row.created_by && p.kind === "human");
+    if (!filer) return skip("the person it was filed for is no longer in the office. It has been paused.", true);
+    const action: Action = {
+      type: "SUBMIT_REQUEST",
+      title: row.title,
+      detail: row.detail,
+      requestedById: filer.id,
+      ...(row.urgent === 1 ? { urgent: true } : {}),
+    };
+    const verdict = authorize(before.office, contextOf(before.office, before.now), filer, action);
+    if (!verdict.allowed) return skip(`${filer.displayName} may no longer file requests here. It has been paused.`, true);
+
+    // No model is asked here. The agent that takes the request does so from its queue.
+    const { runtime, deferred } = turnRuntime(runtimeFor(db, officeId), { performs: new Map() }, null, true);
+    const result = await reduce(before, action, runtime);
+    const known = new Set(before.office.tasks.map((t) => t.id));
+    const task = result.state.office.tasks.find((t) => !known.has(t.id));
+    if (!task) return skip("the office did not accept it.");
+    transaction(db, () => {
+      saveEngineState(db, before, result.state);
+      syncAccessTokens(db);
+      run(db, "UPDATE standing_requests SET next_at = ?, last_task_id = ?, last_filed_at = ? WHERE id = ?", next, task.id, before.now, id);
+      recordAudit(db, {
+        officeId,
+        officeClock: result.state.now,
+        actorId: filer.id,
+        actionType: "STANDING_FILED",
+        subject: { ...NO_SUBJECT, taskId: task.id, roomId: task.roomId },
+        notes: [`The office filed the standing request "${row.title}" as ${task.id}, for ${filer.displayName}`, ...result.notes],
+      });
+    });
+    carryOn(officeId, [...result.wake, ...deferred], changedTasks(before.office, result.state.office), true);
+    return { ok: true, taskId: task.id };
+  });
 }
 
 // ---------------------------------------------------------------------------
