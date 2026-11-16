@@ -309,6 +309,23 @@ async function main(): Promise<void> {
   const replied = asked2?.kind === "attend" ? await reduce(heard, { type: "AGENT_ATTEND", taskId: heardId, participantId: asked2.participantId, noteId: asked2.noteId }, reviewing) : null;
   expect("and the colleague's reply wakes the reviewer, though the task waits for a decision", replied?.wake.some((w) => w.kind === "resume" && w.participantId === replied.state.office.tasks.find((t) => t.id === heardId)!.ownerId), true);
 
+  console.log("\n-- work that was sent back, as the agent reads it --");
+  const redone = new Recorder((input) =>
+    input.stage === "execution"
+      ? { questions: [], assumptions: [], notes: ["p-atlas", "p-ledger", "p-iris", "p-quill"].map((to) => ({ toParticipantId: to, body: `Please do your part, ${to}.` })) }
+      : { questions: [], assumptions: [] },
+  );
+  let again = (await reduce(withAi, { type: "SUBMIT_REQUEST", title: "Order 4797", detail: "One head.", requestedById: "p-dana" }, redone)).state;
+  const againId = again.office.tasks.at(-1)!.id;
+  for (let i = 0; i < 3; i++) again = (await reduce(again, { type: "ADVANCE", taskId: againId }, redone)).state;
+  expect("one step can call on every colleague an order needs", again.office.messages.filter((m) => m.taskId === againId && m.kind === "note").length >= 3, true);
+  again = (await reduce(again, { type: "DECIDE", taskId: againId, byId: "p-dana", verdict: "changes_requested", comment: "Do it again." }, redone)).state;
+  again = (await reduce(again, { type: "AGENT_RESUME", taskId: againId }, redone)).state;
+  const reread = buildStepPrompt(redone.inputs.at(-1)!).split("\n");
+  const mark = reread.findIndex((l) => l.startsWith("--- The work was sent back at this point."));
+  expect("the agent is shown where the work was sent back", mark > 0 && reread[mark - 1].includes("Sent back for changes: Do it again."), true);
+  expect("and that what came before holds only if the live records show it", reread[mark].includes("exists only if the live records still show it"), true);
+
   console.log("\n-- waiting for a day --");
   const waitsFor = async (until: string) => {
     const dated = new Recorder((input) =>

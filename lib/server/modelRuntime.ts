@@ -333,8 +333,16 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
 
   lines.push("Thread so far, limited to what you may read:");
   if (priorMessages.length === 0) lines.push("(nothing yet)");
+  // Work that was sent back is done again. What the thread records from
+  // before may be gone, so the line is drawn where the agent can see it.
+  const sentBack = priorMessages.findLast((m) => m.kind === "decision" && m.verdict === "changes_requested");
   for (const m of priorMessages) {
     lines.push(`[${clock(m.at)}] ${speaker(m, input)} (${m.kind}): ${asData("message", m.body)}`);
+    if (m === sentBack) {
+      lines.push(
+        "--- The work was sent back at this point. Everything above was said before that. An order, booking, invoice or other record mentioned above exists only if the live records still show it. ---",
+      );
+    }
   }
   // Asked last, where it is least likely to be passed over: a model will say
   // that work happens later and still leave the field that makes it so empty.
@@ -414,7 +422,7 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
   const colleagues = new Set(input.surroundings.colleagues.map((c) => c.id));
   const notes = raw.notes
     .filter((n) => n.body.trim().length > 0 && (people.has(n.to) || colleagues.has(n.to)))
-    .slice(0, 2)
+    .slice(0, 4)
     .map((n) => ({ toParticipantId: n.to, body: clip(n.body, 400) }));
 
   const statusNote = clip(raw.statusNote, 300);

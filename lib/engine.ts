@@ -1583,7 +1583,8 @@ async function runAgent(
 
   // Notes come after anything done in a system, so a note that speaks of an
   // order follows the order in the thread.
-  for (const draft of (result.notes ?? []).slice(0, 2)) tell(draft.toParticipantId, draft.body);
+  // An order can call on freight, finance and purchasing at once.
+  for (const draft of (result.notes ?? []).slice(0, 4)) tell(draft.toParticipantId, draft.body);
   for (const { to, need } of passedOn.slice(0, 2)) {
     tell(
       to.id,
