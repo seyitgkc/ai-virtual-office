@@ -16,14 +16,20 @@ services:
       ADMIN_NAME: ${ADMIN_NAME:-}
       # The demo office and password-free entry to it. Set to 0 to turn off.
       DEMO_LOGIN: ${DEMO_LOGIN:-1}
-      # The two sample services below, which the demo office is connected to.
+      # The sample services below, which the demo office is connected to.
       # They are reached over the stack's own network and published nowhere.
       DEMO_STOREFRONT_URL: http://storefront:8081
       DEMO_CARRIER_URL: http://carrier:8082
+      DEMO_LEDGER_URL: http://ledger:8083
+      DEMO_SUPPLIER_URL: http://supplier:8084
+      DEMO_SERVICE_DESK_URL: http://service-desk:8085
       DEMO_SYSTEMS_KEY: ${DEMO_SYSTEMS_KEY:-sample-systems-key}
     depends_on:
       - storefront
       - carrier
+      - ledger
+      - supplier
+      - service-desk
     volumes:
       - office-data:/data
     restart: unless-stopped
@@ -60,6 +66,51 @@ services:
       API_KEY: ${DEMO_SYSTEMS_KEY:-sample-systems-key}
     expose:
       - "8082"
+    restart: unless-stopped
+    read_only: true
+
+  # A stand-in accounts ledger: dealer credit, invoices and payments.
+  ledger:
+    build:
+      context: ./services
+      args:
+        SERVICE: ledger
+    image: ai-virtual-office-ledger:latest
+    environment:
+      PORT: "8083"
+      API_KEY: ${DEMO_SYSTEMS_KEY:-sample-systems-key}
+    expose:
+      - "8083"
+    restart: unless-stopped
+    read_only: true
+
+  # A stand-in supplier portal: factory lead times and purchase orders.
+  supplier:
+    build:
+      context: ./services
+      args:
+        SERVICE: supplier
+    image: ai-virtual-office-supplier:latest
+    environment:
+      PORT: "8084"
+      API_KEY: ${DEMO_SYSTEMS_KEY:-sample-systems-key}
+    expose:
+      - "8084"
+    restart: unless-stopped
+    read_only: true
+
+  # A stand-in service desk: warranty, tickets, returns and technician visits.
+  service-desk:
+    build:
+      context: ./services
+      args:
+        SERVICE: service-desk
+    image: ai-virtual-office-service-desk:latest
+    environment:
+      PORT: "8085"
+      API_KEY: ${DEMO_SYSTEMS_KEY:-sample-systems-key}
+    expose:
+      - "8085"
     restart: unless-stopped
     read_only: true
 
