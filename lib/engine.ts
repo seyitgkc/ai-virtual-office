@@ -20,6 +20,7 @@
  */
 
 import { earlierWork, type EarlierWork } from "./recall";
+import { taskLabel, withTaskLabels } from "./taskLabels";
 import {
   allowedInWindUp,
   answersGiven,
@@ -206,6 +207,8 @@ export interface AgentStepInput {
    * one thing it did on it, as the note says.
    */
   windingUp?: boolean;
+  /** The task as people know it, such as T-12. Agents are shown this, never the id. */
+  label?: string;
 }
 
 export interface DraftQuestion {
@@ -1721,9 +1724,15 @@ async function runAgent(
     // Grants made for another task do not count for this one.
     forTask: task.id,
   };
+  // Tasks are named to an agent the way people see them, so that what it
+  // writes about a task reads the same as everything else on the screen.
   const prior = office.messages
     .filter((m) => m.taskId === task.id && canRead(m, participant, ctx))
-    .sort((a, b) => a.at - b.at);
+    .sort((a, b) => a.at - b.at)
+    .map((m) => {
+      const body = withTaskLabels(office, m.body);
+      return body === m.body ? m : { ...m, body };
+    });
   const mayRead = (room: RoomId): boolean => resolveAccess(participant, room, "read", ctx).effect === "allow";
   const surroundings: AgentSurroundings = {
     officeName: office.name,
@@ -1746,7 +1755,7 @@ async function runAgent(
       purpose: s.purpose,
       roomId: roomForStage(office, s.stage),
     })),
-    earlier: earlierWork(office, task, participant, ctx),
+    earlier: earlierWork(office, task, participant, ctx).map((e) => ({ ...e, taskId: taskLabel(office, e.taskId), summary: withTaskLabels(office, e.summary) })),
     systems: office.systems.map((system) => ({
       ...system,
       readable: roomsShowing(system).some((room) => resolveAccess(participant, room, "read", ctx).effect === "allow"),
@@ -1763,9 +1772,10 @@ async function runAgent(
     now,
     ...(afterAction ? { afterAction } : {}),
     ...(attending && attending.fromId !== "system"
-      ? { attending: { fromId: attending.fromId, body: attending.body, noteId: attending.id } }
+      ? { attending: { fromId: attending.fromId, body: withTaskLabels(office, attending.body), noteId: attending.id } }
       : {}),
     ...(attending && task.windUp ? { windingUp: true } : {}),
+    label: taskLabel(office, task.id),
   });
   if (answered.later) {
     const owes = !attending && task.ownerId === participant.id && !task.owed;

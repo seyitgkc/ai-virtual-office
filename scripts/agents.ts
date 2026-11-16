@@ -14,7 +14,9 @@ import { deskState, statusReply } from "../lib/agentState";
 import { canRead, resolveAccess } from "../lib/model";
 import { authorize, contextOf, parseAction } from "../lib/policy";
 import { applyAdminOp } from "../lib/admin";
+import { plainNames, type Named } from "../lib/plainNames";
 import { earlierWork } from "../lib/recall";
+import { splitAtTasks, taskLabel, taskNamed, withTaskLabels } from "../lib/taskLabels";
 import { span, workReport } from "../lib/report";
 import { buildChatSystem } from "../lib/server/chat";
 import { buildStepPrompt, dataMarker, readReply, SYSTEM_PROMPT, systemPrompt, toStepResult } from "../lib/server/modelRuntime";
@@ -392,9 +394,10 @@ async function main(): Promise<void> {
   const again2 = await finish(brightlineJob.at, "Calder order: 2 more condensers", "Calder Heating, account CAL-3310, want 2 more units.", false);
   const seenBy = (id: string) => worked.inputs.findLast((i) => i.participant.id === id && i.task.id === again2.id)!;
   const veraSaw = seenBy(worker ?? "").surroundings.earlier ?? [];
-  expect("an agent is shown the closed task that bears on this one", veraSaw.map((e) => e.taskId).join(), calderJob.id);
+  expect("an agent is shown the closed task that bears on this one", veraSaw.map((e) => e.taskId).join(), taskLabel(again2.at.office, calderJob.id));
+  expect("named by its number in the office, not by its id", /^T-\d+$/.test(veraSaw[0]?.taskId ?? "") && veraSaw[0]?.taskId !== calderJob.id, true);
   expect("with what was concluded on it", veraSaw[0]?.summary.includes("Paid late twice this year"), true);
-  expect("and not the one about another dealer", veraSaw.some((e) => e.taskId === brightlineJob.id), false);
+  expect("and not the one about another dealer", veraSaw.some((e) => e.taskId === taskLabel(again2.at.office, brightlineJob.id)), false);
   expect("an agent that may not read the room it was concluded in is shown nothing", (seenBy("p-iris").surroundings.earlier ?? []).length, 0);
   const concludedIn = again2.at.office.messages.findLast((m) => m.taskId === calderJob.id && m.kind === "output")!.roomId;
   const let_in = (await reduce(again2.at, { type: "GRANT_ACCESS", participantId: "p-iris", room: concludedIn, scopes: ["read"], effect: "allow", reason: "To see past orders", grantedBy: "p-dana" }, worked)).state;
@@ -402,7 +405,7 @@ async function main(): Promise<void> {
   expect("and is shown it once that room is opened to it", irisNow.map((e) => e.taskId).join(), calderJob.id);
   const recalled = buildStepPrompt(seenBy(worker ?? ""));
   expect("it is given as data, with the warning that it is finished work", recalled.includes("These tasks are closed.") && recalled.includes(`<office_data kind="earlier_result">Order placed for Calder order: 3 condensers.`), true);
-  expect("a task that is still open is never given as earlier work", (seenBy(worker ?? "").surroundings.earlier ?? []).some((e) => e.taskId === again2.id), false);
+  expect("a task that is still open is never given as earlier work", (seenBy(worker ?? "").surroundings.earlier ?? []).some((e) => e.taskId === taskLabel(again2.at.office, again2.id)), false);
   const lesson = "Calder Heating pays late, so ask Finance before invoicing.";
   const taught = { ...again2.at, office: applyAdminOp(again2.at.office, { type: "KEEP_ROOM_RECORD", roomId: concludedIn, record: lesson }, "p-dana", () => "k1") };
   worked.inputs.length = 0;
@@ -410,6 +413,47 @@ async function main(): Promise<void> {
   const toldTo = (id: string) => worked.inputs.findLast((i) => i.participant.id === id && i.task.id === later.id)!.surroundings.rooms.some((r) => r.records.includes(lesson));
   expect("a line kept as a record is told to an agent that reads that room", toldTo(worker ?? ""), true);
   expect("and to no agent that does not", toldTo("p-iris"), false);
+
+  console.log("\n-- ids that slip into an agent's writing --");
+  const things: Named[] = [["room-67e73059", "Fulfilment"], ["room-3a438fbb", "Finance"], ["p-42d351cb", "Arlo"], ["finance", "Finance"], ["sys-demo-storefront", "Storefront"]];
+  expect("an id in brackets after the name is dropped", plainNames("Step 1, Fulfilment room (room-67e73059): read the stock.", things), "Step 1, Fulfilment room: read the stock.");
+  expect("an id that repeats the name is dropped", plainNames("Finance in room-3a438fbb records the payment.", things), "Finance records the payment.");
+  expect("an id on its own becomes the name", plainNames("Hand it to p-42d351cb in room-3a438fbb.", things), "Hand it to Arlo in Finance.");
+  expect("so does one in quotes", plainNames('Execution happens in the room "room-67e73059".', things), "Execution happens in Fulfilment.");
+  expect("and one in brackets with no name before it", plainNames("The review room (room-3a438fbb) checks it.", things), "The review room (Finance) checks it.");
+  expect("an id that is an ordinary word is left alone", plainNames("Ask finance about the finance charge.", things), "Ask finance about the finance charge.");
+  expect("a longer id that starts like another is not cut", plainNames("room-67e73059-b is not known.", things), "room-67e73059-b is not known.");
+  expect("text with no id is untouched", plainNames("Order SO-1001 ships from Laval.", things), "Order SO-1001 ships from Laval.");
+  const slipped = toStepResult(
+    {
+      statusNote: "Planned it for fulfilment (fulfilment) and p-ledger.",
+      questions: [{ body: "Should p-ledger sign off in the room finance?", toParticipantId: "p-dana", blocking: true, options: ["Yes, ask p-ledger"] }],
+      assumptions: [],
+      needs: [{ room: "finance", scope: "read", purpose: "The tier, which p-ledger keeps." }],
+      actions: [],
+      notes: [{ to: "p-ledger", body: "p-quill will send the quote." }],
+      output: { label: "Plan", body: "p-quill quotes, then p-ledger checks it." },
+      wait: null,
+    },
+    vera,
+  );
+  expect("what an agent writes is stored with names in place of ids", `${slipped.statusNote} | ${slipped.questions[0].body} | ${slipped.questions[0].options?.[0]} | ${slipped.notes?.[0].body} | ${slipped.output?.body}`, "Planned it for fulfilment (fulfilment) and Ledger. | Should Ledger sign off in the room finance? | Yes, ask Ledger | Quill will send the quote. | Quill quotes, then Ledger checks it.");
+  expect("while the ids it has to use stay ids", `${slipped.questions[0].toParticipantId} ${slipped.needs?.[0].room} ${slipped.notes?.[0].toParticipantId}`, "p-dana finance p-ledger");
+  expect("and a need says who by name", slipped.needs?.[0].purpose, "The tier, which Ledger keeps.");
+
+  console.log("\n-- how tasks are named --");
+  const named = again2.at.office;
+  const third = named.tasks[2];
+  expect("a task is shown by its number in the office", taskLabel(named, third.id), "T-3");
+  expect("an id the office does not know is left alone", taskLabel(named, "T-zzzz-9"), "T-zzzz-9");
+  expect("ids in a text are replaced by numbers", withTaskLabels(named, `See ${third.id} and ${named.tasks[0].id}, not SO-1001.`), "See T-3 and T-1, not SO-1001.");
+  expect("a number points back at its task", taskNamed(named, "T-3")?.id, third.id);
+  expect("and so does the id", taskNamed(named, third.id)?.id, third.id);
+  expect("a number past the last task points at nothing", taskNamed(named, "T-9999"), undefined);
+  const pieces = splitAtTasks(named, `Handled before on ${third.id}, and again on T-1. PTAC-12 is a part.`);
+  expect("a text is cut where it names tasks", pieces.map((p) => (p.task ? `[${p.text}]` : p.text)).join(""), "Handled before on [T-3], and again on [T-1]. PTAC-12 is a part.");
+  const shownTo = worked.inputs.at(-1)!;
+  expect("an agent is told its task by number", `${/^T-\d+$/.test(shownTo.label ?? "")} ${buildStepPrompt(shownTo).includes(`Task ${shownTo.label}:`)} ${buildStepPrompt(shownTo).includes(shownTo.task.id)}`, "true true false");
 
   console.log("\n-- the report --");
   const demo = workReport(initialState.office);
@@ -557,7 +601,7 @@ async function main(): Promise<void> {
   expect("an agent waiting on an answer says so", deskState(seeded, who("p-vera")).tone, "question");
   expect("an agent with no open work has nothing on the desk", deskState(seeded, who("p-iris")).tone, "idle");
   const report = statusReply(seeded, who("p-quill"), who("p-dana"), seededCtx);
-  expect("a playbook agent answers with where its work stands", report.includes("T-1001") && report.includes("halted"), true);
+  expect("a playbook agent answers with where its work stands", report.includes("T-1,") && !report.includes("T-1001") && report.includes("halted"), true);
   expect("and says it follows a playbook", report.startsWith("I follow a playbook"), true);
   const withDana = buildChatSystem(seeded, who("p-ledger"), who("p-dana"), seededCtx, []);
   const withSam = buildChatSystem(seeded, who("p-ledger"), who("p-sam"), seededCtx, []);

@@ -14,6 +14,7 @@ import { Minimap } from "./Minimap";
 import { Inbox, inboxCount } from "./Inbox";
 import { InviteDialog } from "./InviteDialog";
 import { Settings } from "./Settings";
+import { taskLabel } from "../lib/taskLabels";
 
 /** On a phone one section shows at a time. A wide screen shows them all. */
 type Sheet = "office" | "work" | "detail" | "activity";
@@ -219,7 +220,15 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
             participantAlert={participantAlert}
           />
         ) : (
-          <Feed feed={feed} />
+          <Feed
+            feed={feed}
+            office={office}
+            onOpenTask={(id) => {
+              setSelectedTaskId(id);
+              setSelectedPersonId(null);
+              setSheet("detail");
+            }}
+          />
         )}
       </div>
 
@@ -239,6 +248,10 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         dispatch={dispatch}
         onTokenOperation={tokenOperation}
         setup={setup}
+        onOpenTask={(id) => {
+          setSelectedTaskId(id);
+          setSelectedPersonId(null);
+        }}
         agentLoad={view.agentLoad}
         keepRecord={
           view.viewer.permissions.includes("manage_rooms")
@@ -294,7 +307,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
             .filter(([, load]) => load.taskId !== null)
             .map(([id, load]) => {
               const who = office.participants.find((p) => p.id === id)?.displayName ?? "An agent";
-              return `${who} is on ${load.taskId}${load.waiting > 0 ? `, ${load.waiting} more waiting` : ""}`;
+              return `${who} is on ${taskLabel(office, load.taskId ?? "")}${load.waiting > 0 ? `, ${load.waiting} more waiting` : ""}`;
             })
             .join(" · ") || "Agents are working..."}
         </div>

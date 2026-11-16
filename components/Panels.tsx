@@ -22,6 +22,8 @@ import {
 import { dayOf, eligibleOwners, nextStage, roomForStage, stageSpec, type Action } from "../lib/engine";
 import { authorize } from "../lib/policy";
 import { atWorkOn, deskState } from "../lib/agentState";
+import { taskLabel, withTaskLabels } from "../lib/taskLabels";
+import { TaskText } from "./TaskText";
 import type { DirectLine, FeedEntry, OfficeView, TokenView } from "../lib/view";
 
 const STATUS: Record<TaskStatus, { label: string; accent: string }> = {
@@ -516,7 +518,7 @@ export function TaskList({
               style={{ ["--accent" as string]: s.accent }}
               onClick={() => onSelect(task.id)}
             >
-              <div className="id">{task.id}</div>
+              <div className="id">{taskLabel({ tasks }, task.id)}</div>
               <div className="t">{task.title}</div>
               <span className="chip" style={{ ["--accent" as string]: s.accent }}>
                 {s.label}
@@ -534,7 +536,15 @@ export function TaskList({
   );
 }
 
-export function Feed({ feed }: { feed: FeedEntry[] }) {
+export function Feed({
+  feed,
+  office,
+  onOpenTask,
+}: {
+  feed: FeedEntry[];
+  office: Office;
+  onOpenTask: (taskId: string) => void;
+}) {
   return (
     <div className="panel" id="feed">
       <div className="panel-head">
@@ -544,7 +554,7 @@ export function Feed({ feed }: { feed: FeedEntry[] }) {
         {feed.length === 0 && <div className="empty">Nothing yet.</div>}
         {feed.map((e) => (
           <div key={e.id} className="feed-row">
-            {e.text}
+            <TaskText office={office} text={e.text} onOpen={onOpenTask} />
           </div>
         ))}
       </div>
@@ -572,8 +582,11 @@ export function Inspector({
   setup,
   keepRecord,
   agentLoad,
+  onOpenTask,
   onClear,
 }: {
+  /** Opens another task, when one is named in a thread. */
+  onOpenTask: (taskId: string) => void;
   /** What each agent is on and has waiting, to say who is at work on a task. */
   agentLoad: OfficeView["agentLoad"];
   /** Adds a line to a room's records. Null when the viewer may not manage rooms. */
@@ -609,6 +622,7 @@ export function Inspector({
         hidden={hiddenMessages[task.id] ?? 0}
         dispatch={dispatch}
         keepRecord={keepRecord}
+        onOpenTask={onOpenTask}
         atWork={atWorkOn(task.id, agentLoad, (id) => office.participants.find((p) => p.id === id)?.displayName ?? "An agent")}
         onClear={onClear}
       />
@@ -694,8 +708,10 @@ function TaskInspector({
   dispatch,
   keepRecord,
   atWork,
+  onOpenTask,
   onClear,
 }: {
+  onOpenTask: (taskId: string) => void;
   office: Office;
   ctx: AccessContext;
   task: Task;
@@ -794,7 +810,7 @@ function TaskInspector({
   return (
     <div className="panel" id="inspector">
       <div className="panel-head">
-        <span>{task.id}</span>
+        <span>{taskLabel(office, task.id)}</span>
         <button className="btn" style={{ padding: "2px 7px", margin: 0 }} onClick={onClear}>
           close
         </button>
@@ -876,7 +892,7 @@ function TaskInspector({
                 <div className="meta">
                   {openQuestion.fromId === "system" ? "The office" : name(openQuestion.fromId as string)} is waiting
                 </div>
-                {openQuestion.body}
+                <TaskText office={office} text={openQuestion.body} onOpen={onOpenTask} current={task.id} />
               </div>
               {(openQuestion.options ?? ["Confirmed"]).map((opt) => (
                 <button
@@ -913,7 +929,7 @@ function TaskInspector({
             <fieldset className="moves" disabled={!mayManageAccess && !mayReassign}>
               <div className="note esc">
                 <div className="meta">{name(escalation.fromId as string)} is blocked</div>
-                {escalation.body}
+                <TaskText office={office} text={escalation.body} onOpen={onOpenTask} current={task.id} />
               </div>
               <button
                 className="btn primary"
@@ -925,7 +941,7 @@ function TaskInspector({
                     room: escalation.deniedDecision!.room,
                     scopes: [escalation.deniedDecision!.scope],
                     effect: "allow",
-                    reason: `Granted for ${task.id}`,
+                    reason: `Granted for ${taskLabel(office, task.id)}`,
                     grantedBy: supervisor.id,
                     expiresOnTaskId: task.id,
                   })
@@ -1167,7 +1183,7 @@ function TaskInspector({
             </div>
           )}
           {thread.map((m) => (
-            <ThreadLine key={m.id} message={m} name={name} keepRecord={keepRecord} rooms={recordRooms} />
+            <ThreadLine key={m.id} message={m} name={name} keepRecord={keepRecord} rooms={recordRooms} office={office} onOpenTask={onOpenTask} />
           ))}
         </div>
       </div>
@@ -1187,15 +1203,17 @@ const RECORD_LENGTH = 300;
 function KeepBox({
   message,
   rooms,
+  office,
   keepRecord,
   onDone,
 }: {
+  office: Office;
   message: Message;
   rooms: Room[];
   keepRecord: KeepRecord;
   onDone: (keptIn: string | null) => void;
 }) {
-  const [text, setText] = useState(message.body.replace(/\s+/g, " ").trim().slice(0, RECORD_LENGTH));
+  const [text, setText] = useState(withTaskLabels(office, message.body).replace(/\s+/g, " ").trim().slice(0, RECORD_LENGTH));
   const [roomId, setRoomId] = useState(rooms.some((r) => r.id === message.roomId) ? message.roomId : (rooms[0]?.id ?? ""));
   const [saving, setSaving] = useState(false);
   const ready = !saving && roomId !== "" && text.trim().length > 0;
@@ -1252,18 +1270,22 @@ function ThreadLine({
   name,
   keepRecord,
   rooms,
+  office,
+  onOpenTask,
 }: {
   message: Message;
   name: (id: string) => string;
   keepRecord: KeepRecord | null;
   /** The rooms a record can be kept in. */
   rooms: Room[];
+  office: Office;
+  onOpenTask: (taskId: string) => void;
 }) {
   const [keeping, setKeeping] = useState(false);
   const [keptIn, setKeptIn] = useState<string | null>(null);
   const keepable = keepRecord !== null && rooms.length > 0 && (message.kind === "output" || message.kind === "answer");
   // Kept earlier, word for word: say so in place of offering it again.
-  const asRecord = message.body.replace(/\s+/g, " ").trim();
+  const asRecord = withTaskLabels(office, message.body).replace(/\s+/g, " ").trim();
   const kept = keptIn ?? (keepable ? (rooms.find((r) => r.records.includes(asRecord))?.name ?? null) : null);
   const cls =
     message.kind === "question"
@@ -1278,7 +1300,7 @@ function ThreadLine({
   return (
     <div className={`note ${cls}`}>
       <div className="meta">
-        {time(message.at)} · {message.fromId === "system" ? "system" : name(message.fromId)} ·{" "}
+        {time(message.at)} · {message.fromId === "system" ? "the office" : name(message.fromId)} ·{" "}
         {message.kind === "note" && message.audience.to === "participant"
           ? `note for ${name(message.audience.id)}`
           : message.kind}
@@ -1292,9 +1314,10 @@ function ThreadLine({
           </button>
         )}
       </div>
-      {message.body}
+      <TaskText office={office} text={message.body} onOpen={onOpenTask} current={message.taskId} />
       {keepable && keeping && keepRecord && (
         <KeepBox
+          office={office}
           message={message}
           rooms={rooms}
           keepRecord={keepRecord}
@@ -1523,7 +1546,7 @@ function ParticipantInspector({
           <h3>Right now</h3>
           <div className="desk-state" data-tone={desk.tone}>
             <strong>{desk.headline}</strong>
-            {desk.task && <span> · {desk.task.id}</span>}
+            {desk.task && <span> · {taskLabel(office, desk.task.id)}</span>}
           </div>
           <div style={{ fontSize: 11.5, opacity: 0.75, marginTop: 4 }}>{desk.detail}</div>
         </div>
@@ -1549,9 +1572,9 @@ function ParticipantInspector({
                   {note.fromId === participant.id
                     ? `to ${nameOf(note.audience.to === "participant" ? note.audience.id : "")}`
                     : `from ${nameOf(note.fromId)}`}{" "}
-                  · {note.taskId}
+                  · {taskLabel(office, note.taskId)}
                 </div>
-                {note.body}
+                {withTaskLabels(office, note.body)}
               </div>
             ))}
           </div>
@@ -1621,13 +1644,13 @@ function ParticipantInspector({
               <div key={t.id} className="note" data-dead={t.problem !== null}>
                 <div className="meta">
                   {t.scope} on {roomName(t.roomId)}
-                  {t.taskId ? ` · ${t.taskId} only` : ""} ·{" "}
+                  {t.taskId ? ` · ${taskLabel(office, t.taskId)} only` : ""} ·{" "}
                   <span style={{ color: t.problem ? "#eba294" : "#7fc39a" }}>
                     {t.problem ?? "usable"}
                   </span>
                 </div>
                 <div style={{ fontSize: 10.5, opacity: 0.7 }}>
-                  Rule {t.ruleId}: {t.reason}
+                  Rule {t.ruleId}: {withTaskLabels(office, t.reason)}
                 </div>
                 <div style={{ marginTop: 6 }}>
                   <button

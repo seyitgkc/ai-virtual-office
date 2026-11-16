@@ -15,6 +15,7 @@ import {
   type RoomSelector,
 } from "../lib/model";
 import { AccessGrid, ConfirmButton, SavedField, Section, TabBar, type CellEffect } from "./settingsParts";
+import { taskLabel, withTaskLabels } from "../lib/taskLabels";
 
 const roomRows = (office: Office): { id: RoomSelector; label: string }[] => [
   { id: ANY_ROOM, label: "Every room" },
@@ -312,12 +313,12 @@ export function RulesTab({
                     </td>
                   ))}
                   <td>
-                    {rule.reason}
+                    {withTaskLabels(office, rule.reason)}
                     <span className="cell-note">{rule.id}</span>
                   </td>
                   <td className="muted">{who(rule.grantedBy)}</td>
                   <td className="muted">
-                    {rule.expiresOnTaskId ? `With ${rule.expiresOnTaskId}` : rule.expiresAt ? "Time-limited" : "Never"}
+                    {rule.expiresOnTaskId ? `With ${taskLabel(office, rule.expiresOnTaskId)}` : rule.expiresAt ? "Time-limited" : "Never"}
                   </td>
                   <td className="actions">
                     <ConfirmButton

@@ -72,7 +72,7 @@ function draw(screen: DeskScreen): HTMLCanvasElement {
     c.fillStyle = "#e8e6e1";
     c.font = `30px ${sans}`;
     const more = screen.state.openTasks > 1 ? ` (+${screen.state.openTasks - 1} more)` : "";
-    for (const line of wrap(c, `${screen.state.task.id}${more}: ${screen.state.task.title}`, WIDTH - 48, 2)) {
+    for (const line of wrap(c, `${screen.state.taskLabel ?? screen.state.task.id}${more}: ${screen.state.task.title}`, WIDTH - 48, 2)) {
       c.fillText(line, 24, y);
       y += 38;
     }

@@ -9,6 +9,7 @@
  * reveals a room's contents to someone who could not read them.
  */
 import { stageSpec } from "../engine";
+import { taskLabel, withTaskLabels } from "../taskLabels";
 import { bothRead, deskState } from "../agentState";
 import { resolveAccess, type AccessContext, type Office, type Participant } from "../model";
 import type { DirectLine } from "../view";
@@ -145,11 +146,11 @@ export function buildChatSystem(
   lines.push("", `Your desk right now: ${state.headline}.`, "", "Your open work:");
   if (owned.length === 0) lines.push("(none)");
   for (const task of owned.slice(0, 4)) {
-    lines.push(`- ${task.id}, ${asData("title", task.title)}: ${stageSpec(task.stage).label}, status ${task.status.replace(/_/g, " ")}.`);
+    lines.push(`- ${taskLabel(office, task.id)}, ${asData("title", task.title)}: ${stageSpec(task.stage).label}, status ${task.status.replace(/_/g, " ")}.`);
     const thread = office.messages.filter((m) => m.taskId === task.id && visible(m)).slice(-6);
     for (const m of thread) {
       const from = m.fromId === agent.id ? "you" : (office.participants.find((p) => p.id === m.fromId)?.displayName ?? m.fromId);
-      lines.push(`    ${from} (${m.kind}): ${asData("message", m.body)}`);
+      lines.push(`    ${from} (${m.kind}): ${asData("message", withTaskLabels(office, m.body))}`);
     }
   }
   return lines.join("\n");

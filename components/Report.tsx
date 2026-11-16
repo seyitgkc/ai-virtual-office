@@ -3,6 +3,7 @@
 import { span, workReport } from "../lib/report";
 import type { OfficeView } from "../lib/view";
 import { KindBadge } from "./Panels";
+import { taskLabel } from "../lib/taskLabels";
 
 /**
  * How the office has been doing: what was filed and closed, where work
@@ -28,7 +29,7 @@ export function Report({ view, onClose }: { view: OfficeView; onClose: () => voi
   const load = (id: string): string => {
     const now = view.agentLoad[id];
     if (!now) return "Free";
-    return `${now.taskId ? `On ${now.taskId}` : "About to start"}${now.waiting > 0 ? `, ${now.waiting} waiting` : ""}`;
+    return `${now.taskId ? `On ${taskLabel(office, now.taskId)}` : "About to start"}${now.waiting > 0 ? `, ${now.waiting} waiting` : ""}`;
   };
 
   return (

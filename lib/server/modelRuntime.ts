@@ -23,6 +23,7 @@ import {
   type AgentStepResult,
 } from "../engine";
 import type { AccessScope, Message } from "../model";
+import { plainNames, type Named } from "../plainNames";
 
 export { DEFAULT_AGENT_MODEL } from "../aiModels";
 
@@ -253,7 +254,7 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
   lines.push(`You are ${participant.displayName}, ${participant.title}.`);
   lines.push(`Your capabilities: ${participant.capabilities.join("; ")}.`);
   lines.push("");
-  lines.push(`Task ${task.id}: ${asData("title", task.title)}`);
+  lines.push(`Task ${input.label ?? task.id}: ${asData("title", task.title)}`);
   lines.push(`Request: ${asData("request", task.detail)}`);
   // What came with the request goes to every agent that works the task, as
   // the request itself does. A long document is cut, and the agent is told.
@@ -420,7 +421,20 @@ const clip = (value: string, max: number): string => {
  * that points at a room or person that does not exist is dropped, lists are
  * capped, and text is trimmed. Exported for the check script.
  */
+/** Every room, person and system an agent was shown, with the name each goes by. */
+export const namesFor = (input: AgentStepInput): Named[] => [
+  ...input.surroundings.rooms.map((r): Named => [r.id, r.name]),
+  ...input.surroundings.people.map((p): Named => [p.id, p.displayName]),
+  ...input.surroundings.colleagues.map((c): Named => [c.id, c.displayName]),
+  ...input.surroundings.systems.map((y): Named => [y.id, y.name]),
+  [input.participant.id, input.participant.displayName],
+];
+
 export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResult {
+  // What the agent wrote for people to read names rooms, people and systems
+  // by name. An id that slipped into its prose is replaced before it is kept.
+  const known = namesFor(input);
+  const said = (text: string, max: number): string => clip(plainNames(text, known), max);
   const roomIds = new Set(input.surroundings.rooms.map((r) => r.id));
   const readableRooms = new Set(input.surroundings.rooms.filter((r) => r.readable).map((r) => r.id));
   const people = new Set(input.surroundings.people.map((p) => p.id));
@@ -432,9 +446,9 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
     .filter((q) => q.body.trim().length > 0 && fallbackPerson !== undefined)
     .slice(0, 2)
     .map((q) => {
-      const options = q.options.map((o) => clip(o, 80)).filter((o) => o.length > 0).slice(0, 4);
+      const options = q.options.map((o) => said(o, 80)).filter((o) => o.length > 0).slice(0, 4);
       return {
-        body: clip(q.body, 400),
+        body: said(q.body, 400),
         toParticipantId: people.has(q.toParticipantId) ? q.toParticipantId : fallbackPerson!,
         blocking: q.blocking,
         ...(options.length > 0 ? { options } : {}),
@@ -445,8 +459,8 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
     .filter((a) => a.assumed.trim().length > 0)
     .slice(0, 4)
     .map((a) => ({
-      assumed: clip(a.assumed, 200),
-      because: clip(a.because, 300),
+      assumed: said(a.assumed, 200),
+      because: said(a.because, 300),
       confidence: a.confidence,
     }));
 
@@ -454,7 +468,7 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
   const needs = raw.needs
     .filter((n) => roomIds.has(n.room) && !(n.scope === "read" && readableRooms.has(n.room)))
     .slice(0, 2)
-    .map((n) => ({ room: n.room, scope: n.scope as AccessScope, purpose: clip(n.purpose, 200) }));
+    .map((n) => ({ room: n.room, scope: n.scope as AccessScope, purpose: said(n.purpose, 200) }));
 
   // Whether the agent may act is the engine's decision. Here an action only
   // has to name a system that exists.
@@ -472,18 +486,18 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
   const notes = raw.notes
     .filter((n) => n.body.trim().length > 0 && (people.has(n.to) || colleagues.has(n.to)))
     .slice(0, 4)
-    .map((n) => ({ toParticipantId: n.to, body: clip(n.body, NOTE_LENGTH) }));
+    .map((n) => ({ toParticipantId: n.to, body: said(n.body, NOTE_LENGTH) }));
 
-  const statusNote = clip(raw.statusNote, 300);
+  const statusNote = said(raw.statusNote, 300);
   // A day the rest of the step waits for. Anything that is not a calendar day
   // with a reason is dropped, and the engine checks that the day lies ahead.
   const wait =
     raw.wait && /^\d{4}-\d{2}-\d{2}$/.test(raw.wait.until.trim()) && raw.wait.reason.trim()
-      ? { until: raw.wait.until.trim(), reason: clip(raw.wait.reason, 200) }
+      ? { until: raw.wait.until.trim(), reason: said(raw.wait.reason, 200) }
       : undefined;
   const output =
     raw.output && raw.output.body.trim().length > 0
-      ? { label: clip(raw.output.label, 60) || "Output", body: clip(raw.output.body, 1200) }
+      ? { label: said(raw.output.label, 60) || "Output", body: said(raw.output.body, 1200) }
       : undefined;
 
   return {

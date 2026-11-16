@@ -5,6 +5,7 @@ import { EVERY, type Every } from "../lib/standing";
 import type { StandingOp } from "../lib/useOffice";
 import type { OfficeView } from "../lib/view";
 import { ConfirmButton, Section } from "./settingsParts";
+import { taskLabel } from "../lib/taskLabels";
 
 /** A time as the field for picking a date and time wants it, in the viewer's own zone. */
 const forField = (at: number): string => {
@@ -80,7 +81,7 @@ export function StandingTab({ view, standingOp }: { view: OfficeView; standingOp
                   <td className="muted nowrap">{s.active ? when(s.nextAt) : "Paused"}</td>
                   <td className="muted nowrap">
                     {s.lastFiledAt ? when(s.lastFiledAt) : "Not yet"}
-                    {s.lastTaskId && <span className="cell-note">{s.lastTaskId}</span>}
+                    {s.lastTaskId && <span className="cell-note">{taskLabel(view.office, s.lastTaskId)}</span>}
                   </td>
                   <td className="actions">
                     {!locked && (

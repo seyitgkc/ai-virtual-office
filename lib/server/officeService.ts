@@ -101,6 +101,8 @@ import {
   type SystemInput,
 } from "./systems";
 import { roomsShowing } from "../systems";
+import { plainNames, type Named } from "../plainNames";
+import { withTaskLabels } from "../taskLabels";
 
 /** The seeded distributor. It exists only for password-free demo sign-in. */
 export const DEMO_OFFICE_ID = initialState.office.id;
@@ -1647,7 +1649,14 @@ export async function sendDirectMessage(session: Session, toId: string, said: st
   return inTurn(async () => {
     transaction(db, () => {
       recordDirect(db, sender.id, other.id, body, state.now);
-      if (reply !== null) recordDirect(db, other.id, sender.id, reply.slice(0, 2000), state.now);
+      // An agent's answer names things the way people know them, as its work in a thread does.
+      const plain = (text: string): string =>
+        plainNames(text, [
+          ...office.floorplan.rooms.map((r): Named => [r.id, r.name]),
+          ...office.participants.map((p): Named => [p.id, p.displayName]),
+          ...office.systems.map((y): Named => [y.id, y.name]),
+        ]);
+      if (reply !== null) recordDirect(db, other.id, sender.id, withTaskLabels(office, plain(reply)).slice(0, 2000), state.now);
       // The sender is looking at the conversation, so it is read up to here.
       markDirectRead(db, sender.id, other.id);
       recordAudit(db, {

@@ -4,6 +4,7 @@
  * answer when a person walks up and asks.
  */
 import { stageSpec } from "./engine";
+import { taskLabel, withTaskLabels } from "./taskLabels";
 import { canRead, type AccessContext, type Message, type Office, type Participant, type Task } from "./model";
 
 export type DeskTone = "idle" | "working" | "question" | "permission" | "review";
@@ -14,6 +15,8 @@ export interface DeskState {
   headline: string;
   /** The task in front of them, when there is one. */
   task: Task | null;
+  /** That task as it is shown, such as T-12. */
+  taskLabel?: string;
   /** One sentence on what they are waiting for or last did. */
   detail: string;
   /** How many open tasks they own. */
@@ -88,7 +91,8 @@ export function deskState(office: Office, who: Participant, visible?: (message: 
     tone,
     headline: HEADLINE[tone],
     task,
-    detail: said?.body ?? `${stageSpec(task.stage).label} on ${task.id}.`,
+    taskLabel: taskLabel(office, task.id),
+    detail: said ? withTaskLabels(office, said.body) : `${stageSpec(task.stage).label} on ${taskLabel(office, task.id)}.`,
     openTasks: owned.length,
   };
 }
@@ -109,7 +113,7 @@ export function statusReply(office: Office, agent: Participant, asker: Participa
   }
   const task = state.task;
   const others = state.openTasks > 1 ? ` I have ${state.openTasks - 1} more open besides.` : "";
-  const where = `${task.id}, "${task.title}", is with me at the ${stageSpec(task.stage).label.toLowerCase()} stage.`;
+  const where = `${taskLabel(office, task.id)}, "${task.title}", is with me at the ${stageSpec(task.stage).label.toLowerCase()} stage.`;
   switch (state.tone) {
     case "permission":
       return `${intro} ${where} It is halted because I need access I do not have. ${state.detail}${others}`;

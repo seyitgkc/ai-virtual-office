@@ -5,6 +5,7 @@ import { stageSpec } from "../lib/engine";
 import type { Message, Office, Participant, Task } from "../lib/model";
 import type { OfficeView } from "../lib/view";
 import { KindBadge } from "./Panels";
+import { taskLabel, withTaskLabels } from "../lib/taskLabels";
 
 /** Something in the office that is waiting on this person. */
 export interface WaitingItem {
@@ -133,9 +134,9 @@ export function Inbox({
           {waiting.map((item) => (
             <button key={item.id} type="button" className="inbox-row" onClick={() => onOpenTask(item.task.id)}>
               <span className="meta">
-                {item.label} · {item.task.id}
+                {item.label} · {taskLabel(office, item.task.id)}
               </span>
-              <span className="body">{item.body}</span>
+              <span className="body">{withTaskLabels(office, item.body)}</span>
             </button>
           ))}
         </section>
@@ -156,9 +157,9 @@ export function Inbox({
               onClick={() => onOpenTask(note.taskId, note.id)}
             >
               <span className="meta">
-                {person(note.fromId)?.displayName ?? "Someone"} · {note.taskId}
+                {person(note.fromId)?.displayName ?? "Someone"} · {taskLabel(office, note.taskId)}
               </span>
-              <span className="body">{note.body}</span>
+              <span className="body">{withTaskLabels(office, note.body)}</span>
             </button>
           ))}
         </section>
@@ -177,9 +178,9 @@ export function Inbox({
                 <span className="meta">
                   {person(note.fromId)?.displayName ?? "An agent"} to{" "}
                   {note.audience.to === "participant" ? (person(note.audience.id)?.displayName ?? "an agent") : "an agent"} ·{" "}
-                  {note.taskId}
+                  {taskLabel(office, note.taskId)}
                 </span>
-                <span className="body">{note.body}</span>
+                <span className="body">{withTaskLabels(office, note.body)}</span>
               </button>
             ))}
           </section>
