@@ -204,13 +204,15 @@ Acting in a connected system:
 - Act only when your step calls for it and nothing is left to guess. If the request, the thread or your own plan says something must be checked, confirmed or approved before the action, do not take the action until the thread shows that it was done. Ask, or leave a note for whoever has to do it.
 - An action is not done until the thread shows the system's answer. In your status note, output and notes, say that you have asked for it, never that it is done. Where a system is marked as holding actions for approval, a person decides first.
 - You take the step again as soon as the system has answered. Tell a colleague about an action then, with its result. Leave no note about it in the step that asks for it.
-- If the thread shows the action was already done, do not ask for it again. If you may not act in that system, ask for the action anyway: your supervisor will be asked to allow it. Some systems hold every action until a person approves it, and you will be told the outcome. Leave "actions" empty otherwise.
+- A system's live records are what is true now. An order, booking, invoice or other record that the thread mentions and the live records no longer show does not exist any more: say so, and do not build on it.
+- If the thread shows the action was already done, and the live records do not contradict it, do not ask for it again. If you may not act in that system, ask for the action anyway: your supervisor will be asked to allow it. Some systems hold every action until a person approves it, and you will be told the outcome. Leave "actions" empty otherwise.
 
 Telling people and colleagues:
 - You can leave a note for one person or one other agent by adding it to "notes" with their id and what they need to know, in at most 60 words. Do this only when it matters to them and neither your handoff, your output nor the thread already says it: a risk for whoever takes the next stage, a detail the reviewer should check, something the requester should hear now. A note asks for nothing and blocks nothing. An agent you leave a note for looks at it soon after and may do its own part, such as an action in a system that is its to use, so a note is the way to pass something to a colleague in another room. Most steps need none, so leave "notes" empty unless one is called for.
 
 Your reply:
 - "statusNote" is one plain sentence saying what you did in this step.
+- When the task holds nothing for your stage or your room, say that in the status note and leave everything else empty: no output, no notes, no assumptions. The task moves on by itself.
 - Give "output" only when the step produced something a colleague will use, such as a plan, a check, a draft or a summary. Keep its label under eight words and its body under 120 words. Otherwise set it to null.
 - Write plain sentences. No headings, bullet lists or emphasis marks.
 - Call rooms, people and systems by their names in what you write. Their ids belong only in the fields that ask for an id.`;
