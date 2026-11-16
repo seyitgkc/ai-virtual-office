@@ -80,8 +80,12 @@ export type AdminOp =
       purpose: string;
       width: number;
       depth: number;
+      /** The room it is built against. Left empty when it goes along the corridor. */
       attachTo: string;
-      side: Wall;
+      /** A wall of that room, or "along" for the next free place along the corridor. */
+      side: Wall | "along";
+      /** True for a corridor: a room to walk through, which other rooms open onto. */
+      corridor?: boolean;
     }
   | { type: "UPDATE_ROOM"; roomId: string; name?: string; purpose?: string }
   | { type: "SET_ROOM_RECORDS"; roomId: string; records: string[] }
@@ -289,6 +293,46 @@ function attachRoom(
   return { bounds, doorAlong: (centre - bounds.x) / width, targetAlong: (centre - t.x) / t.w };
 }
 
+/**
+ * The next free place along a corridor, on whichever of its long sides has
+ * room nearest its start. When the place runs past the corridor's end, the
+ * corridor is lengthened to reach it. Returns null when nothing fits.
+ */
+function placeAlong(
+  corridor: Room,
+  width: number,
+  depth: number,
+  rooms: Room[],
+): { bounds: Room["bounds"]; side: Wall; grown: Room["bounds"] } | null {
+  const c = corridor.bounds;
+  const lengthwise = c.w >= c.d;
+  const others = rooms.filter((r) => r.id !== corridor.id);
+  const start = lengthwise ? c.x : c.z;
+  const ends = others.map((r) => (lengthwise ? r.bounds.x + r.bounds.w : r.bounds.z + r.bounds.d));
+  const starts = [start, ...ends.filter((e) => e > start)].sort((a, b) => a - b);
+
+  let best: { bounds: Room["bounds"]; side: Wall; at: number } | null = null;
+  for (const side of (lengthwise ? ["north", "south"] : ["east", "west"]) as Wall[]) {
+    for (const at of starts) {
+      const bounds = lengthwise
+        ? { x: at, z: side === "north" ? c.z + c.d : c.z - depth, w: width, d: depth }
+        : { x: side === "east" ? c.x + c.w : c.x - width, z: at, w: width, d: depth };
+      if (others.some((r) => overlaps(r.bounds, bounds))) continue;
+      if (!best || at < best.at) best = { bounds, side, at };
+      break;
+    }
+  }
+  if (!best) return null;
+  const reach = lengthwise ? best.bounds.x + width - c.x : best.bounds.z + depth - c.z;
+  const grown = lengthwise ? { ...c, w: Math.max(c.w, reach) } : { ...c, d: Math.max(c.d, reach) };
+  if (others.some((r) => overlaps(r.bounds, grown))) return null;
+  return { bounds: best.bounds, side: best.side, grown };
+}
+
+/** A room for walking through holds no desk and hosts no stage. */
+const notCorridor = (room: Room, what: string): Room =>
+  room.corridor ? refuse(`${what} in ${room.name}, which is only for walking through.`) : room;
+
 function setRoleGrant(
   grants: AccessGrant[],
   room: RoomSelector,
@@ -358,7 +402,7 @@ export function applyAdminOp(
       const displayName = op.displayName.trim() ? named(op.displayName, "the agent's name") : spareName(office, suffix);
       const title = named(op.title, "the agent's title");
       const role = findRole(op.roleId);
-      const room = findRoom(op.roomId);
+      const room = notCorridor(findRoom(op.roomId), "Nobody has a desk");
       if (hasPermissions(role)) refuse("An agent cannot hold a role that carries permissions.");
       if (op.agentType !== "ai" && op.agentType !== "playbook") refuse("Choose what kind of agent this is.");
       const spot = freeDeskSpot(floorplan, room.id) ?? refuse(`${room.name} has no space for another desk.`);
@@ -434,7 +478,7 @@ export function applyAdminOp(
         };
       }
       if (op.roomId !== undefined) {
-        const room = findRoom(op.roomId);
+        const room = notCorridor(findRoom(op.roomId), "Nobody has a desk");
         const current = desks.find((d) => d.id === person.deskId);
         if (current?.roomId !== room.id) {
           const spot = freeDeskSpot(floorplan, room.id) ?? refuse(`${room.name} has no space for another desk.`);
@@ -506,7 +550,8 @@ export function applyAdminOp(
         name,
         description: op.description.trim().slice(0, 200),
         permissions: [],
-        grants: [],
+        // A new role may walk the corridors and nothing more.
+        grants: floorplan.rooms.filter((r) => r.corridor).map((r) => ({ room: r.id, scopes: ["enter"], effect: "allow" })),
       };
       return { ...office, roles: { ...office.roles, [id]: role } };
     }
@@ -557,21 +602,46 @@ export function applyAdminOp(
     case "ADD_ROOM": {
       const name = named(op.name, "a name for the room");
       const purpose = op.purpose.trim().slice(0, 120);
-      const target = findRoom(op.attachTo);
-      if (!WALLS.includes(op.side)) refuse("Choose which wall to attach the room to.");
       const width = Math.round(op.width);
       const depth = Math.round(op.depth);
-      if (![width, depth].every((n) => Number.isFinite(n) && n >= MIN_ROOM && n <= MAX_ROOM)) {
-        refuse(`Width and depth must be between ${MIN_ROOM} and ${MAX_ROOM} metres.`);
+      const least = op.corridor ? 2 : MIN_ROOM;
+      if (![width, depth].every((n) => Number.isFinite(n) && n >= least && n <= MAX_ROOM)) {
+        refuse(`Width and depth must be between ${least} and ${MAX_ROOM} metres.`);
       }
       if (floorplan.rooms.some((r) => r.name.toLowerCase() === name.toLowerCase())) {
         refuse("A room with that name already exists.");
       }
 
-      const placed = attachRoom(target, op.side, width, depth);
-      const blocker = floorplan.rooms.find((r) => overlaps(r.bounds, placed.bounds));
-      if (blocker) {
-        refuse(`There is no space there. ${blocker.name} is in the way. Try another wall or a smaller room.`);
+      // Where the room goes, which wall of its neighbour the door is in, and
+      // how far along each wall the two doors sit.
+      let target: Room;
+      let wall: Wall;
+      let bounds: Room["bounds"];
+      let doorAlong: number;
+      let targetAlong: number;
+      let grown: Room["bounds"] | null = null;
+      if (op.side === "along") {
+        target =
+          floorplan.rooms.find((r) => r.corridor && (!op.attachTo || r.id === op.attachTo)) ??
+          refuse("This office has no corridor. Choose a room and a wall to build against.");
+        const place =
+          placeAlong(target, width, depth, floorplan.rooms) ??
+          refuse(`There is no space left along ${target.name}. Choose a room and a wall to build against.`);
+        ({ bounds, side: wall, grown } = place);
+        const lengthwise = grown.w >= grown.d;
+        doorAlong = 0.5;
+        targetAlong = lengthwise
+          ? (bounds.x + width / 2 - grown.x) / grown.w
+          : (bounds.z + depth / 2 - grown.z) / grown.d;
+      } else {
+        if (!WALLS.includes(op.side)) refuse("Choose which wall to attach the room to.");
+        target = findRoom(op.attachTo);
+        wall = op.side;
+        ({ bounds, doorAlong, targetAlong } = attachRoom(target, wall, width, depth));
+        const blocker = floorplan.rooms.find((r) => overlaps(r.bounds, bounds));
+        if (blocker) {
+          refuse(`There is no space there. ${blocker.name} is in the way. Try another wall or a smaller room.`);
+        }
       }
 
       const suffix = newId();
@@ -580,37 +650,41 @@ export function applyAdminOp(
         id,
         name,
         purpose,
-        bounds: placed.bounds,
-        doors: [
-          {
-            id: `door-${suffix}-a`,
-            toRoomId: target.id,
-            wall: opposite[op.side],
-            along: placed.doorAlong,
-            width: DOOR_WIDTH,
-          },
-        ],
+        bounds,
+        doors: [{ id: `door-${suffix}-a`, toRoomId: target.id, wall: opposite[wall], along: doorAlong, width: DOOR_WIDTH }],
         deskIds: [],
         records: [],
+        ...(op.corridor ? { corridor: true } : {}),
+      };
+      // A corridor that grew keeps its doors where they stand, so their
+      // places along the longer wall are worked out again.
+      const before = target.bounds;
+      const after = grown ?? before;
+      const stretch = (door: Room["doors"][number]): Room["doors"][number] => {
+        const alongLength = door.wall === "north" || door.wall === "south";
+        const was = alongLength ? before.w : before.d;
+        const now = alongLength ? after.w : after.d;
+        return was === now ? door : { ...door, along: (door.along * was) / now };
       };
       const rooms = floorplan.rooms.map((r) =>
         r.id === target.id
           ? {
               ...r,
+              bounds: after,
               doors: [
-                ...r.doors,
-                {
-                  id: `door-${suffix}-b`,
-                  toRoomId: id,
-                  wall: op.side,
-                  along: placed.targetAlong,
-                  width: DOOR_WIDTH,
-                },
+                ...r.doors.map(stretch),
+                { id: `door-${suffix}-b`, toRoomId: id, wall, along: targetAlong, width: DOOR_WIDTH },
               ],
             }
           : r,
       );
-      return { ...office, floorplan: { ...floorplan, rooms: [...rooms, room] } };
+      // Everyone may walk a corridor, so each role is let into a new one.
+      const roles = op.corridor
+        ? Object.fromEntries(
+            Object.entries(office.roles).map(([key, role]) => [key, { ...role, grants: setRoleGrant(role.grants, id, "enter", "allow") }]),
+          )
+        : office.roles;
+      return { ...office, roles, floorplan: { ...floorplan, rooms: [...rooms, room] } };
     }
 
     case "UPDATE_ROOM": {
@@ -682,7 +756,7 @@ export function applyAdminOp(
 
     case "SET_STAGE_ROOM": {
       if (!CONFIGURABLE_STAGES.includes(op.stage)) refuse("Unknown stage.");
-      const room = findRoom(op.roomId);
+      const room = notCorridor(findRoom(op.roomId), "No stage of the work is done");
       return { ...office, stageRooms: { ...office.stageRooms, [op.stage]: room.id } };
     }
   }
@@ -704,12 +778,28 @@ export function blankOffice(input: {
   const adminId = `p-${suffix}`;
   const adminRole = `role-${suffix}-admin`;
   const memberRole = `role-${suffix}-member`;
+  const hallId = `hall-${suffix}`;
+  // A corridor with the first room opening onto it. Rooms added later line
+  // up along the corridor, which lengthens to take them.
+  const hall: Room = {
+    id: hallId,
+    name: "Corridor",
+    purpose: "Every room opens onto it",
+    bounds: { x: 0, z: 0, w: 24, d: 3 },
+    doors: [
+      { id: `door-${suffix}-out`, toRoomId: null, wall: "west", along: 0.5, width: 1.6 },
+      { id: `door-${suffix}-b`, toRoomId: roomId, wall: "north", along: 0.25, width: DOOR_WIDTH },
+    ],
+    deskIds: [],
+    records: [],
+    corridor: true,
+  };
   const main: Room = {
     id: roomId,
     name: "Main room",
     purpose: "Everything happens here until more rooms are added",
-    bounds: { x: 0, z: 0, w: 14, d: 10 },
-    doors: [{ id: `door-${suffix}-out`, toRoomId: null, wall: "south", along: 0.5, width: 1.6 }],
+    bounds: { x: 0, z: 3, w: 12, d: 10 },
+    doors: [{ id: `door-${suffix}-a`, toRoomId: hallId, wall: "south", along: 0.5, width: DOOR_WIDTH }],
     deskIds: [deskId],
     records: [],
   };
@@ -720,8 +810,8 @@ export function blankOffice(input: {
       id: `fp-${suffix}`,
       name: "Floor plan",
       description: "",
-      rooms: [main],
-      desks: [{ id: deskId, roomId, position: { x: 7, z: 5 }, facing: Math.PI, occupantId: adminId }],
+      rooms: [main, hall],
+      desks: [{ id: deskId, roomId, position: { x: 6, z: 8 }, facing: Math.PI, occupantId: adminId }],
     },
     stageRooms: { intake: roomId, planning: roomId, execution: roomId, review: roomId },
     participants: [
@@ -754,7 +844,10 @@ export function blankOffice(input: {
         name: "Member",
         description: "Works in the main room.",
         permissions: [],
-        grants: [{ room: roomId, scopes: ALL_SCOPES, effect: "allow" }],
+        grants: [
+          { room: roomId, scopes: ALL_SCOPES, effect: "allow" },
+          { room: hallId, scopes: ["enter"], effect: "allow" },
+        ],
       },
     },
     rules: [],
@@ -924,18 +1017,18 @@ export function parseAdminOp(input: unknown): AdminOp | null {
         : null;
     case "ADD_ROOM":
       return text(o.name) &&
-        text(o.attachTo, 60) &&
         typeof o.width === "number" &&
         typeof o.depth === "number" &&
-        WALLS.includes(o.side as Wall)
+        (o.side === "along" ? o.attachTo === undefined || text(o.attachTo, 60) : text(o.attachTo, 60) && WALLS.includes(o.side as Wall))
         ? {
             type: "ADD_ROOM",
             name: o.name,
             purpose: optionalText(o.purpose) ?? "",
             width: o.width,
             depth: o.depth,
-            attachTo: o.attachTo,
-            side: o.side as Wall,
+            attachTo: text(o.attachTo, 60) ? o.attachTo : "",
+            side: o.side as Wall | "along",
+            ...(o.corridor === true ? { corridor: true } : {}),
           }
         : null;
     case "UPDATE_ROOM":

@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   let view = service.getView(await owner.read());
   expect("the administrator's office is empty: no tasks", view.office.tasks.length, 0);
   expect("no rules", view.office.rules.length, 0);
-  expect("one room", view.office.floorplan.rooms.length, 1);
+  expect("one room on a corridor", view.office.floorplan.rooms.map((r) => (r.corridor ? "corridor" : "room")).join(","), "room,corridor");
   expect("one person, the administrator", view.office.participants.map((p) => p.displayName).join(), "Alex Kim");
   expect("nothing from the demo leaked in", JSON.stringify(view).includes("Dana Reyes") || JSON.stringify(view).includes("Northline"), false);
   expect("it holds every permission in its own office", view.viewer.permissions.length, 11);
@@ -185,7 +185,7 @@ async function main(): Promise<void> {
   expect("an invited person's seat carries the role's permissions", robinSeat.permissions.join(), "manage_rooms");
   const robin = await sessionFor("robin@example.test", robinSeat.participantId);
   let robinView = await service.applyAdminOperation(await robin.read(), { type: "ADD_ROOM", name: "Annex", purpose: "", width: 6, depth: 6, attachTo: mainRoom, side: "east" });
-  expect("with manage rooms, a room can be added", robinView.office.floorplan.rooms.length, 2);
+  expect("with manage rooms, a room can be added", robinView.office.floorplan.rooms.length, 3);
   expect("but not a role", await refusal(async () => service.applyAdminOperation(await robin.read(), { type: "ADD_ROLE", name: "Shadow", description: "" })), 403);
   expect("nor an agent", await refusal(async () => service.applyAdminOperation(await robin.read(), { type: "ADD_AGENT", displayName: "Mole", title: "Agent", roleId: memberRole, roomId: mainRoom, capabilities: [], agentType: "playbook" })), 403);
   expect("nor a provider", await refusal(async () => service.saveProviderSettings(await robin.read(), { ...anthropic, apiKey: fakeKey })), 403);

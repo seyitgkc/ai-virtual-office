@@ -19,7 +19,8 @@ export function InviteDialog({
 }) {
   const roles = Object.values(office.roles);
   const withinReach = (role: Role): boolean => role.permissions.every((p) => ownPermissions.includes(p));
-  const rooms = office.floorplan.rooms;
+  // A corridor holds no desk, so it is not offered as a place to sit.
+  const rooms = office.floorplan.rooms.filter((r) => !r.corridor);
   const [displayName, setDisplayName] = useState("");
   const [title, setTitle] = useState("");
   const [roleId, setRoleId] = useState(roles.find((r) => r.permissions.length === 0)?.id ?? roles[0]?.id ?? "");

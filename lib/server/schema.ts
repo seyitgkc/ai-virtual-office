@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -96,6 +96,8 @@ CREATE TABLE rooms (
   z            REAL NOT NULL,
   width        REAL NOT NULL CHECK (width > 0),
   depth        REAL NOT NULL CHECK (depth > 0),
+  -- 1 for a room people only walk through, which other rooms open onto.
+  corridor     INTEGER NOT NULL DEFAULT 0 CHECK (corridor IN (0, 1)),
   UNIQUE (floorplan_id, position)
 ) STRICT;
 
@@ -1067,5 +1069,11 @@ SELECT id, room_id, position, name,
 DROP TABLE connected_systems;
 ALTER TABLE connected_systems_new RENAME TO connected_systems;
 CREATE INDEX systems_by_room ON connected_systems(room_id);
+`,
+  // Version 11 marks corridors. The demo's hall, and the hall of every office
+  // made from it, was one all along.
+  10: /* sql */ `
+ALTER TABLE rooms ADD COLUMN corridor INTEGER NOT NULL DEFAULT 0 CHECK (corridor IN (0, 1));
+UPDATE rooms SET corridor = 1 WHERE id = 'hall' OR id LIKE 'hall-%';
 `,
 };

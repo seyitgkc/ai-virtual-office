@@ -141,8 +141,8 @@ function writeFloorplan(db: Db, office: Office): void {
   plan.rooms.forEach((room, position) => {
     run(
       db,
-      `INSERT INTO rooms (id, floorplan_id, position, name, purpose, x, z, width, depth)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO rooms (id, floorplan_id, position, name, purpose, x, z, width, depth, corridor)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       room.id,
       plan.id,
       position,
@@ -152,6 +152,7 @@ function writeFloorplan(db: Db, office: Office): void {
       room.bounds.z,
       room.bounds.w,
       room.bounds.d,
+      room.corridor ? 1 : 0,
     );
   });
   for (const room of plan.rooms) {
@@ -768,11 +769,12 @@ function syncFloorplan(db: Db, before: Office, after: Office): void {
   plan.rooms.forEach((room, position) => {
     run(
       db,
-      `INSERT INTO rooms (id, floorplan_id, position, name, purpose, x, z, width, depth)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO rooms (id, floorplan_id, position, name, purpose, x, z, width, depth, corridor)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          position = excluded.position, name = excluded.name, purpose = excluded.purpose,
-         x = excluded.x, z = excluded.z, width = excluded.width, depth = excluded.depth`,
+         x = excluded.x, z = excluded.z, width = excluded.width, depth = excluded.depth,
+         corridor = excluded.corridor`,
       room.id,
       plan.id,
       position,
@@ -782,6 +784,7 @@ function syncFloorplan(db: Db, before: Office, after: Office): void {
       room.bounds.z,
       room.bounds.w,
       room.bounds.d,
+      room.corridor ? 1 : 0,
     );
   });
 
@@ -991,6 +994,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     z: number;
     width: number;
     depth: number;
+    corridor: number;
   }>(db, "SELECT * FROM rooms WHERE floorplan_id = ? ORDER BY position", planRow.id).map((r) => ({
     id: r.id,
     name: r.name,
@@ -1005,6 +1009,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     })),
     deskIds: desks.filter((d) => d.roomId === r.id).map((d) => d.id),
     records: (recordsByRoom.get(r.id) ?? []).map((record) => record.body),
+    ...(r.corridor === 1 ? { corridor: true } : {}),
   }));
   const roomIds = new Set(rooms.map((r) => r.id));
   const operations = storedOperations(db);

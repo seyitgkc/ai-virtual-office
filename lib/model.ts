@@ -155,6 +155,8 @@ export interface Room {
    * someone who holds `read` on the room.
    */
   records: string[];
+  /** True for a room people only walk through, which other rooms open onto. */
+  corridor?: boolean;
 }
 
 export interface Desk {

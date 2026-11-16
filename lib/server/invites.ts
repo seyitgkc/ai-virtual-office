@@ -59,6 +59,7 @@ export function createInvite(session: Session, request: InviteRequest): { path: 
   }
   const room = state.office.floorplan.rooms.find((r) => r.id === request.roomId);
   if (!room) throw new OfficeError(400, "Choose a room.");
+  if (room.corridor) throw new OfficeError(400, `Nobody has a desk in ${room.name}, which is only for walking through.`);
   const spot = freeDeskSpot(state.office.floorplan, room.id);
   if (!spot) throw new OfficeError(409, `${room.name} has no space for another desk.`);
 

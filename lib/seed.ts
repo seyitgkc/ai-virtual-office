@@ -128,6 +128,7 @@ const rooms: Room[] = [
     id: "hall",
     name: "Hall",
     purpose: "The corridor every room opens onto",
+    corridor: true,
     bounds: { x: 0, z: HALL_Z, w: PLAN_WIDTH, d: HALL_DEPTH },
     doors: [
       { id: "d-hall-out", toRoomId: null, wall: "west", along: 0.5, width: 1.6 },

@@ -299,8 +299,11 @@ function RoomsTab({ office, adminOp }: { office: Office; adminOp: (op: AdminOp) 
   const [width, setWidth] = useState(8);
   const [depth, setDepth] = useState(8);
   const [attachTo, setAttachTo] = useState(rooms[rooms.length - 1]?.id ?? "");
-  const [side, setSide] = useState<Wall>("east");
+  const hasCorridor = rooms.some((r) => r.corridor);
+  const [side, setSide] = useState<Wall | "along">(hasCorridor ? "along" : "east");
+  const [corridor, setCorridor] = useState(false);
   const target = rooms.some((r) => r.id === attachTo) ? attachTo : (rooms[0]?.id ?? "");
+  const place = side === "along" && !hasCorridor ? "east" : side;
 
   return (
     <>
@@ -323,7 +326,8 @@ function RoomsTab({ office, adminOp }: { office: Office; adminOp: (op: AdminOp) 
                 />
               </div>
               <div className="entity-meta">
-                {room.bounds.w} by {room.bounds.d} m · {seated} desk{seated === 1 ? "" : "s"}
+                {room.bounds.w} by {room.bounds.d} m ·{" "}
+                {room.corridor ? "corridor" : `${seated} desk${seated === 1 ? "" : "s"}`}
                 {stages.length > 0 ? ` · hosts ${stages.map((s) => stageSpec(s).label).join(", ")}` : ""}
               </div>
               <ConfirmButton
@@ -346,11 +350,13 @@ function RoomsTab({ office, adminOp }: { office: Office; adminOp: (op: AdminOp) 
               value={office.stageRooms[stage]}
               onChange={(e) => adminOp({ type: "SET_STAGE_ROOM", stage, roomId: e.target.value })}
             >
-              {office.floorplan.rooms.map((room) => (
-                <option key={room.id} value={room.id}>
-                  {room.name}
-                </option>
-              ))}
+              {rooms
+                .filter((room) => !room.corridor)
+                .map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.name}
+                  </option>
+                ))}
             </select>
           </label>
         ))}
@@ -358,16 +364,26 @@ function RoomsTab({ office, adminOp }: { office: Office; adminOp: (op: AdminOp) 
 
       <Section
         title="Add a room"
-        hint="The new room is built against one wall of an existing room, with a door between them."
+        hint="A new room takes the next free place along the corridor, which lengthens to make space. It can also be built against one wall of a room you choose. Either way a door joins the two."
       >
         <form
           className="form-grid"
           onSubmit={(e) => {
             e.preventDefault();
-            void adminOp({ type: "ADD_ROOM", name, purpose, width, depth, attachTo: target, side }).then((added) => {
+            void adminOp({
+              type: "ADD_ROOM",
+              name,
+              purpose,
+              width,
+              depth,
+              attachTo: place === "along" ? "" : target,
+              side: place,
+              ...(corridor ? { corridor: true } : {}),
+            }).then((added) => {
               if (!added) return;
               setName("");
               setPurpose("");
+              setCorridor(false);
             });
           }}
         >
@@ -381,15 +397,16 @@ function RoomsTab({ office, adminOp }: { office: Office; adminOp: (op: AdminOp) 
           </label>
           <label>
             Width (m)
-            <input type="number" min={4} max={24} value={width} onChange={(e) => setWidth(Number(e.target.value))} />
+            <input type="number" min={corridor ? 2 : 4} max={24} value={width} onChange={(e) => setWidth(Number(e.target.value))} />
           </label>
           <label>
             Depth (m)
-            <input type="number" min={4} max={24} value={depth} onChange={(e) => setDepth(Number(e.target.value))} />
+            <input type="number" min={corridor ? 2 : 4} max={24} value={depth} onChange={(e) => setDepth(Number(e.target.value))} />
           </label>
           <label>
             Place it
-            <select value={side} onChange={(e) => setSide(e.target.value as Wall)}>
+            <select value={place} onChange={(e) => setSide(e.target.value as Wall | "along")}>
+              {hasCorridor && <option value="along">along the corridor</option>}
               {SIDES.map((s) => (
                 <option key={s.wall} value={s.wall}>
                   {s.label}
@@ -397,15 +414,21 @@ function RoomsTab({ office, adminOp }: { office: Office; adminOp: (op: AdminOp) 
               ))}
             </select>
           </label>
-          <label>
-            Which room
-            <select value={target} onChange={(e) => setAttachTo(e.target.value)}>
-              {rooms.map((room) => (
-                <option key={room.id} value={room.id}>
-                  {room.name}
-                </option>
-              ))}
-            </select>
+          {place !== "along" && (
+            <label>
+              Which room
+              <select value={target} onChange={(e) => setAttachTo(e.target.value)}>
+                {rooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="wide check">
+            <input type="checkbox" checked={corridor} onChange={(e) => setCorridor(e.target.checked)} />
+            This room is a corridor. People walk through it and nobody has a desk there.
           </label>
           <button type="submit" className="btn primary">
             Add room

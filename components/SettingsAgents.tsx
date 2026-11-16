@@ -106,7 +106,8 @@ export function PeopleTab({
   adminOp: (op: AdminOp) => Promise<boolean>;
 }) {
   const roles = Object.values(office.roles);
-  const rooms = office.floorplan.rooms;
+  // A corridor holds no desk, so it is not offered as a place to sit.
+  const rooms = office.floorplan.rooms.filter((r) => !r.corridor);
   const agentRoles = roles.filter((r) => r.permissions.length === 0);
   const [configuring, setConfiguring] = useState<string | null>(null);
   const agent = office.participants.find((p) => p.id === configuring && p.kind === "agent") ?? null;
@@ -236,7 +237,8 @@ function AddAgent({
   providers: ProviderView[];
   adminOp: (op: AdminOp) => Promise<boolean>;
 }) {
-  const rooms = office.floorplan.rooms;
+  // A corridor holds no desk, so it is not offered as a place to sit.
+  const rooms = office.floorplan.rooms.filter((r) => !r.corridor);
   const [displayName, setDisplayName] = useState("");
   const [title, setTitle] = useState("");
   const [roleId, setRoleId] = useState(agentRoles[0]?.id ?? "");

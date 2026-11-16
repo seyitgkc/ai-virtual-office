@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   expect("clearing the cell leaves no grant for it", roles.roles.intake.grants.some((g) => g.room === "finance"), false);
   const withRole = apply(seed, { type: "ADD_ROLE", name: "Auditor", description: "Reads everything" });
   const auditor = Object.values(withRole.roles).find((r) => r.name === "Auditor")!;
-  expect("a role is added with no access", auditor.grants.length, 0);
+  expect("a role is added able to walk the corridor and nothing more", JSON.stringify(auditor.grants), JSON.stringify([{ room: "hall", scopes: ["enter"], effect: "allow" }]));
   expect("and no permissions", auditor.permissions.length, 0);
   expect("an unused role can be removed", Object.keys(apply(withRole, { type: "REMOVE_ROLE", roleId: auditor.id }).roles).length, 5);
   expect("a role in use cannot be removed", refusal(seed, { type: "REMOVE_ROLE", roleId: "intake" })?.includes("Iris"), true);
@@ -238,7 +238,26 @@ async function main(): Promise<void> {
   const mainRoom = blank.floorplan.rooms[0].id;
   const memberRole = Object.values(blank.roles).find((r) => r.permissions.length === 0)!.id;
   expect("its first person holds every permission", blank.roles[blank.participants[0].roleId].permissions.length, PERMISSIONS.length);
-  expect("a blank office has one room and one person", `${blank.floorplan.rooms.length}/${blank.participants.length}`, "1/1");
+  expect("a blank office has one room on a corridor, and one person", `${blank.floorplan.rooms.length}/${blank.participants.length}`, "2/1");
+  const hallOf = (o: Office) => o.floorplan.rooms.find((r) => r.corridor)!;
+  expect("the corridor has the way out and a door to the room", hallOf(blank).doors.map((d) => d.toRoomId ?? "out").join(","), `out,${mainRoom}`);
+  let lined = blank;
+  for (const name of ["Sales", "Stores", "Accounts office", "Workshop"]) {
+    lined = apply(lined, { type: "ADD_ROOM", name, purpose: "", width: 10, depth: 8, attachTo: "", side: "along" }, me);
+  }
+  const hall = hallOf(lined);
+  const placedAt = (name: string) => { const b = lined.floorplan.rooms.find((r) => r.name === name)!.bounds; return `${b.x},${b.z}`; };
+  expect("rooms added along the corridor take each side in turn", ["Sales", "Stores", "Accounts office", "Workshop"].map(placedAt).join(" "), "0,-8 10,-8 12,3 20,-8");
+  expect("the corridor lengthens to reach the furthest room", hall.bounds.w, 30);
+  const touching = (r: Office["floorplan"]["rooms"][number]) => r.bounds.z === hall.bounds.z + hall.bounds.d || r.bounds.z + r.bounds.d === hall.bounds.z;
+  expect("every room stands against the corridor", lined.floorplan.rooms.filter((r) => !r.corridor).every(touching), true);
+  const doorX = (toRoomId: string) => hall.bounds.x + hall.doors.find((d) => d.toRoomId === toRoomId)!.along * hall.bounds.w;
+  const centred = lined.floorplan.rooms.filter((r) => !r.corridor).every((r) => Math.abs(doorX(r.id) - (r.bounds.x + r.bounds.w / 2)) < 0.01);
+  expect("and each corridor door faces the middle of its room, after the corridor grew", centred, true);
+  expect("nobody is given a desk in a corridor", refusal(lined, { type: "ADD_AGENT", displayName: "", title: "Porter", roleId: memberRole, roomId: hall.id, capabilities: [], agentType: "playbook" }, me), "Nobody has a desk in Corridor, which is only for walking through.");
+  expect("and no stage is hosted there", refusal(lined, { type: "SET_STAGE_ROOM", stage: "intake", roomId: hall.id }, me), "No stage of the work is done in Corridor, which is only for walking through.");
+  const second = apply(lined, { type: "ADD_ROOM", name: "Back passage", purpose: "", width: 3, depth: 8, attachTo: mainRoom, side: "north", corridor: true }, me);
+  expect("a corridor can be added, and every role may walk it", Object.values(second.roles).every((r) => r.grants.some((g) => (g.room === second.floorplan.rooms.at(-1)!.id || g.room === "*") && g.scopes.includes("enter"))), true);
   expect("and no work or rules", blank.tasks.length + blank.messages.length + blank.rules.length, 0);
   const idsOf = (o: Office) => [o.id, o.floorplan.id, ...o.floorplan.rooms.map((r) => r.id), ...o.floorplan.desks.map((d) => d.id), ...o.participants.map((p) => p.id), ...Object.keys(o.roles)];
   expect("two blank offices share no ids", idsOf(blank).some((id) => idsOf(other).includes(id)), false);
