@@ -469,7 +469,9 @@ export async function reduce(
         task &&
         task.closedAt === null &&
         task.ownerId === reader.id &&
-        task.status === "in_progress"
+        // At review too: the reviewer asked a colleague for something and
+        // needs the answer before a person decides.
+        task.status === openStatus(task.stage)
       ) {
         wake.push({ kind: "resume", taskId: task.id, participantId: reader.id });
       }

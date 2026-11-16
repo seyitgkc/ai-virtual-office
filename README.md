@@ -1709,8 +1709,12 @@ playbook.
 - The first step after a click is taken while the page waits, which is
   several seconds with a model. What follows runs in the background.
 - Work waiting to be carried forward is held in the server's memory. If the
-  server restarts mid-run, the tasks stay where they were and a person moves
-  them on with Advance.
+  server restarts mid-run, the office finds the tasks that nothing is
+  carrying within a minute and hands them on, up to three times per task.
+  After that a person moves them on with Advance.
+- Agents take their steps one at a time across the whole server, and a
+  person's click waits its turn behind a step in progress. One slow model
+  call holds everything up for as long as it takes.
 - A wait is stored with the task, so it survives a restart. The office looks
   for waits that have ended once a minute. The demo office keeps a clock that
   only moves with a click, so a wait there ends only when a person ends it.
@@ -1859,12 +1863,12 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, and a need passed to a colleague | `npm run agents` | 129 of 129 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, and a need passed to a colleague | `npm run agents` | 133 of 133 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 55 of 55 pass |
 | Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, and an office built from nothing | `npm run admin` | 93 of 93 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
 | The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 151 of 151 pass |
-| Agents working between clicks, providers that belong to an account, and the sample office | `npm run loop` | 50 of 50 pass |
+| Agents working between clicks, providers that belong to an account, and the sample office | `npm run loop` | 55 of 55 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 

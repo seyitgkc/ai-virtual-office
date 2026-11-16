@@ -291,6 +291,24 @@ async function main(): Promise<void> {
   const worker2 = asksFirst.inputs.findLast((i) => i.stage === "execution")!;
   expect("an agent that may not read Reception still does not", worker2.priorMessages.some((m) => m.kind === "answer"), false);
 
+  console.log("\n-- a reviewer hears back from a colleague --");
+  const reviewing = new Recorder((input) =>
+    input.attending
+      ? { questions: [], assumptions: [], notes: [{ toParticipantId: input.attending.fromId, body: "Freight is booked." }] }
+      : input.stage === "review" && reviewing.inputs.filter((i) => i.stage === "review" && !i.attending).length === 1
+        ? { questions: [], assumptions: [], notes: [{ toParticipantId: worker ?? "", body: "Is the freight booked?" }] }
+        : { questions: [], assumptions: [] },
+  );
+  let heard = (await reduce(withAi, { type: "SUBMIT_REQUEST", title: "Order 4795", detail: "One head.", requestedById: "p-dana" }, reviewing)).state;
+  const heardId = heard.office.tasks.at(-1)!.id;
+  for (let i = 0; i < 2; i++) heard = (await reduce(heard, { type: "ADVANCE", taskId: heardId }, reviewing)).state;
+  const atReview = await reduce(heard, { type: "ADVANCE", taskId: heardId }, reviewing);
+  heard = atReview.state;
+  const asked2 = atReview.wake.find((w) => w.kind === "attend");
+  expect("the reviewer's note reaches the colleague", asked2?.participantId, worker);
+  const replied = asked2?.kind === "attend" ? await reduce(heard, { type: "AGENT_ATTEND", taskId: heardId, participantId: asked2.participantId, noteId: asked2.noteId }, reviewing) : null;
+  expect("and the colleague's reply wakes the reviewer, though the task waits for a decision", replied?.wake.some((w) => w.kind === "resume" && w.participantId === replied.state.office.tasks.find((t) => t.id === heardId)!.ownerId), true);
+
   console.log("\n-- waiting for a day --");
   const waitsFor = async (until: string) => {
     const dated = new Recorder((input) =>
