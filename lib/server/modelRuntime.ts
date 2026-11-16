@@ -518,6 +518,17 @@ export function tidyReply(parsed: unknown): unknown {
         : output && typeof output === "object" && !Array.isArray(output)
           ? { label: word(record(output).label), body: word(record(output).body) }
           : null,
+    // A day to wait for. Models write it as an object, or now and then as
+    // the day alone.
+    wait:
+      typeof raw.wait === "string" && raw.wait.trim()
+        ? { until: raw.wait.trim().slice(0, 10), reason: "The rest of this step is due then." }
+        : raw.wait && typeof raw.wait === "object" && !Array.isArray(raw.wait)
+          ? {
+              until: word(record(raw.wait).until ?? record(raw.wait).date ?? record(raw.wait).day).slice(0, 10),
+              reason: word(record(raw.wait).reason ?? record(raw.wait).why),
+            }
+          : null,
   };
 }
 

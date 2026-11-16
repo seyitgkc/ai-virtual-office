@@ -337,6 +337,10 @@ async function main(): Promise<void> {
   for (let i = 0; i < 3; i++) late = (await reduce(late, { type: "ADVANCE", taskId: late.office.tasks.at(-1)!.id }, lateFind)).state;
   expect("a task cannot wait at review", `${late.office.tasks.at(-1)!.status} ${late.office.tasks.at(-1)!.wait}`, "in_review undefined");
   expect("but what the reviewer found outstanding is said, with how to make it wait", late.office.messages.at(-1)!.body.includes("still to do on 15 January 2027: The second order is placed then. A task cannot wait at this stage. Send it back"), true);
+  const spoken = readReply(JSON.stringify({ statusNote: "Shipped five.", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null, wait: { until: "2027-01-15T00:00:00Z", reason: "Stock arrives." } }));
+  expect("a wait in a model's own reply survives being read", "step" in spoken ? JSON.stringify(toStepResult(spoken.step, vera).wait) : "unread", JSON.stringify({ until: "2027-01-15", reason: "Stock arrives." }));
+  const without = readReply(JSON.stringify({ statusNote: "Shipped five.", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null }));
+  expect("and a reply that leaves it out is still read", "step" in without ? toStepResult(without.step, vera).wait : "unread", undefined);
   expect("a reply with a day is read", toStepResult({ statusNote: "", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null, wait: { until: " 2027-01-15 ", reason: "Stock arrives." } }, vera).wait?.until, "2027-01-15");
   expect("and one that is not a calendar day is dropped", toStepResult({ statusNote: "", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null, wait: { until: "mid January", reason: "Stock arrives." } }, vera).wait, undefined);
 

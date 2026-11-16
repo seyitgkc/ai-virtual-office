@@ -94,6 +94,7 @@ async function main(): Promise<void> {
     assumptions: [],
     needs: [],
     output: { label: "Intake", body: "Two heads returned." },
+    wait: { until: "2027-01-15", reason: "The stock arrives." },
   };
   const server = createServer(async (request, response) => {
     const send = (status: number, data: unknown) => {
@@ -121,6 +122,7 @@ async function main(): Promise<void> {
   let result = await runtime.step(input);
   expect("the reply becomes the agent's step", result.statusNote, "Checked the request");
   expect("with its output", result.output?.body, "Two heads returned.");
+  expect("and the day it waits for, through the same reading a real reply gets", `${result.wait?.until} ${result.wait?.reason}`, "2027-01-15 The stock arrives.");
   expect("and its question", result.questions[0]?.body, "Which branch?");
   expect("the chat completions address is used", seen[0].path, "/v1/chat/completions");
   expect("the key is sent as a bearer token", seen[0].auth, "Bearer test-key-for-the-stand-in");
