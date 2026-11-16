@@ -2,6 +2,7 @@
  * Checks the admin operations: rooms, roles, people and agents, and an office
  * built from nothing. Run: npx tsx scripts/admin.ts
  */
+import { setupSteps } from "../lib/setup";
 import { AGENT_NAMES, AdminError, applyAdminOp, blankOffice, parseAdminOp, permissionFor, type AdminOp } from "../lib/admin";
 import { reduce } from "../lib/engine";
 import { PlaybookRuntime } from "../lib/playbook";
@@ -275,6 +276,21 @@ async function main(): Promise<void> {
   expect("in the room that hosts intake", first.roomId, mainRoom);
   expect("ids it generates carry the office's own tag", first.id, "T-ab12-1");
   expect("an agent with an empty playbook says plainly that it did nothing", run.state.office.messages.some((m) => m.body.includes("has no playbook step for this")), true);
+
+  const todo = (o: Office, providers: { id: string; usable: boolean }[] = []) =>
+    setupSteps(o, initialState.now, providers).filter((s) => !s.done && !s.optional).map((s) => s.id).join(",");
+  const fresh = blankOffice({ suffix: "ee55", name: "Fresh", admin: { displayName: "Ann", title: "Administrator" } });
+  const freshMe = fresh.participants[0].id;
+  const freshMain = fresh.floorplan.rooms[0].id;
+  const freshMember = Object.values(fresh.roles).find((r) => r.permissions.length === 0)!.id;
+  expect("a new office still needs an agent and a first request", todo(fresh), "agents,request");
+  let staffed = apply(fresh, { type: "ADD_AGENT", displayName: "", title: "Helper", roleId: freshMember, roomId: freshMain, capabilities: [], agentType: "ai", providerId: "prov-x" }, freshMe);
+  expect("an AI agent needs a provider with a working key", todo(staffed), "provider,request");
+  expect("and with one, only the request is left", todo(staffed, [{ id: "prov-x", usable: true }]), "request");
+  staffed = apply(staffed, { type: "ADD_ROOM", name: "Accounts", purpose: "", width: 8, depth: 8, attachTo: "", side: "along" }, freshMe);
+  staffed = apply(staffed, { type: "SET_STAGE_ROOM", stage: "review", roomId: staffed.floorplan.rooms.at(-1)!.id }, freshMe);
+  expect("a stage moved to a room nobody may work in is named twice over", todo(staffed, [{ id: "prov-x", usable: true }]), "roles,agents,request");
+  expect("and the step says which room", setupSteps(staffed, initialState.now, []).find((s) => s.id === "agents")!.detail, "Nobody can take the work in Accounts.");
 
   const unnamed = { type: "ADD_AGENT" as const, displayName: "", title: "Helper", roleId: memberRole, roomId: mainRoom, capabilities: [], agentType: "playbook" as const };
   const withOne = apply(blank, unnamed, me);

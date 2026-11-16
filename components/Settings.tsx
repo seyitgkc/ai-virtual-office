@@ -16,14 +16,14 @@ type Tab = "offices" | "own-providers" | "office" | "rooms" | "records" | "peopl
 /** Each tab and the permission that opens it. Offices is open to everyone. */
 const TABS: { id: Tab; label: string; needs: Permission | null }[] = [
   { id: "offices", label: "Offices", needs: null },
-  { id: "own-providers", label: "Your AI providers", needs: null },
   { id: "office", label: "This office", needs: "manage_office" },
   { id: "rooms", label: "Rooms", needs: "manage_rooms" },
   { id: "records", label: "Records and systems", needs: "manage_rooms" },
   { id: "people", label: "People and agents", needs: "manage_people" },
   { id: "roles", label: "Roles and permissions", needs: "manage_roles" },
   { id: "rules", label: "Access rules", needs: "manage_access" },
-  { id: "providers", label: "AI providers", needs: "manage_providers" },
+  { id: "providers", label: "Office AI providers", needs: "manage_providers" },
+  { id: "own-providers", label: "My AI providers", needs: null },
 ];
 
 /** Where each wall is, as the overview shows the plan. */
@@ -48,8 +48,11 @@ export function Settings({
   providerOp,
   systemOp,
   readSystem,
+  initialTab,
   onClose,
 }: {
+  /** The tab to open on, when the person was sent here for one thing. */
+  initialTab?: string;
   view: OfficeView;
   viewer: Participant;
   adminOp: (op: AdminOp) => Promise<boolean>;
@@ -65,7 +68,9 @@ export function Settings({
   const tabs = TABS.filter(
     (t) => (t.needs === null || own.includes(t.needs)) && (t.id !== "own-providers" || view.ownProvidersEditable),
   );
-  const [tab, setTab] = useState<Tab>(tabs.find((t) => t.needs !== null)?.id ?? "offices");
+  const [tab, setTab] = useState<Tab>(
+    tabs.find((t) => t.id === initialTab)?.id ?? tabs.find((t) => t.needs !== null)?.id ?? "offices",
+  );
   const open = tabs.some((t) => t.id === tab) ? tab : "offices";
   const office = view.office;
 
@@ -187,7 +192,7 @@ function SampleOffice({ view, officeOp }: { view: OfficeView; officeOp: (op: Off
       title="Add a sample office with AI agents"
       hint={
         usable.length === 0
-          ? "This adds the distributor from the demo as an office of your own, with five AI agents in place of the playbook agents. It needs an AI provider from your account: add one under Your AI providers first."
+          ? "This adds the distributor from the demo as an office of your own, with five AI agents in place of the playbook agents. It needs an AI provider from your account: add one under My AI providers first."
           : "This adds the distributor from the demo as an office of your own: the same rooms, roles and records, five AI agents on the provider you choose, and you as its manager. It starts with no work. Every step an agent takes is a call to that provider."
       }
     >

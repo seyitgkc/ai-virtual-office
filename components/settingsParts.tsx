@@ -111,12 +111,24 @@ export type CellEffect = Effect | "none";
  * Room access as a table: one row per room, and for each of enter, read and
  * act an Allow box and a Deny box. Ticking one clears the other.
  */
+/** Whole rows of the access grid that people set most often, in one choice. */
+const ROW_CHOICES: { label: string; effects: Record<AccessScope, CellEffect> }[] = [
+  { label: "Work here: enter, read and act", effects: { enter: "allow", read: "allow", act: "allow" } },
+  { label: "Look in: enter and read", effects: { enter: "allow", read: "allow", act: "none" } },
+  { label: "Walk through: enter only", effects: { enter: "allow", read: "none", act: "none" } },
+  { label: "Keep out: deny all three", effects: { enter: "deny", read: "deny", act: "deny" } },
+  { label: "Not set: clear the row", effects: { enter: "none", read: "none", act: "none" } },
+];
+
 export function AccessGrid({
   rows,
   caption,
   effectOf,
   onChange,
+  wholeRows = false,
 }: {
+  /** Offer a choice that sets a whole row at once. */
+  wholeRows?: boolean;
   rows: { id: RoomSelector; label: string }[];
   caption: string;
   effectOf: (room: RoomSelector, scope: AccessScope) => CellEffect;
@@ -136,6 +148,11 @@ export function AccessGrid({
                 {scope}
               </th>
             ))}
+            {wholeRows && (
+              <th rowSpan={2} scope="col">
+                Whole row
+              </th>
+            )}
           </tr>
           <tr>
             {ALL_SCOPES.flatMap((scope) => [
@@ -165,6 +182,28 @@ export function AccessGrid({
                   </td>
                 ));
               })}
+              {wholeRows && (
+                <td className="row-choice">
+                  <select
+                    aria-label={`Set every scope on ${row.label}`}
+                    value=""
+                    onChange={(e) => {
+                      const choice = ROW_CHOICES[Number(e.target.value)];
+                      if (!choice) return;
+                      for (const scope of ALL_SCOPES) {
+                        if (effectOf(row.id, scope) !== choice.effects[scope]) onChange(row.id, scope, choice.effects[scope]);
+                      }
+                    }}
+                  >
+                    <option value="">Set to</option>
+                    {ROW_CHOICES.map((choice, index) => (
+                      <option key={choice.label} value={index}>
+                        {choice.label}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

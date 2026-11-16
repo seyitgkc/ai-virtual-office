@@ -1,5 +1,6 @@
 "use client";
 
+import type { SetupStep, SetupTab } from "../lib/setup";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ALL_SCOPES,
@@ -134,11 +135,11 @@ export function TitleCard({
       </p>
       <div className="legend">
         <span>
-          <KindBadge kind="human" agentType={null} /> rounded figure
+          <KindBadge kind="human" agentType={null} /> A person is a rounded figure.
         </span>
         <span>
-          <KindBadge kind="agent" agentType="ai" /> <KindBadge kind="agent" agentType="playbook" /> faceted,
-          with a ring
+          <KindBadge kind="agent" agentType="ai" /> <KindBadge kind="agent" agentType="playbook" /> An agent is a
+          faceted figure with a ring.
         </span>
       </div>
       {isDemoOffice && (
@@ -399,8 +400,11 @@ export function Inspector({
   pending,
   dispatch,
   onTokenOperation,
+  setup,
   onClear,
 }: {
+  /** What a new office still needs, for whoever is setting it up. */
+  setup: { steps: SetupStep[]; onOpen: (tab: SetupTab) => void } | null;
   office: Office;
   ctx: AccessContext;
   task: Task | null;
@@ -449,6 +453,43 @@ export function Inspector({
         onTokenOperation={onTokenOperation}
         onClear={onClear}
       />
+    );
+  }
+  if (setup) {
+    const left = setup.steps.filter((s) => !s.done && !s.optional).length;
+    return (
+      <div className="panel" id="inspector">
+        <div className="panel-head">
+          <span>Setting up this office</span>
+        </div>
+        <div className="panel-body">
+          <p className="setup-lead">
+            {left === 1
+              ? "Everything is in place. File a request and the office starts work."
+              : "Work runs once each stage has a room, a role that may work there and an agent to take it."}
+          </p>
+          <ol className="setup-steps">
+            {setup.steps.map((step) => (
+              <li key={step.id} data-done={step.done}>
+                <div className="setup-label">
+                  <span className="setup-mark" aria-hidden="true" />
+                  <span>
+                    <span className="visually-hidden">{step.done ? "Done: " : "To do: "}</span>
+                    {step.label}
+                    {step.optional && !step.done ? " (optional)" : ""}
+                  </span>
+                </div>
+                <div className="setup-detail">{step.detail}</div>
+                {step.tab && !step.done && (
+                  <button className="btn" onClick={() => setup.onOpen(step.tab!)}>
+                    Open in Settings
+                  </button>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
     );
   }
   return (

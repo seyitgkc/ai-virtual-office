@@ -1,5 +1,6 @@
 "use client";
 
+import { setupSteps } from "../lib/setup";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useOffice } from "../lib/useOffice";
@@ -55,6 +56,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
   const [inviting, setInviting] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
   const [mode, setMode] = useState<"overview" | "walk">("overview");
   const [walkRoomId, setWalkRoomId] = useState<string | null>(null);
   const walkPose = useRef(entryPose(office.floorplan.rooms));
@@ -160,7 +162,10 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           onSwitchOffice={(officeId) => officeOp({ operation: "switch", officeId })}
           isDemoOffice={view.isDemoOffice}
           onSignOut={signOut}
-          onSettings={() => setSettingsOpen(true)}
+          onSettings={() => {
+            setSettingsTab(undefined);
+            setSettingsOpen(true);
+          }}
           onInvite={() => setInviting(true)}
           inboxCount={inboxCount(view, viewer)}
           onInbox={() => setInboxOpen(true)}
@@ -210,6 +215,17 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         pending={pending}
         dispatch={dispatch}
         onTokenOperation={tokenOperation}
+        setup={
+          !view.isDemoOffice && office.tasks.length === 0 && view.viewer.permissions.includes("manage_office")
+            ? {
+                steps: setupSteps(office, view.now, view.providers),
+                onOpen: (tab) => {
+                  setSettingsTab(tab);
+                  setSettingsOpen(true);
+                },
+              }
+            : null
+        }
         onClear={() => {
           // Back to where the selection was made.
           setSheet(selectedTaskId ? "work" : "office");
@@ -288,6 +304,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           providerOp={providerOp}
           systemOp={systemOp}
           readSystem={readSystem}
+          initialTab={settingsTab}
           onClose={() => setSettingsOpen(false)}
         />
       )}

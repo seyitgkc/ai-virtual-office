@@ -326,14 +326,14 @@ checked on the server, stored, and written to the audit log.
 | Tab | Needs the permission | What you can do |
 | --- | --- | --- |
 | Offices | none | See every office your account has a seat in. Open another one. Add a new, empty office, or a sample office with AI agents. Remove one you manage. |
-| Your AI providers | none, with a password account | Add, edit, test and remove providers that belong to your account. They can be used in every office you have a seat in. |
 | This office | Manage the office | Rename the office. Choose whether agents hand work on by themselves. Clear all work, or remove the office. In the demo office: reset it to how it first loaded. |
 | Rooms | Manage rooms | Rename a room or change its purpose. Add a room, which takes the next free place along the corridor while the corridor lengthens to make space, or build it against a wall of a room you choose. Either way a door joins the two. A room can be marked as a corridor: every role may walk it, nobody has a desk there and no stage is hosted there. Remove an empty room. Choose which room hosts each workflow stage. |
 | Records and systems | Manage rooms | Edit the records kept in each room you can read. See what a connected system holds right now. Connect a system to a room, change it, or disconnect it. |
 | People and agents | Manage people and agents | Add an AI agent or a playbook agent with a desk and a role. An agent added with no name is given one that nobody in the office has. Choose an agent's provider and model, or write its playbook. Rename anyone, change their role, or move their desk. Remove someone who has no history. |
-| Roles and permissions | Manage roles | Add, rename or remove a role. Tick each permission per role. Tick allow or deny for each scope in each room. |
+| Roles and permissions | Manage roles | Add, rename or remove a role. Tick each permission per role. Tick allow or deny for each scope in each room, or set a whole row in one choice: work here, look in, walk through, keep out or not set. |
 | Access rules | Manage access | See every individual rule in a table and revoke one. Add rules for a person or agent by ticking cells and giving a reason. |
-| AI providers | Manage AI providers | Add, edit, test and remove the office's own providers. Each holds a type, a default model and an API key. See which providers people have brought in from their accounts. |
+| Office AI providers | Manage AI providers | Add, edit, test and remove the office's own providers. Each holds a type, a default model and an API key. See which providers people have brought in from their accounts. |
+| My AI providers | none, with a password account | Add, edit, test and remove providers that belong to your account. They can be used in every office you have a seat in. |
 
 A tab appears only for someone whose role carries its permission.
 
@@ -385,7 +385,7 @@ encrypted before it is stored and is never sent back to the page: afterwards
 the table shows only its last four characters. The shared demo office cannot
 hold a key.
 
-A provider can also belong to your account, under *Your AI providers*. It is
+A provider can also belong to your account, under *My AI providers*. It is
 then listed in every office you have a seat in, and you can give it to agents
 there without entering the key again. Other people in the office see that it
 is yours. They can give it to an agent only if their role has the *Use shared
@@ -446,8 +446,11 @@ person who can manage roles cannot lose that, and a role still in use cannot
 be deleted.
 
 **A new office starts empty**: a corridor and one room on it with you inside, two starter roles, no
-agents, no work and no rules. Add rooms, assign the stages, add agents and set
-the roles from there. Demo access cannot add offices.
+agents, no work and no rules. Until the first request is filed, the panel on
+the right lists what the office still needs, worked out from the office
+itself: a role that may work in each room that hosts a stage, an agent who can
+take each stage, a provider with a working key for each AI agent. Each step
+names what is missing and opens the Settings tab where it is done. Demo access cannot add offices.
 
 ## Example workflows
 
@@ -1823,7 +1826,7 @@ sample services the same way.
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
 | What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, and a need passed to a colleague | `npm run agents` | 120 of 120 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 55 of 55 pass |
-| Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, and an office built from nothing | `npm run admin` | 88 of 88 pass |
+| Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, and an office built from nothing | `npm run admin` | 93 of 93 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
 | The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 151 of 151 pass |
 | Agents working between clicks, providers that belong to an account, and the sample office | `npm run loop` | 40 of 40 pass |

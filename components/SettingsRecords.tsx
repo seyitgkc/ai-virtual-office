@@ -66,7 +66,7 @@ export function RecordsTab({
           (closed > 0 ? ` ${closed} room${closed === 1 ? " is" : "s are"} not listed because you cannot read ${closed === 1 ? "it" : "them"}.` : "")
         }
       >
-        {readable.map((room) => (
+        {homes.map((room) => (
           <RoomRecords key={room.id} room={room} adminOp={adminOp} />
         ))}
       </Section>

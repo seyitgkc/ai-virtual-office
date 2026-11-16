@@ -194,6 +194,7 @@ export function RolesTab({
           />
           <AccessGrid
             caption={`Room access for the role ${role.name}`}
+            wholeRows
             rows={roomRows(office)}
             effectOf={(room, scope) => roleEffect(role, room, scope)}
             onChange={(room, scope, effect) =>

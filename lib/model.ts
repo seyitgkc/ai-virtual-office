@@ -224,7 +224,7 @@ export const PERMISSION_INFO: Record<Permission, { label: string; description: s
     description: "Grant and revoke individual access rules and permission tokens. Receives escalations.",
   },
   reassign_work: { label: "Hand work over", description: "Give a task to a different owner." },
-  decide_reviews: { label: "Decide reviews", description: "Approve or reject work at the review stage." },
+  decide_reviews: { label: "Decide reviews", description: "Approve or reject work at the review stage, or send it back with what has to change." },
   see_everything: {
     label: "See everything",
     description: "Read every message and the whole activity log, including messages between other people.",
