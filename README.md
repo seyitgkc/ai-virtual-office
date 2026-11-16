@@ -45,7 +45,7 @@ review. Everything else moves without a click.
    to meet the doorways Sam may not pass.
 
 **What is real and what is not.** The access model, the workflow, sign-in,
-the database, the audit trail and the calls to the two sample services all
+the database, the audit trail and the calls to the five sample services all
 run for real. The demo's agents follow written playbooks, and the screen says
 so. Real AI agents on a language model work too, in any office where a
 provider is connected, and have been run end to end on the deployed site. The
@@ -133,9 +133,14 @@ pricing, and a finance approval before a quote goes out.
   person writes in Settings, and can be connected to an outside system whose
   records are read live. `read` on the room shows both. `act` on the room lets
   an agent do something in the system, such as placing an order.
-- **Two sample services in the stack.** A storefront and a freight carrier run
-  as their own containers beside the office. The demo office is connected to
-  both, and its agents place a real order in the storefront.
+- **Five sample services in the stack.** A storefront, a freight carrier, an
+  accounts ledger, a supplier portal and a service desk run as their own
+  containers beside the office. Each refuses what its real counterpart would,
+  such as an invoice past a credit limit. The demo office is connected to all
+  of them, and its agents place a real order in the storefront.
+- **Systems that describe themselves.** A connected system tells the office
+  what it is for and what can be done in it. Agents are given that
+  description, and a person can reword it in Settings.
 - **Granular role permissions.** Eleven separate permissions, such as managing
   access, deciding reviews or inviting people, ticked per role in a table.
 - **Many offices.** An account can add offices, switch between them and remove
@@ -154,7 +159,8 @@ pricing, and a finance approval before a quote goes out.
   for one person or one other agent when they should know something the
   handoff and the outputs do not say. A note blocks nothing.
 - **An inbox.** One place for what is waiting on you, the notes agents left
-  you, and your conversations, with a count of what is new.
+  you, what agents wrote to each other, and your conversations, with a count
+  of what is new.
 - **A walkable office.** An overview from above, and a first-person mode with
   a map. Every desk's screen shows what its occupant is doing right now, and
   facing someone offers a key to talk to them.
@@ -264,6 +270,7 @@ message: for work, file a request.
 | --- | --- | --- |
 | Waiting for you | Questions addressed to you, requests for access addressed to you, and tasks at review if you may decide reviews | Opens the task |
 | Notes left for you | Notes agents addressed to you in task threads, unopened ones marked | Opens the task and marks the note opened |
+| Between agents | Every note one agent left another, with who wrote to whom and on which task. Listed for people who may see everything | Opens the task |
 | Conversations | Everyone you have exchanged messages with, the latest line and how many are new | Opens their panel with the keyboard in the message box |
 
 **Notes.** An agent can leave a note for one person or one other agent while
@@ -382,19 +389,33 @@ being usable in an office once you no longer have a seat there.
 
 **A sample office.** Under *Offices*, *Add the sample office* creates the
 demo's distributor as an office of your own: the same five rooms, roles and
-records, the storefront and the carrier where the server has them, five AI
+records, the sample services where the server has them, five AI
 agents on the provider you pick from your account, and you as its manager. It
 starts with no work. Unlike the public demo it is yours alone, so model calls
 are spent only by people you invite.
 
 **Records and systems.** A room's records are sentences, one per line, such
-as a policy or an account's terms. A connected system belongs to one room and
-is one of two kinds:
+as a policy or an account's terms. A connected system belongs to one room. To
+connect one, give its address and API key. The office asks the system to
+describe itself and stores the answer: a name, a description of when and how
+to use it, and the operations it offers with the fields each one takes. The
+description is what an agent is told about the system. You can reword it in
+Settings, for example to say which jobs it is for in your office or what to
+check first. Leave it empty and the system's own wording comes back.
 
-| Kind | Live records | Operations |
-| --- | --- | --- |
-| Storefront | Products with list price and stock per branch, and recent orders | Place an order, cancel an order |
-| Freight carrier | Service levels with their rates, and recent shipments | Book a shipment, cancel a shipment |
+The office has no list of system types. Any service that answers three calls
+can be connected: `GET /v1/manifest` for the description and the operations,
+a records address named in the manifest that returns plain lines, and the
+operations themselves, each answering with a sentence that says what it did or
+why it refused. The five sample services are built this way:
+
+| Service | Live records | Operations | Refuses, for example |
+| --- | --- | --- | --- |
+| Storefront | Products with list price and stock per branch, and recent orders | Place an order, cancel an order | An order the branch cannot fill in full |
+| Freight carrier | Service levels with their rates, and recent shipments | Book a shipment, cancel a shipment | A parcel above 500 kg, or a second booking for the same order |
+| Accounts ledger | Dealer accounts with tier, credit limit, balance, payment record and holds, and recent invoices | Raise an invoice, record a payment, put an account on hold or release it | An invoice on a held account or past the credit limit, an order invoiced twice, a large invoice for a dealer that pays late |
+| Supplier portal | What the factory charges, its minimum order and case size, lead time and what it can ship now, and purchase orders | Raise a purchase order, expedite one by air, cancel one | An order below the minimum or not in whole cases. A short run ships in part and backorders the rest |
+| Service desk | Units in the field by serial number with their warranty, and tickets | Open a ticket, authorize a return, schedule a technician visit, close a ticket | A return for a unit out of warranty, a visit on a weekend or a fully booked day |
 
 The room's access rules cover the system. Someone with `read` on the room is
 shown the system's records as they are at that moment. An agent with `act` on
@@ -407,7 +428,7 @@ chooses Approve. Declining, or typing any other answer, leaves it undone. What t
 system answered is written to the thread, including a refusal such as a branch
 that does not hold enough stock. A system's address and API key are entered
 once, the key is stored encrypted, and neither a manager without `read` on the
-room nor any agent ever receives them. The demo office's two systems are fixed.
+room nor any agent ever receives them. The demo office's systems are fixed.
 
 The screen refuses changes that would leave the office broken, and says why: a
 room that hosts a stage or still has people in it cannot be removed, the last
@@ -561,7 +582,7 @@ flowchart TB
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>58 tables in 3NF")]
+  db[("SQLite<br/>60 tables in 3NF")]
   llm["Anthropic or an OpenAI<br/>compatible service"]
 
   hook -->|"action"| http
@@ -641,8 +662,9 @@ app/page.tsx              the office, for a signed-in person
 app/login, app/invite     sign-in and invite pages
 components/               3D scene, panels, settings, sign-in and invite forms
 scripts/                  ten check scripts
-services/storefront, services/carrier   the two sample services, one file each
-Dockerfile, compose.yaml  container build and run of the office and both services
+services/                 the five sample services, one folder each, with
+                          what they share and what each says about itself
+Dockerfile, compose.yaml  container build and run of the office and the services
 ```
 
 ### Access model
@@ -990,7 +1012,7 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 58 tables. One database holds many offices. The schema is in
+SQLite, one file, 60 tables. One database holds many offices. The schema is in
 third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
@@ -1023,6 +1045,8 @@ erDiagram
   rooms ||--o{ doors : has
   rooms ||--o{ room_records : keeps
   rooms ||--o{ connected_systems : "is connected to"
+  connected_systems ||--o{ system_operations : offers
+  system_operations ||--o{ system_operation_fields : takes
   rooms ||--o{ desks : holds
   rooms ||--o{ stage_rooms : hosts
   offices ||--o{ stage_rooms : maps
@@ -1071,11 +1095,27 @@ erDiagram
     text id PK
     text room_id FK
     text name
-    text kind
+    text description
+    text records_path
     text base_url
     text api_key_cipher
     text key_hint
     int needs_approval
+  }
+  system_operations {
+    text system_id PK
+    text operation PK
+    text label
+    text method
+    text path
+  }
+  system_operation_fields {
+    text system_id PK
+    text operation PK
+    text name PK
+    text label
+    text hint
+    text place
   }
   stage_rooms {
     text office_id PK
@@ -1431,7 +1471,7 @@ Each choice is here because it removed something to run or to explain.
 | Framework | Next.js 16, App Router, as a Node server | One project holds the page, the API and the server logic, so the demo deploys as a single container. Route handlers are plain functions, which keeps the API easy to read. |
 | Language | TypeScript 7, strict | The access model and the engine are mostly types and pure functions. Strict types catch a wrong room id or a missing field before anything runs. |
 | 3D | three.js through @react-three/fiber and drei | The scene is declared as React components next to the panels that describe it, and it re-renders from the same state. No separate game loop to keep in step with the UI. |
-| Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (58 tables in third normal form), so moving to Postgres is a change of driver. |
+| Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (60 tables in third normal form), so moving to Postgres is a change of driver. |
 | Sign-in | jose for signed tokens, Node's scrypt for passwords | Small, standard and dependency-light. No outside identity service is needed for the demo to be public. |
 | AI providers | The Anthropic SDK, and plain `fetch` for anything that speaks the OpenAI chat interface | Two connection styles cover nearly every hosted and self-hosted model, so an office is not tied to one vendor. zod checks every reply before the engine sees it. |
 | Checks | tsx running plain scripts | No test framework to learn. Each script prints what it checks in a sentence, and the Docker image refuses to build unless all of them pass. |
@@ -1448,7 +1488,7 @@ what exists, and what a real deployment would add.
 | State updates | Every change goes through the server, is checked against the person's permissions, stored, and written to the audit log. Browsers re-read every five seconds, or every second and a half while agents work. | Updates pushed to the browser over a WebSocket or server-sent events, so a change shows the moment it happens. |
 | Persistence | SQLite, with migrations that bring an older database forward on start. | Postgres, for more than one server process, point-in-time backups and row-level locking. The schema carries over as it is. |
 | Real AI | Working today: several providers per office or per account, a model per agent, structured replies that are validated, a retry on an unreadable reply, and limits enforced outside the model. | Streaming, so a long step shows progress. Per-office spending limits and usage reports. Tools an agent can call during a step, in place of a fixed snapshot of each system. |
-| Outside systems | Two kinds of connector, read and write, behind the room's access rules, with per-action approval and repeat-safe requests. Tested against two sample services. | Connectors for named products such as Shopify or an accounting package, and retries with backoff when a system is down. |
+| Outside systems | Any service that describes itself, read and write, behind the room's access rules, with per-action approval and repeat-safe requests. Tested against five sample services. | Connectors for named products such as Shopify or an accounting package, and retries with backoff when a system is down. |
 | Identity | Password accounts, sessions, invites and a public demo sign-in. | Single sign-on, password reset by email, and two-factor sign-in. |
 | Operations | A container that checks itself before it builds, a health check, an audit log. | Metrics, alerting, log shipping and a staging environment. |
 
@@ -1477,7 +1517,7 @@ what exists, and what a real deployment would add.
   not read the room the answers were given in. The check scripts cover the
   same path against a stand-in service on the same machine.
 - Room records edited in Settings, and connected systems. The office calls the
-  two sample services over HTTP with a stored key, reads their records live,
+  sample services over HTTP with a stored key, reads their records live,
   and places and cancels orders and shipments in them. In the demo office, the
   agent working a dealer order places it in the storefront once its halt for
   Finance is cleared, and the storefront's stock goes down. This was run on
@@ -1669,7 +1709,7 @@ Requires Node 24 or later, for the built-in SQLite module.
 npm install
 npm run dev       # http://localhost:3000
 npm run verify    # type check, then all ten check scripts
-npm run services  # the two sample services, on ports 8081 and 8082
+npm run services  # the five sample services, on ports 8081 to 8085
 npm run build     # production server in .next/standalone
 ```
 
@@ -1677,11 +1717,15 @@ The database is created at `./data/office.db` on first run, with the demo
 office in it. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` to get an account with its
 own empty office. Delete the `data` folder to start again.
 
-Started this way the demo office has no connected systems. To give it the two
+Started this way the demo office has no connected systems. To give it the
 sample services, run `npm run services` in a second terminal and start the
-office with `DEMO_STOREFRONT_URL=http://127.0.0.1:8081`,
-`DEMO_CARRIER_URL=http://127.0.0.1:8082` and
-`DEMO_SYSTEMS_KEY=local-systems-key`.
+office with `DEMO_SYSTEMS_KEY=local-systems-key` and one address per service:
+`DEMO_STOREFRONT_URL=http://127.0.0.1:8081`,
+`DEMO_CARRIER_URL=http://127.0.0.1:8082`,
+`DEMO_LEDGER_URL=http://127.0.0.1:8083`,
+`DEMO_SUPPLIER_URL=http://127.0.0.1:8084` and
+`DEMO_SERVICE_DESK_URL=http://127.0.0.1:8085`. A service with no address is
+left out.
 
 ### Configuration
 
@@ -1694,15 +1738,15 @@ All optional. See `.env.example`.
 | `DEMO_LOGIN` | `1` | Creates the demo office and allows password-free entry to it. `0` turns that off. |
 | `OFFICE_DB_PATH` | `./data/office.db` | Where the SQLite file lives. |
 | `ADMIN_NAME` | taken from the email | The administrator's display name. |
-| `DEMO_STOREFRONT_URL`, `DEMO_CARRIER_URL` | set by `compose.yaml` | Where the demo office finds the two sample services. Unset, the demo has no connected systems. |
+| `DEMO_STOREFRONT_URL`, `DEMO_CARRIER_URL`, `DEMO_LEDGER_URL`, `DEMO_SUPPLIER_URL`, `DEMO_SERVICE_DESK_URL` | set by `compose.yaml` | Where the demo office and a sample office find each sample service. A service with no address is not connected. |
 | `DEMO_SYSTEMS_KEY` | `sample-systems-key` in `compose.yaml` | The key the office and the sample services share. |
 
 ### Docker
 
-The stack is three containers. The office image runs the checks, builds the
+The stack is six containers. The office image runs the checks, builds the
 server, and runs it as a non-root user on port 8080, with its data on a named
-volume. The storefront and the carrier each run from one file with no
-dependencies, also as a non-root user.
+volume. Each of the five sample services runs from its own file and two shared
+ones, with no dependencies, also as a non-root user.
 
 ```bash
 docker compose up -d --build    # http://localhost:8080
@@ -1716,19 +1760,23 @@ flowchart LR
   app -.->|"only for offices with a model connected"| api["Model API"]
   app -->|"HTTP, bearer key"| shop["Container<br/>storefront :8081"]
   app -->|"HTTP, bearer key"| freight["Container<br/>carrier :8082"]
+  app -->|"HTTP, bearer key"| books["Container<br/>ledger :8083"]
+  app -->|"HTTP, bearer key"| factory["Container<br/>supplier :8084"]
+  app -->|"HTTP, bearer key"| desk["Container<br/>service-desk :8085"]
 ```
 
 The office listens on localhost only, so a reverse proxy with TLS belongs in
-front of it. The two services publish no port: only the office reaches them,
+front of it. The services publish no port: only the office reaches them,
 over the stack's own network. An office other than the demo can connect to
-them too, at `http://storefront:8081` and `http://carrier:8082` with the value
-of `DEMO_SYSTEMS_KEY`. Back up the office by copying the volume.
+them too, at `http://storefront:8081`, `http://carrier:8082`,
+`http://ledger:8083`, `http://supplier:8084` and `http://service-desk:8085`,
+with the value of `DEMO_SYSTEMS_KEY`. Back up the office by copying the volume.
 
-The deployed site runs the same three containers without compose, as three
+The deployed site runs the same six containers without compose, as six
 applications in one Dokploy project that build from this repository on every
 push to `main`. The office builds from `Dockerfile`. Each service builds from
 `services/Dockerfile` with the build argument `SERVICE` and has `PORT` and
-`API_KEY` in its environment. Neither service has a domain, so only the office
+`API_KEY` in its environment. No service has a domain, so only the office
 reaches them, by their internal names on Dokploy's network.
 
 ### Plesk
@@ -1759,7 +1807,7 @@ sample services the same way.
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 55 of 55 pass |
 | Set-up changes, permissions, playbooks, their refusals, and an office built from nothing | `npm run admin` | 77 of 77 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
-| The two sample services, connecting a system, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 99 of 99 pass |
+| The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 143 of 143 pass |
 | Agents working between clicks, providers that belong to an account, and the sample office | `npm run loop` | 40 of 40 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
