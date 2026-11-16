@@ -53,6 +53,8 @@ const round = (amount: number): number => Math.round(amount * 100) / 100;
 export function ledger(apiKey: string): Server {
   let book = accounts();
   let invoices: Invoice[] = [];
+  let payments: { id: string; account: string; amount: number; on: string; released: boolean }[] = [];
+  let paid = 8000;
   let sequence = 3000;
 
   const find = (id: string): Account => {
@@ -113,6 +115,7 @@ export function ledger(apiKey: string): Server {
     // A hold placed for the balance lifts itself once there is room again.
     const released = account.onHold !== null && account.balance <= account.creditLimit * 0.8;
     if (released) account.onHold = null;
+    payments.unshift({ id: `PAY-${++paid}`, account: account.id, amount, on: dayFromNow(0), released });
     return {
       summary: `recorded a payment of ${cad(amount)} from ${account.id}. The account now has ${standing(account)}${released ? ", and its credit hold is released" : account.onHold ? ", and it is still on hold" : ""}.`,
       account,
@@ -145,13 +148,18 @@ export function ledger(apiKey: string): Server {
           `Account ${a.id}, ${a.name}: tier ${a.tier}, net ${a.termsDays} days, ${standing(a)}, ${a.latePayments === 0 ? "pays on time" : `${a.latePayments} late payment${a.latePayments === 1 ? "" : "s"} this year`}${a.onHold ? `. ON CREDIT HOLD: ${a.onHold}` : ""}.`,
       ),
       ...invoices.slice(0, 8).map((i) => `Invoice ${i.id}: ${i.account}, for ${i.reference}, ${cad(i.total)} due on ${i.dueOn}.`),
+      ...payments.slice(0, 8).map(
+        (p) => `Payment ${p.id}: ${cad(p.amount)} from ${p.account} on ${p.on}${p.released ? ", which released its credit hold" : ""}.`,
+      ),
     ],
     operations: { raise_invoice: raiseInvoice, record_payment: recordPayment, set_credit_hold: setHold },
     reads: { "/v1/accounts": () => ({ accounts: book }), "/v1/invoices": () => ({ invoices: invoices.slice(0, 50) }) },
     reset: () => {
       book = accounts();
       invoices = [];
+      payments = [];
       sequence = 3000;
+      paid = 8000;
     },
   });
 }
