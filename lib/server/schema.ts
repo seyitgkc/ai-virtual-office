@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -146,6 +146,8 @@ CREATE TABLE system_operations (
   label     TEXT NOT NULL,
   method    TEXT NOT NULL CHECK (method IN ('POST', 'PUT', 'DELETE')),
   path      TEXT NOT NULL,
+  -- The operation of the same system that this one takes back, if any.
+  undoes    TEXT,
   PRIMARY KEY (system_id, operation)
 ) STRICT;
 
@@ -352,6 +354,9 @@ CREATE TABLE tasks (
   step_owed    INTEGER NOT NULL DEFAULT 0 CHECK (step_owed IN (0, 1)),
   -- 1 when a person marked the task urgent, which puts it ahead on every queue.
   urgent       INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
+  -- 1 from a rejection until the task closes, while what it did in connected
+  -- systems is being taken back or left on a person's word.
+  wind_up      INTEGER NOT NULL DEFAULT 0 CHECK (wind_up IN (0, 1)),
   CHECK ((wait_until IS NULL) = (wait_reason IS NULL))
 ) STRICT;
 
@@ -522,6 +527,17 @@ CREATE TABLE message_assumption_tasks (
 CREATE TABLE message_progress (
   message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
   progress   REAL NOT NULL CHECK (progress >= 0 AND progress <= 1)
+) STRICT;
+
+-- What a connected system answered to an action, on the status line that
+-- reports it. system_id is not a reference: the record of what was done has
+-- to outlive the connection. record is the number the system gave.
+CREATE TABLE message_system_results (
+  message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  system_id  TEXT NOT NULL,
+  operation  TEXT NOT NULL,
+  ok         INTEGER NOT NULL CHECK (ok IN (0, 1)),
+  record     TEXT
 ) STRICT;
 
 CREATE TABLE message_handoffs (
@@ -1216,6 +1232,22 @@ CREATE TABLE standing_requests (
   last_task_id  TEXT REFERENCES tasks(id) ON DELETE SET NULL,
   last_filed_at INTEGER,
   active        INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
+) STRICT;
+`,
+  // Version 19 records what each system action did, so that a rejected task
+  // can have what it did taken back.
+  18: /* sql */ `
+ALTER TABLE system_operations ADD COLUMN undoes TEXT;
+ALTER TABLE tasks ADD COLUMN wind_up INTEGER NOT NULL DEFAULT 0 CHECK (wind_up IN (0, 1));
+-- What a connected system answered to an action, on the status line that
+-- reports it. system_id is not a reference: the record of what was done has
+-- to outlive the connection. record is the number the system gave.
+CREATE TABLE message_system_results (
+  message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  system_id  TEXT NOT NULL,
+  operation  TEXT NOT NULL,
+  ok         INTEGER NOT NULL CHECK (ok IN (0, 1)),
+  record     TEXT
 ) STRICT;
 `,
 };

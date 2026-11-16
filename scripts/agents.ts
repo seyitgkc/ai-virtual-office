@@ -182,6 +182,8 @@ async function main(): Promise<void> {
   const needing = reviewer({ questions: [], assumptions: [], needs: [{ room: closedRoom.id, scope: "read", purpose: "The stock count for this order." }] });
   review = await toReview(needing);
   expect("a missing permission at review halts the task", `${reviewTask().stage}/${reviewTask().status}`, "review/blocked_permission");
+  const aroundIt = await reduce(review.at, { type: "ADVANCE", taskId: review.id }, needing);
+  expect("a task halted for access cannot be moved on around the halt", `${aroundIt.state.office.tasks.find((t) => t.id === review.id)!.status} ${aroundIt.notes.some((n) => n.includes("halted for access"))}`, "blocked_permission true");
   const wall = review.at.office.messages.findLast((m) => m.kind === "escalation" && m.taskId === review.id)!;
   expect("the escalation names the room", wall.body.includes(`access to ${closedRoom.name}.`), true);
   expect("and reads cleanly", wall.body.includes(".. ") || wall.body.includes(closedRoom.id + "."), false);

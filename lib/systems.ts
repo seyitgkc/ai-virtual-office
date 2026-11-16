@@ -28,6 +28,11 @@ export interface SystemOperation {
   path: string;
   /** Every field must be filled in for the operation to be carried out. */
   fields: SystemField[];
+  /**
+   * The operation this one takes back, such as cancelling an order that was
+   * placed. The office uses it to tell what a task did that still stands.
+   */
+  undoes?: string;
 }
 
 /** What a system says about itself. Served by the system at /v1/manifest. */
@@ -133,7 +138,12 @@ export function parseManifest(input: unknown): ServiceManifest | null {
       fields.push({ name: fieldName, label: text(field.label, 40) || fieldName, hint: text(field.hint, 80), place });
     }
     if (operations.some((x) => x.id === id)) continue;
-    operations.push({ id, label: text(o.label, 60) || id, method, path, fields });
+    const undoes = text(o.undoes, 40);
+    operations.push({ id, label: text(o.label, 60) || id, method, path, fields, ...(SAFE_NAME.test(undoes) && undoes !== id ? { undoes } : {}) });
+  }
+  // An operation can only take back one the same system offers.
+  for (const operation of operations) {
+    if (operation.undoes && !operations.some((x) => x.id === operation.undoes)) delete operation.undoes;
   }
   return { name, description: text(raw.description, 1200), recordsPath, operations };
 }

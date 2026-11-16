@@ -21,6 +21,22 @@
 
 import { earlierWork, type EarlierWork } from "./recall";
 import {
+  allowedInWindUp,
+  answersGiven,
+  askedThisRound,
+  asksAboutDeeds,
+  CLOSE_AS_IS,
+  deedsOf,
+  describeDeed,
+  instructionOf,
+  LEAVE_ALL,
+  listDeeds,
+  TRY_AGAIN,
+  UNDO_ALL,
+  whyStanding,
+  type Deed,
+} from "./windup";
+import {
   ANY_ROOM,
   canOwnWorkIn,
   canRead,
@@ -36,6 +52,8 @@ import {
   type ParticipantId,
   type QuestionMessage,
   type RoomId,
+  type StatusMessage,
+  type SystemDeed,
   DOCUMENT_LIMITS,
   type Task,
   type TaskDocument,
@@ -183,6 +201,11 @@ export interface AgentStepInput {
    * note. It does not take the task over.
    */
   attending?: { fromId: ParticipantId; body: string; noteId: string };
+  /**
+   * Set when the task was rejected and the agent is here only to deal with
+   * one thing it did on it, as the note says.
+   */
+  windingUp?: boolean;
 }
 
 export interface DraftQuestion {
@@ -251,6 +274,8 @@ export interface SystemCall extends SystemAction {
 export interface SystemOutcome {
   ok: boolean;
   summary: string;
+  /** The number of the record the system made, changed or took back, when it names one. */
+  record?: string;
 }
 
 /**
@@ -342,7 +367,13 @@ export type Action =
    */
   | { type: "AGENT_RESUME"; taskId: TaskId; afterAction?: boolean }
   /** An agent looks at a note left for it. Raised by the office, never by a person. */
-  | { type: "AGENT_ATTEND"; taskId: TaskId; participantId: ParticipantId; noteId: string; afterAction?: boolean };
+  | { type: "AGENT_ATTEND"; taskId: TaskId; participantId: ParticipantId; noteId: string; afterAction?: boolean }
+  /**
+   * Carry a rejected task's winding up one step further: ask the next agent
+   * about what it did, or close the task, or go back to the person. Raised by
+   * the office once nobody is busy with the task.
+   */
+  | { type: "WIND_UP"; taskId: TaskId };
 
 /**
  * Thrown by a runtime that cannot answer yet, because the answer has to be
@@ -374,6 +405,14 @@ export type Wake =
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** What a system answered to an action, as it is kept on the line that reports it. */
+const deedOf = (action: SystemAction, outcome: SystemOutcome): SystemDeed => ({
+  systemId: action.systemId,
+  operation: action.operation,
+  ok: outcome.ok,
+  ...(outcome.record ? { record: outcome.record } : {}),
+});
 
 function contextOf(state: EngineState): AccessContext {
   return {
@@ -587,6 +626,16 @@ export async function reduce(
         notes.push(`${task.id} is already closed`);
         return done();
       }
+      // A task halted for want of access moves on once the access is settled,
+      // never around it.
+      if (task.status === "blocked_permission") {
+        notes.push(`${task.id} cannot advance: it is halted for access that has not been granted`);
+        return done();
+      }
+      if (task.windUp) {
+        notes.push(`${task.id} was rejected and is being wound up, so it does not move on`);
+        return done();
+      }
 
       const current = stageSpec(task.stage);
       if (current.humanGate) {
@@ -726,6 +775,15 @@ export async function reduce(
         notes.push(`${question.taskId}: that question was already answered`);
         return done();
       }
+      // A question on a task that has closed, or that was open when the task
+      // was rejected, settles nothing any more. Answering it must not carry
+      // out an action that was waiting for approval.
+      const asked = findTask(office, question.taskId);
+      if (asked.closedAt !== null || (asked.windUp && !asked.openQuestionIds.includes(question.id))) {
+        notes.push(`${question.taskId}: that question no longer applies`);
+        return done();
+      }
+      const aboutDeeds = asksAboutDeeds(asked, question);
 
       const answer: Message = {
         id: nextId("m"),
@@ -756,7 +814,9 @@ export async function reduce(
         openQuestionIds: stillOpen,
         status:
           stillOpen.length === 0 && task.status === "blocked_question"
-            ? openStatus(task.stage)
+            ? task.windUp
+              ? "in_progress"
+              : openStatus(task.stage)
             : task.status,
         history: [
           ...task.history,
@@ -773,18 +833,32 @@ export async function reduce(
           (stillOpen.length === 0 ? ", unblocked" : `, ${stillOpen.length} still open`),
       );
 
+      // The person has said what is to happen to what a rejected task did.
+      if (aboutDeeds) {
+        const said = action.chosenOption ?? action.body;
+        const next =
+          said === LEAVE_ALL || said === CLOSE_AS_IS
+            ? closeRejected(office, unblocked.id, now, nextId)
+            : await windUp(office, unblocked.id, runtime, now, nextId, state);
+        office = next.office;
+        emitted.push(...next.emitted);
+        notes.push(...next.notes);
+        wake.push(...next.wake);
+        return done();
+      }
+
       // The question was a request to act in a connected system. Approval
       // carries the action out, provided the agent may still act there.
       const held = question.heldAction;
       const asker = office.participants.find((p) => p.id === question.fromId);
       // An AI agent that asked an ordinary question has its answer now, and
       // can take the step again once nothing else is holding the task.
-      if (!held && asker?.agentType === "ai" && unblocked.ownerId === asker.id && unblocked.status !== "blocked_question") {
+      if (!held && asker?.agentType === "ai" && unblocked.ownerId === asker.id && unblocked.status !== "blocked_question" && !unblocked.windUp) {
         wake.push({ kind: "resume", taskId: task.id, participantId: asker.id });
       }
       const system = held ? office.systems.find((s) => s.id === held.systemId) : undefined;
       if (held && asker && asker.kind === "agent") {
-        const say = (body: string): void => {
+        const say = (body: string, did?: SystemDeed): void => {
           const said: Message = {
             id: nextId("m"),
             kind: "status",
@@ -794,6 +868,7 @@ export async function reduce(
             roomId: task.roomId,
             at: now,
             body,
+            ...(did ? { did } : {}),
           };
           emitted.push(said);
           office = { ...office, messages: [...office.messages, said] };
@@ -810,11 +885,11 @@ export async function reduce(
           const outcome: SystemOutcome = runtime.perform
             ? await runtime.perform({ ...held, system, taskId: task.id })
             : { ok: false, summary: "it is not reachable from here, so nothing was done" };
-          say(`${system.name}: ${outcome.summary}`);
+          say(`${system.name}: ${outcome.summary}`, deedOf(held, outcome));
           notes.push(`${approver} approved, and ${asker.displayName} ${outcome.ok ? "used" : "was refused by"} ${system.name}: ${outcome.summary}`);
           // An AI agent takes the step once more, with the outcome in front of it.
           const current = findTask(office, task.id);
-          if (asker.agentType === "ai" && current.ownerId === asker.id && current.status !== "blocked_question") {
+          if (asker.agentType === "ai" && current.ownerId === asker.id && current.status !== "blocked_question" && !current.windUp) {
             try {
               const turn = await runAgent(office, current, current.stage, asker, runtime, now, nextId, true, true);
               office = turn.office;
@@ -837,6 +912,7 @@ export async function reduce(
         owner?.agentType === "ai" &&
         asker?.id !== owner.id &&
         settled.closedAt === null &&
+        !settled.windUp &&
         settled.status === openStatus(settled.stage) &&
         !stageSpec(settled.stage).humanGate
       ) {
@@ -1114,7 +1190,7 @@ export async function reduce(
     case "AGENT_RESUME": {
       const task = office.tasks.find((t) => t.id === action.taskId);
       const owner = office.participants.find((p) => p.id === task?.ownerId);
-      if (!task || task.closedAt !== null || !owner || owner.kind !== "agent" || task.status !== openStatus(task.stage)) {
+      if (!task || task.closedAt !== null || task.windUp || !owner || owner.kind !== "agent" || task.status !== openStatus(task.stage)) {
         return done();
       }
       const turn = await runAgent(office, task, task.stage, owner, runtime, now, nextId, true, action.afterAction === true);
@@ -1133,7 +1209,9 @@ export async function reduce(
         task.closedAt !== null ||
         !reader ||
         reader.agentType !== "ai" ||
-        task.ownerId === reader.id ||
+        // The owner reads its notes when it takes its own step. On a task
+        // that is being wound up it takes none, so it is asked like anyone.
+        (task.ownerId === reader.id && !task.windUp) ||
         !note ||
         note.kind !== "note" ||
         note.audience.to !== "participant" ||
@@ -1148,11 +1226,27 @@ export async function reduce(
       return done();
     }
 
+    case "WIND_UP": {
+      const task = office.tasks.find((t) => t.id === action.taskId);
+      if (!task || task.closedAt !== null || !task.windUp || task.openQuestionIds.length > 0) return done();
+      const next = await windUp(office, task.id, runtime, now, nextId, state);
+      office = next.office;
+      emitted.push(...next.emitted);
+      notes.push(...next.notes);
+      wake.push(...next.wake);
+      return done();
+    }
+
     case "DECIDE": {
       const task = findTask(office, action.taskId);
       const by = findParticipant(office, action.byId);
       const ctx = contextOf({ ...state, office, now });
       const decision = resolveAccess(by, task.roomId, "act", ctx);
+
+      if (task.closedAt !== null || task.windUp) {
+        notes.push(`${task.id} has already been ${task.windUp ? "rejected" : "closed"}`);
+        return done();
+      }
 
       if (decision.effect === "deny") {
         notes.push(`${by.displayName} may not decide in ${roomName(office, task.roomId)}: ${decision.explanation}`);
@@ -1214,6 +1308,44 @@ export async function reduce(
         return done();
       }
 
+      // A rejected task that already did things in connected systems stays
+      // open until a person has said what is to happen to them.
+      const left = action.verdict === "rejected" ? deedsOf(office, task.id).standing : [];
+      if (left.length > 0) {
+        const { wait: _wait, owed: _owed, ...plain } = task;
+        const ask = deedQuestion(
+          office,
+          plain,
+          by.id,
+          `This task was rejected after it had already done ${left.length === 1 ? "this" : "these things"} in connected systems: ${listDeeds(office, left)} What should happen to ${left.length === 1 ? "it" : "them"}? Choose one, or say it in your own words.`,
+          [UNDO_ALL, LEAVE_ALL],
+          now,
+          nextId,
+        );
+        emitted.push(ask);
+        office = {
+          ...replaceTask(office, {
+            ...plain,
+            windUp: true,
+            status: "blocked_question",
+            // Whatever was being asked on the task is moot now.
+            openQuestionIds: [ask.id],
+            history: [
+              ...task.history,
+              {
+                at: now,
+                summary: `${by.displayName} rejected it. What it had already done is to be settled first`,
+                messageId: ruling.id,
+                decision,
+              },
+            ],
+          }),
+          messages: [...office.messages, ruling, ask],
+        };
+        notes.push(`${task.id} rejected by ${by.displayName}, who is asked what should happen to what it already did`);
+        return done();
+      }
+
       const closed = action.verdict === "approved" || action.verdict === "rejected";
       office = {
         ...replaceTask(office, {
@@ -1237,6 +1369,261 @@ export async function reduce(
       return done();
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Winding up a rejected task
+// ---------------------------------------------------------------------------
+
+/** What a step of winding up leaves behind. */
+interface WindUpStep {
+  office: Office;
+  emitted: Message[];
+  notes: string[];
+  wake: Wake[];
+}
+
+/**
+ * The question that asks a person what is to happen to what a rejected task
+ * did. It comes from the task's owner when that is an agent, since an agent
+ * is who the person will be telling, and from the office otherwise.
+ */
+function deedQuestion(
+  office: Office,
+  task: Task,
+  toId: ParticipantId,
+  body: string,
+  options: string[],
+  now: number,
+  nextId: (prefix: string) => string,
+): QuestionMessage {
+  const owner = office.participants.find((p) => p.id === task.ownerId);
+  return {
+    id: nextId("m"),
+    kind: "question",
+    taskId: task.id,
+    fromId: owner?.kind === "agent" ? owner.id : "system",
+    audience: { to: "participant", id: toId },
+    roomId: task.roomId,
+    at: now,
+    body,
+    blocking: true,
+    options,
+  };
+}
+
+/** Close a rejected task, saying what it leaves behind in connected systems. */
+function closeRejected(office: Office, taskId: TaskId, now: number, nextId: (prefix: string) => string): WindUpStep {
+  const task = findTask(office, taskId);
+  const { standing, undone } = deedsOf(office, task.id);
+  const parts = [
+    undone.length > 0 ? `Taken back: ${listDeeds(office, undone)}` : "",
+    standing.length > 0 ? `Left in place: ${listDeeds(office, standing)}` : "",
+  ].filter(Boolean);
+  const closing: StatusMessage = {
+    id: nextId("m"),
+    kind: "status",
+    taskId: task.id,
+    fromId: "system",
+    audience: { to: "room", id: task.roomId },
+    roomId: task.roomId,
+    at: now,
+    body: `Closed as rejected. ${standing.length === 0 ? "Nothing this task did in a connected system is left standing. " : ""}${parts.join(" ")}`.trim(),
+  };
+  const { windUp: _windUp, wait: _wait, owed: _owed, ...rest } = task;
+  const closed: Task = {
+    ...rest,
+    status: "rejected",
+    closedAt: now,
+    openQuestionIds: [],
+    history: [
+      ...task.history,
+      {
+        at: now,
+        summary:
+          standing.length === 0
+            ? "Closed as rejected, with everything it did taken back"
+            : `Closed as rejected, with ${standing.length} thing${standing.length === 1 ? "" : "s"} left in place`,
+        messageId: closing.id,
+      },
+    ],
+  };
+  return {
+    office: { ...replaceTask(office, closed), messages: [...office.messages, closing] },
+    emitted: [closing],
+    notes: [
+      `${task.id} closed as rejected, ${standing.length === 0 ? "with everything it did taken back" : `leaving ${standing.length} thing${standing.length === 1 ? "" : "s"} in place`}`,
+    ],
+    wake: [],
+  };
+}
+
+/**
+ * Take a rejected task's winding up as far as it goes without waiting for
+ * anyone. The newest thing still standing is dealt with first, by whoever
+ * did it. An AI agent is left a note and looks at it in its own time. A
+ * playbook agent has no judgment to apply, so the office carries out the
+ * operation that takes the thing back in that agent's name, where the
+ * operation needs nothing but the record's number. Once nobody is left to
+ * ask, the task closes if nothing stands, and goes back to the person if
+ * something does.
+ */
+async function windUp(
+  start: Office,
+  taskId: TaskId,
+  runtime: AgentRuntime,
+  now: number,
+  nextId: (prefix: string) => string,
+  state: EngineState,
+): Promise<WindUpStep> {
+  let office = start;
+  const emitted: Message[] = [];
+  const notes: string[] = [];
+  const wake: Wake[] = [];
+  const say = (message: Message): void => {
+    emitted.push(message);
+    office = { ...office, messages: [...office.messages, message] };
+  };
+  const result = (): WindUpStep => ({ office, emitted, notes, wake });
+
+  const first = findTask(office, taskId);
+  const answers = answersGiven(office, first);
+  const personId = answers.at(-1)?.fromId;
+  const instruction = instructionOf(office, first);
+  const undoAll = instruction === UNDO_ALL;
+  if (!personId || personId === "system") return result();
+  // The task is with the agents from here until it closes or a person is asked again.
+  if (first.status !== "in_progress") office = replaceTask(office, { ...first, status: "in_progress" });
+
+  const doerOf = (deed: Deed): Participant | undefined => office.participants.find((p) => p.id === deed.byId);
+  // Who can be asked to deal with a thing: the agent that did it, while its
+  // system is connected. A playbook agent can only take back, and only where
+  // the operation asks for the record's number and nothing else.
+  const canAsk = (deed: Deed): boolean => {
+    const doer = doerOf(deed);
+    if (!doer || doer.kind !== "agent" || !deed.system) return false;
+    if (doer.agentType === "ai") return undoAll ? deed.undo !== undefined : true;
+    return undoAll && deed.undo !== undefined && deed.undo.fields.length === 1 && deed.message.did.record !== undefined;
+  };
+
+  for (;;) {
+    const task = findTask(office, taskId);
+    const { standing } = deedsOf(office, task.id);
+    const asked = askedThisRound(office, task);
+    const deed = standing.findLast((d) => !asked.has(d.message.id) && canAsk(d));
+    if (!deed) break;
+    const doer = doerOf(deed)!;
+    const system = deed.system!;
+    const how = deed.undo
+      ? ` ${system.name} takes this back with "${deed.undo.label}" (${deed.undo.id})${deed.message.did.record ? `, and the record is ${deed.message.did.record}` : ""}.`
+      : ` ${system.name} has no operation that takes this back.`;
+    const note: Message = {
+      id: nextId("m"),
+      kind: "note",
+      taskId: task.id,
+      fromId: personId,
+      audience: { to: "participant", id: doer.id },
+      roomId: task.roomId,
+      at: now,
+      inReplyTo: deed.message.id,
+      body: `This task was rejected. Asked what should happen to what it had already done, I answered: "${instruction}". You did this on it in ${system.name}: ${deed.summary}.${how} Deal with this one thing as I answered, and tell me what came of it. If nothing is to be done about it, or it cannot be done, tell me that.`,
+    };
+    say(note);
+    notes.push(`${doer.displayName} was asked to deal with what it did in ${system.name} on ${task.id}`);
+
+    if (doer.agentType === "ai") {
+      // The owner of a task is not woken for a note the way a colleague is.
+      if (task.ownerId === doer.id) wake.push({ kind: "attend", taskId: task.id, participantId: doer.id, noteId: note.id });
+      return result();
+    }
+
+    // A playbook agent: the office carries out the one operation in its name.
+    const undo = deed.undo!;
+    const call: SystemAction = { systemId: system.id, operation: undo.id, fields: { [undo.fields[0].name]: deed.message.did.record! } };
+    const answer = (body: string): void =>
+      say({
+        id: nextId("m"),
+        kind: "note",
+        taskId: task.id,
+        fromId: doer.id,
+        audience: { to: "participant", id: personId },
+        roomId: task.roomId,
+        at: now,
+        body,
+      });
+    const ctx: AccessContext = { ...contextOf({ ...state, office, now }), forTask: task.id };
+    if (resolveAccess(doer, system.roomId, "act", ctx).effect !== "allow") {
+      answer(`I may no longer act in ${roomName(office, system.roomId)}, so I did not ${undo.label.toLowerCase()} for ${deed.message.did.record}.`);
+      continue;
+    }
+    if (system.needsApproval) {
+      const approver =
+        office.participants.find((p) => p.kind === "human" && roleMay(office.roles[p.roleId], "manage_access")) ??
+        office.participants.find((p) => p.kind === "human");
+      if (!approver) {
+        answer(`${system.name} holds every action for approval and there is nobody to approve it, so ${deed.message.did.record} stands.`);
+        continue;
+      }
+      const hold: QuestionMessage = {
+        id: nextId("m"),
+        kind: "question",
+        taskId: task.id,
+        fromId: doer.id,
+        audience: { to: "participant", id: approver.id },
+        roomId: task.roomId,
+        at: now,
+        body: `May I ${undo.label.toLowerCase()} in ${system.name}? ${undo.fields[0].label}: ${deed.message.did.record}.`,
+        blocking: true,
+        options: [APPROVE, DECLINE],
+        heldAction: call,
+      };
+      say(hold);
+      const held = findTask(office, taskId);
+      office = replaceTask(office, { ...held, status: "blocked_question", openQuestionIds: [...held.openQuestionIds, hold.id] });
+      notes.push(`${doer.displayName} is waiting for approval to act in ${system.name}`);
+      return result();
+    }
+    const outcome: SystemOutcome = runtime.perform
+      ? await runtime.perform({ ...call, system, taskId: task.id })
+      : { ok: false, summary: "it is not reachable from here, so nothing was done" };
+    say({
+      id: nextId("m"),
+      kind: "status",
+      taskId: task.id,
+      fromId: doer.id,
+      audience: { to: "room", id: task.roomId },
+      roomId: task.roomId,
+      at: now,
+      body: `${system.name}: ${outcome.summary}`,
+      did: deedOf(call, outcome),
+    });
+    notes.push(`${doer.displayName} ${outcome.ok ? "used" : "was refused by"} ${system.name}: ${outcome.summary}`);
+    answer(outcome.ok ? `Done. ${system.name} ${outcome.summary}` : `Not done. ${system.name} ${outcome.summary}`);
+  }
+
+  // Nobody is left to ask. Nothing standing means the task can close.
+  const task = findTask(office, taskId);
+  const { standing, undone } = deedsOf(office, task.id);
+  if (standing.length === 0) {
+    const closed = closeRejected(office, taskId, now, nextId);
+    return { office: closed.office, emitted: [...emitted, ...closed.emitted], notes: [...notes, ...closed.notes], wake };
+  }
+  const still = standing
+    .map((d, i) => `(${i + 1}) ${describeDeed(office, d)}. Still in place because ${whyStanding(office, task, d, doerOf(d), undoAll)}.`)
+    .join(" ");
+  const ask = deedQuestion(
+    office,
+    task,
+    personId,
+    `Not everything this rejected task did could be settled. ${undone.length > 0 ? `Taken back: ${listDeeds(office, undone)} ` : ""}Still in place: ${still} What next? Choose one, or say it in your own words.`,
+    [TRY_AGAIN, CLOSE_AS_IS],
+    now,
+    nextId,
+  );
+  say(ask);
+  office = replaceTask(office, { ...findTask(office, taskId), status: "blocked_question", openQuestionIds: [ask.id] });
+  notes.push(`${task.id}: ${standing.length} thing${standing.length === 1 ? "" : "s"} it did could not be settled, so ${findParticipant(office, personId).displayName} is asked what next`);
+  return result();
 }
 
 /**
@@ -1378,6 +1765,7 @@ async function runAgent(
     ...(attending && attending.fromId !== "system"
       ? { attending: { fromId: attending.fromId, body: attending.body, noteId: attending.id } }
       : {}),
+    ...(attending && task.windUp ? { windingUp: true } : {}),
   });
   if (answered.later) {
     const owes = !attending && task.ownerId === participant.id && !task.owed;
@@ -1628,9 +2016,32 @@ async function runAgent(
     }
   }
 
+  // On a task that is being wound up, an agent may take back only what this
+  // task made, and nothing else unless the person asked for more in words.
+  const winding = attending && task.windUp
+    ? { standing: deedsOf(office, task.id).standing, undoAll: instructionOf(office, task) === UNDO_ALL }
+    : null;
+
   let acted = false;
   if (!wallHit) {
     for (const call of allowedCalls) {
+      if (winding) {
+        const verdict = allowedInWindUp(winding.standing, call.system, call.operation, call.fields, winding.undoAll);
+        if (!verdict.ok) {
+          emitted.push({
+            id: nextId("m"),
+            kind: "status",
+            taskId: task.id,
+            fromId: participant.id,
+            audience: { to: "room", id: task.roomId },
+            roomId: task.roomId,
+            at: now,
+            body: `${call.system.name}: not done, because ${verdict.why}.`,
+          });
+          notes.push(`${participant.displayName} was stopped from acting in ${call.system.name} on ${task.id}: ${verdict.why}`);
+          continue;
+        }
+      }
       // Where a system needs approval, being allowed to act is not enough: the
       // action is put to a person as a question and waits for their answer.
       if (call.system.needsApproval) {
@@ -1679,6 +2090,7 @@ async function runAgent(
         roomId: task.roomId,
         at: now,
         body: `${call.system.name}: ${outcome.summary}`,
+        did: deedOf(call, outcome),
       };
       emitted.push(done);
       notes.push(

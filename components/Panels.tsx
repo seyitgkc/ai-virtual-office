@@ -64,7 +64,9 @@ const WORK_FILTERS: Record<WorkFilter, { label: string; hint: string; keeps: (ta
 const statusOf = (task: Task): { label: string; accent: string } =>
   task.wait && task.closedAt === null && task.status === "in_progress"
     ? { label: `waiting until ${dayOf(task.wait.until)}`, accent: "#8a93a0" }
-    : STATUS[task.status];
+    : task.windUp && task.closedAt === null
+      ? { label: task.status === "blocked_question" ? "rejected, needs an answer" : "rejected, winding up", accent: task.status === "blocked_question" ? "#e0a23f" : "#8a8a8a" }
+      : STATUS[task.status];
 
 const time = (ms: number): string =>
   new Date(ms).toLocaleTimeString("en-CA", {
@@ -775,6 +777,7 @@ function TaskInspector({
   // that stage is waiting for one.
   const awaitingDecision =
     task.closedAt === null &&
+    !task.windUp &&
     task.stage !== "done" &&
     stageSpec(task.stage).humanGate === true &&
     (task.status === "in_review" || task.status === "in_progress");
@@ -783,6 +786,7 @@ function TaskInspector({
     task.closedAt === null &&
     task.status !== "blocked_question" &&
     task.status !== "blocked_permission" &&
+    !task.windUp &&
     !awaitingDecision;
   const needsSupervisor =
     (task.status === "blocked_permission" && !mayManageAccess) || (awaitingDecision && !mayDecide);
@@ -869,7 +873,9 @@ function TaskInspector({
           {openQuestion && (
             <fieldset className="moves" disabled={!mayAnswer}>
               <div className="note q">
-                <div className="meta">{name(openQuestion.fromId as string)} is waiting</div>
+                <div className="meta">
+                  {openQuestion.fromId === "system" ? "The office" : name(openQuestion.fromId as string)} is waiting
+                </div>
                 {openQuestion.body}
               </div>
               {(openQuestion.options ?? ["Confirmed"]).map((opt) => (
@@ -1059,14 +1065,26 @@ function TaskInspector({
             </button>
           )}
 
-          <button
-            className="btn"
-            disabled={!canAdvance}
-            title={mayAdvance.allowed ? undefined : mayAdvance.reason}
-            onClick={() => dispatch({ type: "ADVANCE", taskId: task.id })}
-          >
-            {target ? `Advance to ${stageSpec(target).label}` : "Advance"}
-          </button>
+          {task.windUp && task.closedAt === null && (
+            <div className="waiting">
+              <p>
+                {task.status === "blocked_question"
+                  ? "This task was rejected. It closes once what it had already done is settled, and that waits for an answer."
+                  : "This task was rejected. The agents that acted on it are dealing with what it had already done, and it closes once that is settled."}
+              </p>
+            </div>
+          )}
+
+          {!task.windUp && (
+            <button
+              className="btn"
+              disabled={!canAdvance}
+              title={mayAdvance.allowed ? undefined : mayAdvance.reason}
+              onClick={() => dispatch({ type: "ADVANCE", taskId: task.id })}
+            >
+              {target ? `Advance to ${stageSpec(target).label}` : "Advance"}
+            </button>
+          )}
 
           {needsSupervisor && (
             <div className="empty">This needs someone with a supervising role.</div>

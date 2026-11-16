@@ -444,13 +444,15 @@ function writeTask(db: Db, officeId: string, task: Task): void {
     task.wait?.reason ?? null,
     task.owed ? 1 : 0,
     task.urgent ? 1 : 0,
+    task.windUp ? 1 : 0,
   ];
   if (exists) {
     run(
       db,
       `UPDATE tasks
           SET title = ?, detail = ?, requested_by = ?, owner_id = ?, room_id = ?, stage = ?,
-              status = ?, created_at = ?, closed_at = ?, wait_until = ?, wait_reason = ?, step_owed = ?, urgent = ?
+              status = ?, created_at = ?, closed_at = ?, wait_until = ?, wait_reason = ?, step_owed = ?, urgent = ?,
+              wind_up = ?
         WHERE id = ?`,
       ...values,
       task.id,
@@ -460,8 +462,8 @@ function writeTask(db: Db, officeId: string, task: Task): void {
       db,
       `INSERT INTO tasks
          (title, detail, requested_by, owner_id, room_id, stage, status, created_at, closed_at,
-          wait_until, wait_reason, step_owed, urgent, id, office_id, position)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          wait_until, wait_reason, step_owed, urgent, wind_up, id, office_id, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ...values,
       task.id,
       officeId,
@@ -534,6 +536,7 @@ const DETAIL_TABLES = [
   "message_answers",
   "message_assumptions",
   "message_progress",
+  "message_system_results",
   "message_handoffs",
   "message_escalations",
   "message_verdicts",
@@ -655,6 +658,17 @@ function writeMessage(db: Db, officeId: string, m: Message): void {
     case "status":
       if (m.progress !== undefined) {
         run(db, "INSERT INTO message_progress (message_id, progress) VALUES (?, ?)", m.id, m.progress);
+      }
+      if (m.did) {
+        run(
+          db,
+          "INSERT INTO message_system_results (message_id, system_id, operation, ok, record) VALUES (?, ?, ?, ?, ?)",
+          m.id,
+          m.did.systemId,
+          m.did.operation,
+          m.did.ok ? 1 : 0,
+          m.did.record ?? null,
+        );
       }
       break;
     case "handoff":
@@ -1328,6 +1342,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     wait_reason: string | null;
     step_owed: number;
     urgent: number;
+    wind_up: number;
   }>(db, "SELECT * FROM tasks WHERE office_id = ? ORDER BY position", officeRow.id).map((t) => ({
     id: t.id,
     title: t.title,
@@ -1352,6 +1367,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     ...(t.wait_until !== null ? { wait: { until: t.wait_until, reason: t.wait_reason ?? "" } } : {}),
     ...(t.step_owed === 1 ? { owed: true } : {}),
     ...(t.urgent === 1 ? { urgent: true } : {}),
+    ...(t.wind_up === 1 ? { windUp: true } : {}),
     ...(documents.has(t.id)
       ? { documents: documents.get(t.id)!.map((d) => ({ id: d.id, name: d.name, body: d.body, addedById: d.added_by, at: d.added_at })) }
       : {}),
@@ -1400,6 +1416,9 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     (a) => a.message_id,
   );
   const progress = one<{ message_id: string; progress: number }>("message_progress");
+  const deeds = one<{ message_id: string; system_id: string; operation: string; ok: number; record: string | null }>(
+    "message_system_results",
+  );
   const handoffs = one<{
     message_id: string;
     from_participant_id: string;
@@ -1497,7 +1516,15 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
       }
       case "status": {
         const p = progress.get(m.id);
-        return { ...base, kind: "status", ...(p ? { progress: p.progress } : {}) };
+        const d = deeds.get(m.id);
+        return {
+          ...base,
+          kind: "status",
+          ...(p ? { progress: p.progress } : {}),
+          ...(d
+            ? { did: { systemId: d.system_id, operation: d.operation, ok: d.ok === 1, ...(d.record ? { record: d.record } : {}) } }
+            : {}),
+        };
       }
       case "handoff": {
         const h = handoffs.get(m.id)!;

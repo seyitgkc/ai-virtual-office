@@ -66,8 +66,12 @@ async function main(): Promise<void> {
   expect("and moves none of its lines", await stock("ECOBEE-T", "Laval"), 60);
   expect("an unknown product is refused", (await api(`${shopUrl}/v1/orders`, "POST", { ...order, items: [{ sku: "NOPE", quantity: 1 }] })).status, 422);
   expect("an unknown branch is refused", (await api(`${shopUrl}/v1/orders`, "POST", { ...order, branch: "Moon" })).status, 422);
-  await api(`${shopUrl}/v1/orders/${placed.data.order.id}/cancel`, "POST");
+  expect("an answer names the record it made", placed.data.record, placed.data.order.id);
+  const cancelled = await api(`${shopUrl}/v1/orders/${placed.data.order.id}/cancel`, "POST");
   expect("cancelling returns the stock", await stock("GREE-MZ-12", "Laval"), 120);
+  expect("and names the record it took back", cancelled.data.record, placed.data.order.id);
+  const says = (await api(`${shopUrl}/v1/manifest`)).data.operations.find((o: { id: string }) => o.id === "cancel_order");
+  expect("the storefront says cancelling is how an order is taken back", says.undoes, "place_order");
 
   console.log("\n-- the carrier service --");
   expect("it needs the key too", (await fetch(`${freightUrl}/v1/services`)).status, 401);
@@ -108,6 +112,15 @@ async function main(): Promise<void> {
   const heldAccount = await api(`${booksUrl}/v1/accounts/NOR-0188/hold`, "PUT", { hold: "yes", reason: "Dispute" });
   expect("an account can be put on hold", heldAccount.data.account.onHold, "Dispute");
   expect("the records show the hold", (await api(`${booksUrl}/v1/summary`)).data.lines.some((l: string) => l.includes("NOR-0188") && l.includes("ON CREDIT HOLD: Dispute")), true);
+  const owedBefore = (await api(`${booksUrl}/v1/accounts`)).data.accounts.find((a: { id: string }) => a.id === "BRT-0931").balance;
+  const voided = await api(`${booksUrl}/v1/invoices/${raised.data.invoice.id}/void`, "POST", { reason: "The order was cancelled" });
+  expect("an invoice can be voided, which names the invoice", `${voided.status} ${voided.data.record}`, `201 ${raised.data.invoice.id}`);
+  expect("and comes off what the dealer owes", (await api(`${booksUrl}/v1/accounts`)).data.accounts.find((a: { id: string }) => a.id === "BRT-0931").balance, owedBefore - 4200);
+  expect("the records no longer show it", (await api(`${booksUrl}/v1/summary`)).data.lines.some((l: string) => l.includes(raised.data.invoice.id)), false);
+  expect("voiding it twice changes nothing more", (await api(`${booksUrl}/v1/invoices/${raised.data.invoice.id}/void`, "POST", { reason: "Again" })).data.summary.includes("already voided"), true);
+  expect("an invoice that never existed cannot be voided", (await api(`${booksUrl}/v1/invoices/INV-9/void`, "POST", { reason: "None" })).data.error.code, "unknown_invoice");
+  expect("voiding needs a reason", (await api(`${booksUrl}/v1/invoices/INV-9/void`, "POST", {})).status, 422);
+  expect("the order can then be invoiced afresh", (await invoice("BRT-0931", "SO-1001", 5000, 100)).status, 201);
   books.close();
   books.closeAllConnections();
 
@@ -385,6 +398,32 @@ async function main(): Promise<void> {
   view = await service.applyAction(await owner(), { type: "ANSWER_QUESTION", questionId: heldAgain.id, answeredById: "", body: "Go ahead, as long as it is five.", });
   expect("an answer typed in place of the Approve choice does not count as approval", await stock("ECOBEE-T", "Laval"), thermostats);
   view = await service.saveSystemSettings(await owner(), { id: shopId, name: "Shop", description: "", roomId: warehouse, baseUrl: shopUrl, needsApproval: false });
+
+  console.log("\n-- rejecting a task that already placed an order --");
+  const before = await stock("ECOBEE-T", "Laval");
+  view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Thermostats, a third time", detail: "Five thermostats.", requestedById: "" });
+  const doomed = view.office.tasks.at(-1)!.id;
+  const doomedTask = () => view.office.tasks.find((t) => t.id === doomed)!;
+  expect("the order is placed", await stock("ECOBEE-T", "Laval"), before - 5);
+  expect("the storefront's way of taking an order back was stored when it was connected", view.office.systems[0].operations.find((o) => o.id === "cancel_order")?.undoes, "place_order");
+  view = await service.applyAction(await owner(), { type: "DECIDE", taskId: doomed, byId: "", verdict: "rejected" });
+  expect("the rejected task stays open, with a question", `${doomedTask().status} ${doomedTask().windUp} ${doomedTask().closedAt}`, "blocked_question true null");
+  const whatNow = view.office.messages.find((m) => m.kind === "question" && doomedTask().openQuestionIds.includes(m.id))!;
+  expect("that names the order in the storefront's own words", /in Shop: placed order SO-\d+ for account ACME-1 from Laval: 5 x ECOBEE-T/.test(whatNow.body), true);
+  view = await service.applyAction(await owner(), { type: "ANSWER_QUESTION", questionId: whatNow.id, answeredById: "", body: "Undo all of them", chosenOption: "Undo all of them" });
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  expect("the order is cancelled in the storefront", await stock("ECOBEE-T", "Laval"), before);
+  expect("the thread has the storefront's answer", view.office.messages.some((m) => m.taskId === doomed && /^Shop: cancelled order SO-\d+ and returned its stock to Laval/.test(m.body)), true);
+  expect("the agent reported back to whoever rejected it", view.office.messages.some((m) => m.taskId === doomed && m.kind === "note" && m.fromId === nova && m.body.startsWith("Done. Shop cancelled order")), true);
+  expect("and only then is the task closed", `${doomedTask().status} ${doomedTask().closedAt !== null} ${doomedTask().windUp}`, "rejected true undefined");
+
+  view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Thermostats, a fourth time", detail: "Five thermostats.", requestedById: "" });
+  const kept = view.office.tasks.at(-1)!.id;
+  view = await service.applyAction(await owner(), { type: "DECIDE", taskId: kept, byId: "", verdict: "rejected" });
+  const keepIt = view.office.messages.find((m) => m.kind === "question" && view.office.tasks.find((t) => t.id === kept)!.openQuestionIds.includes(m.id))!;
+  view = await service.applyAction(await owner(), { type: "ANSWER_QUESTION", questionId: keepIt.id, answeredById: "", body: "Leave them as they are", chosenOption: "Leave them as they are" });
+  expect("told to leave it, the office closes the task and keeps the order", `${view.office.tasks.find((t) => t.id === kept)!.status} ${await stock("ECOBEE-T", "Laval")}`, `rejected ${before - 5}`);
 
   shop.close();
   shop.closeAllConnections();

@@ -13,7 +13,7 @@ import type { Office } from "../model";
 import { DEMO_CARRIER_ID, DEMO_STOREFRONT_ID, office as seededOffice } from "../seed";
 import { parseManifest, type ServiceManifest, type SystemOperation } from "../systems";
 import type { SystemView } from "../view";
-import { all, get, run, type Db } from "./db";
+import { all, get, run, transaction, type Db } from "./db";
 import { checkedBaseUrl, ProviderError } from "./providers";
 import { seal, unseal } from "./secrets";
 
@@ -59,7 +59,7 @@ export function storedOperations(db: Db): Map<string, SystemOperation[]> {
     "SELECT * FROM system_operation_fields ORDER BY position",
   );
   const found = new Map<string, SystemOperation[]>();
-  for (const o of all<{ system_id: string; operation: string; label: string; method: SystemOperation["method"]; path: string }>(
+  for (const o of all<{ system_id: string; operation: string; label: string; method: SystemOperation["method"]; path: string; undoes: string | null }>(
     db,
     "SELECT * FROM system_operations ORDER BY position",
   )) {
@@ -72,6 +72,7 @@ export function storedOperations(db: Db): Map<string, SystemOperation[]> {
       fields: fields
         .filter((f) => f.system_id === o.system_id && f.operation === o.operation)
         .map((f) => ({ name: f.name, label: f.label, hint: f.hint, place: f.place })),
+      ...(o.undoes ? { undoes: o.undoes } : {}),
     });
     found.set(o.system_id, list);
   }
@@ -84,13 +85,14 @@ function writeOperations(db: Db, systemId: string, operations: SystemOperation[]
   operations.forEach((operation, position) => {
     run(
       db,
-      "INSERT INTO system_operations (system_id, operation, position, label, method, path) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO system_operations (system_id, operation, position, label, method, path, undoes) VALUES (?, ?, ?, ?, ?, ?, ?)",
       systemId,
       operation.id,
       position,
       operation.label,
       operation.method,
       operation.path,
+      operation.undoes ?? null,
     );
     operation.fields.forEach((field, at) => {
       run(
@@ -353,6 +355,41 @@ async function fetchManifest(baseUrl: string, key: string): Promise<ServiceManif
   return manifest;
 }
 
+/** How often each system has been asked again since this server started. A count of -1 means it answered. */
+const asked = globalThis as unknown as { __systemsAsked?: Map<string, number> };
+const ASK_AGAIN = 5;
+
+/**
+ * Ask each connected system once more what can be done in it, after the
+ * server starts. A system gains operations over time, such as a way to take
+ * something back, and the office otherwise knows only what the system said
+ * on the day it was connected. One that does not answer is asked again on
+ * later turns of the clock, a few times. Returns how many answered.
+ */
+export async function rereadOperations(db: Db): Promise<number> {
+  const counts = (asked.__systemsAsked ??= new Map());
+  let answered = 0;
+  for (const system of all<SystemRow>(db, "SELECT * FROM connected_systems ORDER BY position")) {
+    const tries = counts.get(system.id) ?? 0;
+    if (tries < 0 || tries >= ASK_AGAIN) continue;
+    counts.set(system.id, tries + 1);
+    const key = unseal(system.api_key_cipher);
+    if (!key) continue;
+    try {
+      const manifest = await fetchManifest(system.base_url, key);
+      transaction(db, () => {
+        // It may have been disconnected while it was being asked.
+        if (get(db, "SELECT 1 AS found FROM connected_systems WHERE id = ?", system.id)) writeOperations(db, system.id, manifest.operations);
+      });
+      counts.set(system.id, -1);
+      answered++;
+    } catch {
+      // Not reachable at the moment. It keeps the operations it has.
+    }
+  }
+  return answered;
+}
+
 /** A system's records as it tells them: plain lines, capped in number and length. */
 async function read(system: SystemRow): Promise<string[]> {
   const { status, data } = await call(system, "GET", system.records_path);
@@ -419,7 +456,8 @@ async function performIn(system: SystemRow, action: SystemCall): Promise<SystemO
     return { ok: false, summary: `refused to ${operation.label.toLowerCase()}: ${reason(data, status)}.` };
   }
   const said = str(data.summary).trim().slice(0, 600);
-  return { ok: true, summary: said || `answered that "${operation.label}" was done, with no detail.` };
+  const record = str(data.record).trim().slice(0, 60);
+  return { ok: true, summary: said || `answered that "${operation.label}" was done, with no detail.`, ...(record ? { record } : {}) };
 }
 
 /** Carry out one operation. Always resolves, with what happened in a sentence. */

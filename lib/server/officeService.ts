@@ -91,6 +91,7 @@ import {
   liveRecords,
   performInSystem,
   readSystem,
+  rereadOperations,
   removeSystem,
   checkSystem,
   storeSystem,
@@ -580,7 +581,12 @@ export async function applyAction(session: Session, requested: Action): Promise<
 // ---------------------------------------------------------------------------
 
 /** One thing done without a person asking: an agent's wake, ending a wait, or handing a task on. */
-type Pending = Wake | { kind: "advance"; taskId: string } | { kind: "wake"; taskId: string };
+type Pending =
+  | Wake
+  | { kind: "advance"; taskId: string }
+  | { kind: "wake"; taskId: string }
+  /** A rejected task whose agents have done what they were asked, for the office to take further. */
+  | { kind: "windup"; taskId: string };
 
 /** Steps a task may take in the background between a person's actions on it. */
 const STEPS_PER_TASK = 40;
@@ -601,6 +607,8 @@ interface OfficeWork {
   following: Set<string>;
   /** Tasks left for a person: a handoff went nowhere, a step failed, or the limit was reached. */
   stuck: Set<string>;
+  /** Rejected tasks the office has looked at since anything last happened on them. */
+  wound: Set<string>;
   /** Background steps taken on each task since a person last acted on it. */
   steps: Map<string, number>;
   settling: boolean;
@@ -625,6 +633,7 @@ function workOf(officeId: string): OfficeWork {
       desk: [],
       following: new Set(),
       stuck: new Set(),
+      wound: new Set(),
       steps: new Map(),
       settling: false,
       settleAgain: false,
@@ -702,11 +711,28 @@ function readyToHandOn(office: Office, taskIds: Set<string>, skip: Set<string>):
   const inOrder = [...office.tasks.filter((t) => t.urgent), ...office.tasks.filter((t) => !t.urgent)];
   for (const task of inOrder) {
     if (!taskIds.has(task.id) || skip.has(task.id)) continue;
-    if (task.closedAt !== null || task.status !== "in_progress" || task.wait || task.owed) continue;
+    if (task.closedAt !== null || task.status !== "in_progress" || task.wait || task.owed || task.windUp) continue;
     if (stageSpec(task.stage).humanGate || nextStage(task.stage) === null) continue;
     if (office.participants.find((p) => p.id === task.ownerId)?.kind === "agent") return task.id;
   }
   return null;
+}
+
+/**
+ * A rejected task that is waiting for the office: its agents have dealt with
+ * what they were asked about, and nothing on it waits for a person.
+ */
+function readyToWindUp(office: Office, taskIds: Set<string>, skip: Set<string>): string | null {
+  const task = office.tasks.find(
+    (t) =>
+      t.windUp &&
+      t.closedAt === null &&
+      t.status === "in_progress" &&
+      t.openQuestionIds.length === 0 &&
+      taskIds.has(t.id) &&
+      !skip.has(t.id),
+  );
+  return task?.id ?? null;
 }
 
 /**
@@ -761,7 +787,15 @@ export function carryOnIdleWork(): number {
     const owing = idle.find(
       (t) => t.owed && t.closedAt === null && loaded.office.participants.find((p) => p.id === t.ownerId)?.agentType === "ai",
     );
-    const ready = owing?.id ?? readyToHandOn(loaded.office, new Set(idle.map((t) => t.id)), new Set());
+    const ready =
+      owing?.id ??
+      readyToHandOn(loaded.office, new Set(idle.map((t) => t.id)), new Set()) ??
+      // A rejected task that a restart left between two of its steps.
+      readyToWindUp(
+        loaded.office,
+        new Set(loaded.office.tasks.filter((t) => (idlePushes.get(t.id) ?? 0) < IDLE_PUSHES).map((t) => t.id)),
+        new Set(outstanding(id, true)),
+      );
     if (!ready) continue;
     idlePushes.set(ready, (idlePushes.get(ready) ?? 0) + 1);
     carryOn(id, owing?.ownerId ? [{ kind: "resume", taskId: owing.id, participantId: owing.ownerId }] : [], [ready], true);
@@ -784,6 +818,7 @@ function startClock(): void {
       wakeDueTasks();
       carryOnIdleWork();
       void fileDueStanding();
+      void rereadOperations(officeDatabase()).catch((error) => console.error("Reading the systems again failed.", error));
     } catch (error) {
       console.error("Waking waiting tasks failed.", error);
     }
@@ -802,6 +837,7 @@ function carryOn(officeId: string, wakes: Pending[], taskIds: string[], afresh =
   const work = workOf(officeId);
   for (const id of taskIds) {
     work.following.add(id);
+    work.wound.delete(id);
     if (afresh) {
       work.stuck.delete(id);
       work.steps.delete(id);
@@ -852,12 +888,16 @@ function cross(wake: Wake, outcome: "done" | "failed"): void {
   );
 }
 
-/** Tasks that still have something written down for an agent, done or given up on. */
-function outstanding(officeId: string): string[] {
+/**
+ * Tasks that still have something written down for an agent, done or given
+ * up on. With `live`, only work that still has tries left.
+ */
+function outstanding(officeId: string, live = false): string[] {
   return all<{ task_id: string }>(
     officeDatabase(),
-    "SELECT DISTINCT task_id FROM pending_work WHERE office_id = ?",
+    `SELECT DISTINCT task_id FROM pending_work WHERE office_id = ?${live ? " AND tries < ?" : ""}`,
     officeId,
+    ...(live ? [TRIES] : []),
   ).map((r) => r.task_id);
 }
 
@@ -895,7 +935,9 @@ const same = (a: Wake, b: Wake): boolean =>
 /** Put one piece of work where it belongs: on an agent's queue, or on the office's own desk. */
 function hand(officeId: string, work: OfficeWork, next: Pending): void {
   work.following.add(next.taskId);
-  if (next.kind === "advance" || next.kind === "wake") {
+  // Anything new on a rejected task is a reason for the office to look at it again.
+  work.wound.delete(next.taskId);
+  if (next.kind === "advance" || next.kind === "wake" || next.kind === "windup") {
     work.desk.push(next);
     return;
   }
@@ -1029,10 +1071,19 @@ function handOn(officeId: string, work: OfficeWork): Pending | null {
   if (!loaded) return null;
   // A task with anything outstanding for an agent stays where it is. That
   // covers a colleague's part that failed, until it is done or a person steps in.
-  const inHand = new Set<string>([...work.current.values(), ...outstanding(officeId)]);
-  for (const queue of work.queues.values()) for (const item of queue) inHand.add(item.taskId);
+  const busyWith = new Set<string>(work.current.values());
+  for (const queue of work.queues.values()) for (const item of queue) busyWith.add(item.taskId);
+  const inHand = new Set<string>([...busyWith, ...outstanding(officeId)]);
   const taskId = readyToHandOn(loaded.office, work.following, new Set([...work.stuck, ...inHand]));
-  return taskId ? { kind: "advance", taskId } : null;
+  if (taskId) return { kind: "advance", taskId };
+  // A rejected task does not wait on work that was given up on: what could
+  // not be done is put to the person, who decides what happens next.
+  const winding = readyToWindUp(loaded.office, work.following, new Set([...work.wound, ...busyWith, ...outstanding(officeId, true)]));
+  if (!winding) return null;
+  // It is looked at once for each thing that happens on it, so that a
+  // winding up with nothing to do is not taken up again and again.
+  work.wound.add(winding);
+  return { kind: "windup", taskId: winding };
 }
 
 /** What a turn found it has to fetch before it can go on. */
@@ -1171,6 +1222,11 @@ async function carryOut(officeId: string, next: Pending): Promise<"done" | "fail
 function subjectOf(office: Office, next: Pending): { task: Task; actor: Participant; action: Action } | null {
   const task = office.tasks.find((t) => t.id === next.taskId);
   if (!task) return null;
+  if (next.kind === "windup") {
+    // The office does this itself. It is recorded against whoever holds the task.
+    const holder = office.participants.find((p) => p.id === task.ownerId) ?? office.participants.find((p) => p.id === task.requestedById);
+    return holder ? { task, actor: holder, action: { type: "WIND_UP", taskId: task.id } } : null;
+  }
   const actorId = next.kind === "advance" || next.kind === "wake" ? task.ownerId : next.participantId;
   // A wait ends whoever owns the task. Everything else here is an agent's doing.
   const actor = office.participants.find((p) => p.id === actorId && (p.kind === "agent" || next.kind === "wake"));
@@ -1244,6 +1300,9 @@ async function takeTurn(
       subject: { ...NO_SUBJECT, taskId: task.id, subjectParticipantId: actor.id, roomId: task.roomId },
       notes: result.notes,
     });
+    // What was given up on has been put to the person, so it is not tried
+    // again behind their back when they answer.
+    if (next.kind === "windup") run(db, "DELETE FROM pending_work WHERE task_id = ? AND tries >= ?", task.id, TRIES);
   });
   return { wake: [...result.wake, ...deferred], taskIds: changedTasks(before.office, result.state.office) };
 }

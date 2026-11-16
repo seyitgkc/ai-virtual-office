@@ -96,6 +96,9 @@ async function main(): Promise<void> {
   /** How many times a colleague looking at a note fails before it answers. */
   let failNotes = 0;
   let slowFor: (input: AgentStepInput) => number = () => 0;
+  const shopCalls: string[] = [];
+  let orders = 2000;
+  let refuseCancel = false;
   const atOnce = new Map<string, number>();
   let most = 0;
   let doubled = false;
@@ -118,6 +121,21 @@ async function main(): Promise<void> {
         failNotes--;
         throw new Error(`${who} could not answer: the provider could not be reached.`);
       }
+      // On a rejected task: take back the one thing the note names.
+      if (input.attending && input.windingUp) {
+        const record = /the record is ([A-Z]+-\d+)/.exec(input.attending.body)?.[1] ?? "";
+        return input.afterAction
+          ? { statusNote: "", questions: [], assumptions: [], notes: [{ toParticipantId: input.attending.fromId, body: `The shop has answered about ${record}.` }] }
+          : { statusNote: "", questions: [], assumptions: [], actions: [{ systemId: "sys-loop-shop", operation: "cancel_order", fields: { order: record } }] };
+      }
+      if (input.stage === "execution" && input.task.title.includes("doomed") && !input.afterAction && !input.attending) {
+        return {
+          statusNote: "Placing the order.",
+          questions: [],
+          assumptions: [],
+          actions: [{ systemId: "sys-loop-shop", operation: "place_order", fields: { account: "CAL-3310", branch: "Laval", items: "GREE-CU-24 x 2" } }],
+        };
+      }
       if (input.attending) {
         return { statusNote: "Checked the credit as asked.", questions: [], assumptions: [], notes: [{ toParticipantId: input.attending.fromId, body: "Credit is fine." }] };
       }
@@ -134,6 +152,14 @@ async function main(): Promise<void> {
           : { statusNote: "Shipped what is here.", questions: [], assumptions: [], wait: { until: inTwentyDays, reason: "The factory order arrives, and the rest can be ordered." } };
       }
       return { statusNote: `${who} did ${input.stage}${answered ? " with the answer" : ""}.`, questions: [], assumptions: [] };
+    },
+    // A stand-in shop: it numbers what is ordered and can be told to refuse a cancellation.
+    perform: async (call: { operation: string; fields: Record<string, string> }) => {
+      shopCalls.push(`${call.operation}:${call.fields.order ?? call.fields.items}`);
+      if (call.operation === "place_order") return { ok: true, summary: `placed order SO-${++orders}.`, record: `SO-${orders}` };
+      return refuseCancel
+        ? { ok: false, summary: "refused to cancel an order: it has already shipped." }
+        : { ok: true, summary: `cancelled order ${call.fields.order}.`, record: call.fields.order };
     },
   };
   service.useAgentRuntime(scripted);
@@ -365,6 +391,81 @@ async function main(): Promise<void> {
   expect("filing by hand is refused while the last one is open, and says so", await refusal(async () => service.fileStandingNow(await owner(), view.standing[0].id)), 409);
   view = await service.changeStandingRequest(await owner(), view.standing[0].id, "remove");
   expect("and it can be removed", view.standing.length, 0);
+
+  console.log("\n-- a rejected task is wound up between clicks --");
+  // A shop in the room where the order is carried out, as the office would hold it once connected.
+  const workRoom = view.office.stageRooms.execution;
+  const { run: sql } = await import("../lib/server/db");
+  sql(db, "INSERT INTO connected_systems (id, room_id, position, name, description, records_path, base_url, updated_at) VALUES ('sys-loop-shop', ?, 900, 'Shop', 'Orders.', '/v1/summary', 'http://127.0.0.1:9', 0)", workRoom);
+  sql(db, "INSERT INTO system_operations (system_id, operation, position, label, method, path) VALUES ('sys-loop-shop', 'place_order', 0, 'Place an order', 'POST', '/v1/orders')");
+  for (const [at, name] of ["account", "branch", "items"].entries()) {
+    sql(db, "INSERT INTO system_operation_fields (system_id, operation, name, position, label, hint, place) VALUES ('sys-loop-shop', 'place_order', ?, ?, ?, '', 'body')", name, at, name);
+  }
+  sql(db, "INSERT INTO system_operations (system_id, operation, position, label, method, path, undoes) VALUES ('sys-loop-shop', 'cancel_order', 1, 'Cancel an order', 'POST', '/v1/orders/{order}/cancel', 'place_order')");
+  sql(db, "INSERT INTO system_operation_fields (system_id, operation, name, position, label, hint, place) VALUES ('sys-loop-shop', 'cancel_order', 'order', 0, 'Order number', '', 'path')");
+  const reject = async (title: string) => {
+    view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title, detail: "Two condensers.", requestedById: "" });
+    await service.agentsIdle();
+    view = await service.applyAction(await owner(), { type: "DECIDE", taskId: taskOf(service.getView(await owner()), title).id, byId: "", verdict: "rejected" });
+    return view.office.messages.find((m) => m.kind === "question" && taskOf(view, title).openQuestionIds.includes(m.id))!;
+  };
+  const say = async (title: string, said: string) => {
+    const question = view.office.messages.find((m) => m.kind === "question" && taskOf(view, title).openQuestionIds.includes(m.id))!;
+    view = await service.applyAction(await owner(), { type: "ANSWER_QUESTION", questionId: question.id, answeredById: "", body: said, chosenOption: said });
+  };
+  steps.length = 0;
+  const asked = await reject("Order, doomed");
+  expect("the order was placed, and the question names it", `${shopCalls.join()} ${asked.body.includes("placed order SO-2001")}`, "place_order:GREE-CU-24 x 2 true");
+  expect("the rejected task waits for the answer", `${taskOf(view, "Order, doomed").status} ${taskOf(view, "Order, doomed").windUp}`, "blocked_question true");
+  await service.agentsIdle();
+  expect("and nothing is carried forward meanwhile", `${service.carryOnIdleWork()} ${taskOf(service.getView(await owner()), "Order, doomed").closedAt}`, "0 null");
+  steps.length = 0;
+  await say("Order, doomed", "Undo all of them");
+  expect("the click returns before the agents have finished", taskOf(view, "Order, doomed").closedAt, null);
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  expect("the agent that placed the order is the one that cancels it", `${steps.filter((x) => x === "Vera:note").length > 0} ${shopCalls.at(-1)}`, "true cancel_order:SO-2001");
+  expect("the task closes by itself once that is done", `${taskOf(view, "Order, doomed").status} ${taskOf(view, "Order, doomed").closedAt !== null}`, "rejected true");
+  expect("and nothing is left written down for it", written("Order, doomed"), "");
+  expect("the log says how it ended", view.feed.some((f) => f.text.includes("closed as rejected, with everything it did taken back")), true);
+
+  refuseCancel = true;
+  await reject("Order, doomed twice");
+  await say("Order, doomed twice", "Undo all of them");
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  const stuckTask = taskOf(view, "Order, doomed twice");
+  expect("an order the shop will not cancel keeps the task open", `${stuckTask.status} ${stuckTask.closedAt}`, "blocked_question null");
+  expect("and the person is told why, and asked what next", view.office.messages.find((m) => m.kind === "question" && stuckTask.openQuestionIds.includes(m.id))!.body.includes("it has already shipped"), true);
+  refuseCancel = false;
+  await say("Order, doomed twice", "Try again");
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  expect("trying again once the shop allows it closes the task", `${taskOf(view, "Order, doomed twice").status} ${shopCalls.at(-1)}`, "rejected cancel_order:SO-2002");
+
+  await reject("Order, doomed thrice");
+  failNotes = 99;
+  await say("Order, doomed thrice", "Undo all of them");
+  await service.agentsIdle();
+  for (let i = 0; i < 4; i++) {
+    service.carryOnIdleWork();
+    await service.agentsIdle();
+  }
+  view = service.getView(await owner());
+  const unreached = taskOf(view, "Order, doomed thrice");
+  expect("an agent that cannot be reached is tried three times, then the person is asked", `${unreached.status} ${view.office.messages.find((m) => m.kind === "question" && unreached.openQuestionIds.includes(m.id))?.body.includes("placed order SO-2003")}`, "blocked_question true");
+  expect("what was given up on is not kept for later", written("Order, doomed thrice"), "");
+  failNotes = 1;
+  await say("Order, doomed thrice", "Try again");
+  await service.agentsIdle();
+  // The server stops and starts while the agent still owes its part.
+  service.forgetQueues();
+  expect("after a restart the office finds the agent's part again", service.carryOnIdleWork() >= 1, true);
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  expect("and takes the winding up to its end", `${taskOf(view, "Order, doomed thrice").status} ${shopCalls.at(-1)}`, "rejected cancel_order:SO-2003");
+  failNotes = 0;
+  sql(db, "DELETE FROM connected_systems WHERE id = 'sys-loop-shop'");
 
   console.log("\n-- with the setting off, a person moves each task on --");
   await service.applyAdminOperation(await owner(), { type: "SET_AUTO_HANDOFF", on: false });

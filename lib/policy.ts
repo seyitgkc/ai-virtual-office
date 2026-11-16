@@ -106,6 +106,8 @@ export function authorize(
     case "AGENT_RESUME":
     case "AGENT_ATTEND":
       return no("Only the office can wake an agent.");
+    case "WIND_UP":
+      return no("Only the office winds a rejected task up.");
 
     case "RESOLVE_ASSUMPTION": {
       const assumption = office.messages.find((m) => m.id === action.assumptionId);
@@ -150,6 +152,7 @@ export function stampActor(action: Action, actorId: string): Action {
     case "ADVANCE":
     case "AGENT_RESUME":
     case "AGENT_ATTEND":
+    case "WIND_UP":
       return action;
   }
 }

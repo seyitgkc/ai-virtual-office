@@ -298,10 +298,17 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
     const from =
       [...surroundings.people, ...surroundings.colleagues].find((p) => p.id === input.attending!.fromId)?.displayName ??
       input.attending.fromId;
-    lines.push(
-      `This task is not yours. You are looking at it only because ${from} left you this note: ${asData("note", input.attending.body)}`,
-      "Do your own part if the note calls for something that is yours to do, such as an action in a system you may act in, and answer with one note to them if they need to hear back. Do not take the task over. Questions, assumptions, needs and an output are ignored here. If there is nothing for you to do, say so in the status note and leave the lists empty.",
-    );
+    if (input.windingUp) {
+      lines.push(
+        `This task was rejected and is being wound up. Nothing more is to be done on its work. You are here only because ${from} left you this note about one thing you did on it: ${asData("note", input.attending.body)}`,
+        `Deal with that one thing and nothing else. Where it is to be taken back, add one entry to "actions" using the operation the note names, with the record number the note gives. Take back only what the note names: an operation that names any other record is refused. Then answer ${from} with one note that says plainly what happened: that you have asked the system for it, or that nothing was to be done, or why it cannot be done. Once the thread shows the system's answer, say what the system answered. Questions, assumptions, needs and an output are ignored here.`,
+      );
+    } else {
+      lines.push(
+        `This task is not yours. You are looking at it only because ${from} left you this note: ${asData("note", input.attending.body)}`,
+        "Do your own part if the note calls for something that is yours to do, such as an action in a system you may act in, and answer with one note to them if they need to hear back. Do not take the task over. Questions, assumptions, needs and an output are ignored here. If there is nothing for you to do, say so in the status note and leave the lists empty.",
+      );
+    }
   }
   if (input.afterAction) {
     lines.push(
@@ -396,10 +403,10 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
   return lines.join("\n");
 }
 
-/** Shorten text to a limit, ending on a whole word. */
 /** Room for a note of 120 words, the most an agent is asked to write. */
 const NOTE_LENGTH = 900;
 
+/** Shorten text to a limit, ending on a whole word. */
 const clip = (value: string, max: number): string => {
   const text = value.trim();
   if (text.length <= max) return text;

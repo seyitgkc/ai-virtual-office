@@ -516,6 +516,20 @@ export interface AssumptionMessage extends MessageBase {
 export interface StatusMessage extends MessageBase {
   kind: "status";
   progress?: number;
+  /** Set on the line that reports what a connected system answered to an action. */
+  did?: SystemDeed;
+}
+
+/**
+ * One thing done, or refused, in a connected system on behalf of a task. The
+ * office reads these to tell what a task has done that still stands.
+ */
+export interface SystemDeed {
+  systemId: string;
+  operation: string;
+  ok: boolean;
+  /** The number of the record the system made, changed or took back. */
+  record?: string;
 }
 
 export interface HandoffMessage extends MessageBase {
@@ -667,6 +681,12 @@ export interface Task {
   urgent?: boolean;
   /** Documents attached to the request, in the order they were added. */
   documents?: TaskDocument[];
+  /**
+   * Set from the moment a task is rejected until it closes, when the task
+   * had already done things in connected systems. Until then a person says
+   * what is to happen to them and the agents that did them carry it out.
+   */
+  windUp?: boolean;
 }
 
 // ---------------------------------------------------------------------------
