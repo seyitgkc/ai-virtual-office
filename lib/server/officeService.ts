@@ -808,6 +808,7 @@ async function workThrough(officeId: string, agentId: string): Promise<void> {
   const work = workOf(officeId);
   if (work.working.has(agentId)) return;
   work.working.add(agentId);
+  let did = false;
   try {
     for (;;) {
       const queue = work.queues.get(agentId) ?? [];
@@ -816,6 +817,7 @@ async function workThrough(officeId: string, agentId: string): Promise<void> {
       const at = queue.findIndex((item) => item.kind !== "resume" || !colleaguesAt(work, item.taskId, agentId));
       if (at === -1) break;
       const [next] = queue.splice(at, 1);
+      did = true;
       work.current.set(agentId, next.taskId);
       if (next.kind === "attend") work.attending.set(agentId, next.taskId);
       await carryOut(officeId, next).catch((error) => console.error("An agent's step failed.", error));
@@ -829,7 +831,10 @@ async function workThrough(officeId: string, agentId: string): Promise<void> {
     work.current.delete(agentId);
     work.attending.delete(agentId);
     if ((work.queues.get(agentId)?.length ?? 0) === 0) work.queues.delete(agentId);
-    void settle(officeId);
+    // An agent that found nothing it could start has changed nothing, so
+    // there is nothing for the office to settle. Calling it anyway would have
+    // the two start each other without end while that agent waits.
+    if (did) void settle(officeId);
     stirred();
   }
 }
@@ -858,14 +863,18 @@ async function settle(officeId: string): Promise<void> {
     do {
       work.settleAgain = false;
       for (;;) {
+        // Let the server answer whatever else is waiting between one piece of
+        // its own work and the next.
+        await new Promise<void>((resolve) => setImmediate(resolve));
         const next = work.desk.shift() ?? (await inTurn(async () => handOn(officeId, work)));
         if (!next) break;
-        await carryOut(officeId, next).catch((error) => console.error("A handoff failed.", error));
+        await carryOut(officeId, next);
       }
     } while (work.settleAgain);
+  } catch (error) {
+    console.error("The office could not settle its work.", error);
   } finally {
     work.settling = false;
-    stir2(officeId, work);
     stirred();
   }
 }

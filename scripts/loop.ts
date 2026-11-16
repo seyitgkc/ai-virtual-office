@@ -198,6 +198,9 @@ async function main(): Promise<void> {
   service.useAgentRuntime({
     step: async (input: AgentStepInput): Promise<AgentStepResult> => {
       steps.push(`${input.participant.displayName}:${input.attending ? "note" : input.stage}`);
+      // A real model answers over the network, one colleague sooner than the
+      // other. The owner must wait for both without the server spinning.
+      if (input.attending) await new Promise((resolve) => setTimeout(resolve, input.participant.displayName === "Vera" ? 120 : 40));
       if (input.attending) return { questions: [], assumptions: [], notes: [{ toParticipantId: input.attending.fromId, body: `${input.participant.displayName} answers.` }] };
       if (input.stage === "intake") {
         return { statusNote: "Asked two colleagues.", questions: [], assumptions: [], notes: [{ toParticipantId: ledger, body: "Credit?" }, { toParticipantId: `p-vera-${suffix}`, body: "Stock?" }] };
@@ -206,7 +209,13 @@ async function main(): Promise<void> {
     },
   });
   view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Order, two answers", detail: "Two units.", requestedById: "" });
-  await service.agentsIdle();
+  // A timer that keeps its beat shows the server is still answering while agents wait on each other.
+  let beats = 0;
+  const beat = setInterval(() => beats++, 10);
+  const quiet = await Promise.race([service.agentsIdle().then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5000))]);
+  clearInterval(beat);
+  expect("the agents finish", quiet, true);
+  expect("and the server kept answering while one of them waited for its colleagues", beats > 5, true);
   expect("it takes its step again once, with both answers, and the task moves on", steps.join(" "), "Iris:intake Ledger:note Vera:note Iris:intake Atlas:planning Vera:execution Ledger:review");
   service.useAgentRuntime(scripted);
 
