@@ -127,6 +127,14 @@ pricing, and a finance approval before a quote goes out.
   reaches a real halt: a question, missing access, an approval or the review.
   When a colleague's request for approval held the task, its owner takes its
   step once more after the answer, so nothing it was waiting for is skipped.
+- **Urgent work.** A person can mark a task urgent when filing it or later.
+  Every agent takes urgent work ahead of whatever else is on its queue, once
+  it has finished what it is on, and the task leads the work list.
+- **A report on how the office is doing.** For people who see everything:
+  what was filed and closed, how many tasks went through with nobody asked,
+  where work stopped for a person and how often, how long each stage takes,
+  and what each agent and person did. It is counted from the tasks and
+  threads themselves, so there is nothing separate to keep in step.
 - **Work that waits for a day.** When the rest of a job depends on a date,
   such as stock due from the factory or a booked visit, the agent does what
   it can now and sets the task to wait until that day. The task shows the day
@@ -1373,6 +1381,7 @@ erDiagram
     int wait_until
     text wait_reason
     integer step_owed
+    integer urgent
   }
   messages {
     text id PK
@@ -1802,10 +1811,10 @@ of a human one.
 | Time: due dates, a reminder on Friday, a job that waits for a delivery | A task can wait for one day at a time and is picked up again then. There are no due dates, no reminders to people and no working hours, and an agent takes the day from the thread or the records and cannot look ahead in a calendar. |
 | Conversation: two rooms talk a problem through | Agents leave each other notes of up to 60 words on a task. They cannot meet, and a reviewer cannot ask the worker a question without sending the work back. |
 | Parallel work: Finance and Purchasing on the same order at once | A task has one owner in one room. Colleagues help through notes, which is where most faults found in testing came from. |
-| Priority and load: this one is urgent, that desk is swamped | Tasks are taken in the order they arrive, and nothing shows how much each agent is carrying. |
+| Priority and load: this one is urgent, that desk is swamped | A person can mark a task urgent, and agents take urgent work first. The report and the status line show what each agent is on and how much waits behind it. There is no finer order than urgent or not, no due date, and work is not moved from a busy agent to a free one. |
 | Documents: a purchase order as a PDF, an email from the dealer | A request is a title and a paragraph. Nothing can be attached, and nothing is sent outside the office. |
 | A different path for different work | Every task passes all four stages. A stage with nothing to do says so in a line and passes it on. |
-| Reporting: how did we do last month | Every action is in the audit log, with no summary over it. |
+| Reporting: how did we do last month | A report counts everything since the office began. It cannot be narrowed to a period, compared with an earlier one, or exported. |
 
 ## Run it
 
@@ -1911,12 +1920,12 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, and a need passed to a colleague | `npm run agents` | 140 of 140 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, and a need passed to a colleague | `npm run agents` | 155 of 155 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 56 of 56 pass |
 | Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, and an office built from nothing | `npm run admin` | 93 of 93 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
 | The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 152 of 152 pass |
-| Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, providers that belong to an account, and the sample office | `npm run loop` | 68 of 68 pass |
+| Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, providers that belong to an account, and the sample office | `npm run loop` | 71 of 71 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 

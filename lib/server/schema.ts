@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -350,6 +350,8 @@ CREATE TABLE tasks (
   wait_reason  TEXT,
   -- 1 while the owner has been given the task and has not yet taken its step.
   step_owed    INTEGER NOT NULL DEFAULT 0 CHECK (step_owed IN (0, 1)),
+  -- 1 when a person marked the task urgent, which puts it ahead on every queue.
+  urgent       INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
   CHECK ((wait_until IS NULL) = (wait_reason IS NULL))
 ) STRICT;
 
@@ -1111,5 +1113,9 @@ ALTER TABLE tasks ADD COLUMN wait_reason TEXT;
   // Version 14 records that a task's owner still owes its step.
   13: /* sql */ `
 ALTER TABLE tasks ADD COLUMN step_owed INTEGER NOT NULL DEFAULT 0 CHECK (step_owed IN (0, 1));
+`,
+  // Version 15 lets a person mark a task urgent.
+  14: /* sql */ `
+ALTER TABLE tasks ADD COLUMN urgent INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1));
 `,
 };

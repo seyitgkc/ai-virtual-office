@@ -1,5 +1,6 @@
 "use client";
 
+import { Report } from "./Report";
 import { setupSteps, type SetupTab } from "../lib/setup";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -56,6 +57,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
   const [inviting, setInviting] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
   const [mode, setMode] = useState<"overview" | "walk">("overview");
   const [walkRoomId, setWalkRoomId] = useState<string | null>(null);
@@ -179,6 +181,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
             setSettingsOpen(true);
           }}
           onInvite={() => setInviting(true)}
+          onReport={() => setReportOpen(true)}
           inboxCount={inboxCount(view, viewer)}
           onInbox={() => setInboxOpen(true)}
         />
@@ -195,8 +198,8 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           intakeRoomName={
             office.floorplan.rooms.find((r) => r.id === office.stageRooms.intake)?.name ?? "the office"
           }
-          onSubmit={(title, detail) =>
-            dispatch({ type: "SUBMIT_REQUEST", title, detail, requestedById: viewer.id })
+          onSubmit={(title, detail, urgent) =>
+            dispatch({ type: "SUBMIT_REQUEST", title, detail, requestedById: viewer.id, ...(urgent ? { urgent: true } : {}) })
           }
         />
         {mode === "walk" ? (
@@ -306,6 +309,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           onClose={() => setInboxOpen(false)}
         />
       )}
+      {reportOpen && <Report view={view} onClose={() => setReportOpen(false)} />}
       {settingsOpen && (
         <Settings
           view={view}

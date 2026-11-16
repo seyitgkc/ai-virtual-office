@@ -259,6 +259,24 @@ async function main(): Promise<void> {
   expect("nothing is left on anyone's queue", Object.keys(view.agentLoad).length, 0);
   slowFor = () => 0;
 
+  console.log("\n-- urgent work goes first --");
+  steps.length = 0;
+  const taken: string[] = [];
+  slowFor = (input) => {
+    if (input.stage === "intake" && input.task.title.startsWith("Queue")) taken.push(input.task.title);
+    return input.task.title.startsWith("Queue") ? 60 : 0;
+  };
+  for (const title of ["Queue one", "Queue two", "Queue three"]) {
+    view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title, detail: "One unit.", requestedById: "" });
+  }
+  view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Queue rush", detail: "One unit, today.", requestedById: "", urgent: true });
+  expect("the urgent task is stored as urgent", taskOf(view, "Queue rush").urgent, true);
+  await service.agentsIdle();
+  expect("the agent finishes what it is on, then takes the urgent task ahead of the rest", taken.join(", "), "Queue one, Queue rush, Queue two, Queue three");
+  view = service.getView(await owner());
+  expect("and all four reach review", ["Queue one", "Queue two", "Queue three", "Queue rush"].every((t) => taskOf(view, t).stage === "review"), true);
+  slowFor = () => 0;
+
   console.log("\n-- with the setting off, a person moves each task on --");
   await service.applyAdminOperation(await owner(), { type: "SET_AUTO_HANDOFF", on: false });
   steps.length = 0;

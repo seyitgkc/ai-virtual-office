@@ -435,6 +435,7 @@ function auditSubject(action: Action, before: Office, after: Office): AuditSubje
     case "ADVANCE":
     case "DECIDE":
     case "WAKE_TASK":
+    case "SET_URGENT":
       taskId = action.taskId;
       break;
     case "REASSIGN":
@@ -676,7 +677,9 @@ function changedTasks(before: Office, after: Office): string[] {
 /** A task that its agent has finished with at this stage and can pass on. */
 function readyToHandOn(office: Office, taskIds: Set<string>, skip: Set<string>): string | null {
   if (!office.autoHandoff) return null;
-  for (const task of office.tasks) {
+  // Urgent tasks are handed on before the rest.
+  const inOrder = [...office.tasks.filter((t) => t.urgent), ...office.tasks.filter((t) => !t.urgent)];
+  for (const task of inOrder) {
     if (!taskIds.has(task.id) || skip.has(task.id)) continue;
     if (task.closedAt !== null || task.status !== "in_progress" || task.wait || task.owed) continue;
     if (stageSpec(task.stage).humanGate || nextStage(task.stage) === null) continue;
@@ -814,7 +817,11 @@ async function workThrough(officeId: string, agentId: string): Promise<void> {
       const queue = work.queues.get(agentId) ?? [];
       // An owner does not take its step again while colleagues are still
       // looking at notes on that task: it waits and hears them all at once.
-      const at = queue.findIndex((item) => item.kind !== "resume" || !colleaguesAt(work, item.taskId, agentId));
+      const ready = (item: Wake): boolean => item.kind !== "resume" || !colleaguesAt(work, item.taskId, agentId);
+      // Urgent work is taken first. Within each kind the order of arrival stands.
+      const urgent = urgentTasks(officeId);
+      const first = queue.findIndex((item) => ready(item) && urgent.has(item.taskId));
+      const at = first !== -1 ? first : queue.findIndex(ready);
       if (at === -1) break;
       const [next] = queue.splice(at, 1);
       did = true;
@@ -837,6 +844,17 @@ async function workThrough(officeId: string, agentId: string): Promise<void> {
     if (did) void settle(officeId);
     stirred();
   }
+}
+
+/** The open tasks of an office that a person has marked urgent. */
+function urgentTasks(officeId: string): Set<string> {
+  return new Set(
+    all<{ id: string }>(
+      officeDatabase(),
+      "SELECT id FROM tasks WHERE office_id = ? AND urgent = 1 AND closed_at IS NULL",
+      officeId,
+    ).map((t) => t.id),
+  );
 }
 
 /** Whether another agent is looking at a note on this task, or has one waiting. */

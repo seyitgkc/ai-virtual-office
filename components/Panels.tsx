@@ -32,6 +32,9 @@ const STATUS: Record<TaskStatus, { label: string; accent: string }> = {
   rejected: { label: "rejected", accent: "#8a8a8a" },
 };
 
+/** The colour of the mark on urgent work. */
+const URGENT_ACCENT = "#e0614f";
+
 /** The work list offers search and these filters once it holds more tasks than this. */
 const WORK_FILTER_FROM = 5;
 
@@ -96,6 +99,7 @@ export function TitleCard({
   onSignOut,
   onSettings,
   onInvite,
+  onReport,
   inboxCount,
   onInbox,
 }: {
@@ -109,6 +113,8 @@ export function TitleCard({
   onSignOut: () => void;
   onSettings: () => void;
   onInvite: () => void;
+  /** Open the report on how the office is doing. */
+  onReport: () => void;
   /** How many things in the inbox are waiting or unopened. */
   inboxCount: number;
   onInbox: () => void;
@@ -189,6 +195,11 @@ export function TitleCard({
           {viewer.permissions.includes("invite_people") && (
             <button className="btn" onClick={onInvite}>
               Invite
+            </button>
+          )}
+          {viewer.permissions.includes("see_everything") && (
+            <button className="btn" onClick={onReport}>
+              Report
             </button>
           )}
           <button className="btn" onClick={onSettings}>
@@ -273,11 +284,12 @@ function RequestForm({
   /** Start from the demo's sample order. Only the demo office does. */
   sample: boolean;
   intakeRoomName: string;
-  onSubmit: (title: string, detail: string) => void;
+  onSubmit: (title: string, detail: string, urgent: boolean) => void;
   onCancel: () => void;
 }) {
   const [title, setTitle] = useState(sample ? SAMPLE_REQUEST.title : "");
   const [detail, setDetail] = useState(sample ? SAMPLE_REQUEST.detail : "");
+  const [urgent, setUrgent] = useState(false);
   const ready = title.trim().length > 0 && detail.trim().length > 0;
 
   return (
@@ -285,7 +297,7 @@ function RequestForm({
       className="request-form"
       onSubmit={(e) => {
         e.preventDefault();
-        if (ready) onSubmit(title.trim(), detail.trim());
+        if (ready) onSubmit(title.trim(), detail.trim(), urgent);
       }}
     >
       <label htmlFor="request-title">Title</label>
@@ -305,6 +317,10 @@ function RequestForm({
         placeholder={sample ? undefined : "What is needed, and anything the office should know"}
         onChange={(e) => setDetail(e.target.value)}
       />
+      <label className="urgent-box">
+        <input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} />
+        Urgent. Agents take it ahead of their other work.
+      </label>
       {sample && (
         <div className="hint">
           The agents in this demo follow playbooks written for a dealer order like this one.
@@ -336,7 +352,7 @@ export function TaskList({
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** Resolves to whether the request was accepted. */
-  onSubmit: (title: string, detail: string) => Promise<boolean>;
+  onSubmit: (title: string, detail: string, urgent: boolean) => Promise<boolean>;
   /** Why this viewer cannot file a request, or null when they can. */
   submitBlocked: string | null;
 }) {
@@ -346,13 +362,16 @@ export function TaskList({
   // A handful of tasks need no finding. The controls appear once there are more.
   const crowded = tasks.length > WORK_FILTER_FROM;
   const wanted = search.trim().toLowerCase();
+  // Open urgent tasks lead the list. Everything else keeps the order it was filed in.
+  const leading = (task: Task): number => (task.urgent && task.closedAt === null ? 0 : 1);
+  const ordered = [...tasks].sort((a, b) => leading(a) - leading(b));
   const listed = crowded
-    ? tasks.filter(
+    ? ordered.filter(
         (task) =>
           WORK_FILTERS[show].keeps(task) &&
           (wanted === "" || `${task.id} ${task.title} ${task.detail}`.toLowerCase().includes(wanted)),
       )
-    : tasks;
+    : ordered;
 
   return (
     <div className="panel" id="tasks">
@@ -365,9 +384,9 @@ export function TaskList({
           <RequestForm
             sample={isDemoOffice}
             intakeRoomName={intakeRoomName}
-            onSubmit={(title, detail) => {
+            onSubmit={(title, detail, urgent) => {
               // The form stays open with its text when the request is refused.
-              void onSubmit(title, detail).then((accepted) => {
+              void onSubmit(title, detail, urgent).then((accepted) => {
                 if (accepted) setComposing(false);
               });
             }}
@@ -417,6 +436,11 @@ export function TaskList({
               <span className="chip" style={{ ["--accent" as string]: s.accent }}>
                 {s.label}
               </span>
+              {task.urgent && task.closedAt === null && (
+                <span className="chip urgent" style={{ ["--accent" as string]: URGENT_ACCENT }}>
+                  urgent
+                </span>
+              )}
             </button>
           );
         })}
@@ -620,6 +644,7 @@ function TaskInspector({
   const mayReassign = may(office, viewer, "reassign_work");
   const mayDecide = may(office, viewer, "decide_reviews");
   const mayAdvance = authorize(office, ctx, viewer, { type: "ADVANCE", taskId: task.id });
+  const mayMark = authorize(office, ctx, viewer, { type: "SET_URGENT", taskId: task.id, urgent: true, byId: viewer.id });
 
   const target = nextStage(task.stage);
   const targetRoom = target ? (roomForStage(office, target) ?? task.roomId) : null;
@@ -671,6 +696,11 @@ function TaskInspector({
           <span className="chip" style={{ ["--accent" as string]: s.accent }}>
             {s.label}
           </span>
+          {task.urgent && task.closedAt === null && (
+            <span className="chip urgent" style={{ ["--accent" as string]: URGENT_ACCENT }}>
+              urgent
+            </span>
+          )}
           <div style={{ marginTop: 9 }}>
             <div className="kv">
               <span>Stage</span>
@@ -878,6 +908,17 @@ function TaskInspector({
                 Carry on now
               </button>
             </div>
+          )}
+
+          {task.closedAt === null && (
+            <button
+              className="btn"
+              disabled={!mayMark.allowed}
+              title={mayMark.allowed ? "Agents take urgent work ahead of everything else on their queues" : mayMark.reason}
+              onClick={() => dispatch({ type: "SET_URGENT", taskId: task.id, urgent: !task.urgent, byId: supervisor.id })}
+            >
+              {task.urgent ? "Not urgent after all" : "Mark urgent"}
+            </button>
           )}
 
           <button

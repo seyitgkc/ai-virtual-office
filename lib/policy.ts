@@ -66,6 +66,15 @@ export function authorize(
       return task ? mayActIn(office, ctx, actor, task.roomId) : no("No such task.");
     }
 
+    // Whoever asked for the work may say it is urgent. So may anyone who
+    // could move it on, or who hands work between people.
+    case "SET_URGENT": {
+      const task = office.tasks.find((t) => t.id === action.taskId);
+      if (!task) return no("No such task.");
+      if (task.requestedById === actor.id || may(office, actor, "reassign_work")) return yes;
+      return mayActIn(office, ctx, actor, task.roomId);
+    }
+
     case "ANSWER_QUESTION": {
       const question = office.messages.find((m) => m.id === action.questionId);
       if (!question) return no("You cannot see that question.");
@@ -122,6 +131,7 @@ export function stampActor(action: Action, actorId: string): Action {
     case "RESOLVE_ASSUMPTION":
     case "DECIDE":
     case "WAKE_TASK":
+    case "SET_URGENT":
       return { ...action, byId: actorId };
     case "ADVANCE":
     case "AGENT_RESUME":
@@ -144,7 +154,13 @@ export function parseAction(input: unknown): Action | null {
   switch (a.type) {
     case "SUBMIT_REQUEST":
       return text(a.title, 120) && text(a.detail, 600)
-        ? { type: "SUBMIT_REQUEST", title: a.title.trim(), detail: a.detail.trim(), requestedById: "" }
+        ? {
+            type: "SUBMIT_REQUEST",
+            title: a.title.trim(),
+            detail: a.detail.trim(),
+            requestedById: "",
+            ...(a.urgent === true ? { urgent: true } : {}),
+          }
         : null;
     case "ADVANCE":
       return text(a.taskId, 40) ? { type: "ADVANCE", taskId: a.taskId } : null;
@@ -199,6 +215,10 @@ export function parseAction(input: unknown): Action | null {
         : null;
     case "WAKE_TASK":
       return text(a.taskId, 40) ? { type: "WAKE_TASK", taskId: a.taskId, byId: "" } : null;
+    case "SET_URGENT":
+      return text(a.taskId, 40) && typeof a.urgent === "boolean"
+        ? { type: "SET_URGENT", taskId: a.taskId, urgent: a.urgent, byId: "" }
+        : null;
     default:
       return null;
   }

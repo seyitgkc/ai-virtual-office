@@ -258,6 +258,9 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
     const weekday = today.toLocaleDateString("en-CA", { weekday: "long", timeZone: "America/Toronto" });
     lines.push(`Today is ${weekday}, ${day}.`);
   }
+  if (task.urgent) {
+    lines.push("A person has marked this task urgent. Do your part of it now, and do not set it to wait unless the work cannot be done before a certain day.");
+  }
   if (task.wait) {
     lines.push(`This task was set to wait until ${new Date(task.wait.until).toLocaleDateString("en-CA", { timeZone: "America/Toronto" })}: ${asData("wait", task.wait.reason)}`);
   }

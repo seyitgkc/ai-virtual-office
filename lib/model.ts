@@ -647,6 +647,8 @@ export interface Task {
    * handed on while a step is owed.
    */
   owed?: boolean;
+  /** Set by a person. An urgent task is taken ahead of the others on every agent's queue. */
+  urgent?: boolean;
 }
 
 // ---------------------------------------------------------------------------

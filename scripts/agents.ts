@@ -12,7 +12,8 @@ import {
 import { initialState } from "../lib/initialState";
 import { deskState, statusReply } from "../lib/agentState";
 import { canRead, resolveAccess } from "../lib/model";
-import { contextOf } from "../lib/policy";
+import { authorize, contextOf, parseAction } from "../lib/policy";
+import { span, workReport } from "../lib/report";
 import { buildChatSystem } from "../lib/server/chat";
 import { buildStepPrompt, dataMarker, readReply, SYSTEM_PROMPT, systemPrompt, toStepResult } from "../lib/server/modelRuntime";
 
@@ -325,6 +326,39 @@ async function main(): Promise<void> {
   const mark = reread.findIndex((l) => l.startsWith("--- The work was sent back at this point."));
   expect("the agent is shown where the work was sent back", mark > 0 && reread[mark - 1].includes("Sent back for changes: Do it again."), true);
   expect("and that what came before holds only if the live records show it", reread[mark].includes("exists only if the live records still show it"), true);
+
+  console.log("\n-- urgent work --");
+  const calm = new Recorder(() => ({ questions: [], assumptions: [] }));
+  let rush = (await reduce(withAi, { type: "SUBMIT_REQUEST", title: "Order 4810", detail: "One head, today.", requestedById: "p-sam", urgent: true }, calm)).state;
+  const rushId = rush.office.tasks.at(-1)!.id;
+  expect("a request can be filed as urgent", rush.office.tasks.at(-1)!.urgent, true);
+  expect("and the agent is told so", buildStepPrompt(calm.inputs.at(-1)!).includes("A person has marked this task urgent."), true);
+  rush = (await reduce(rush, { type: "SET_URGENT", taskId: rushId, urgent: false, byId: "p-dana" }, calm)).state;
+  expect("a person can take the mark off", rush.office.tasks.at(-1)!.urgent, undefined);
+  expect("and the thread says who did", rush.office.messages.at(-1)!.body, "Dana Reyes took the urgent mark off.");
+  rush = (await reduce(rush, { type: "SET_URGENT", taskId: rushId, urgent: true, byId: "p-sam" }, calm)).state;
+  expect("or put it on later", rush.office.tasks.at(-1)!.urgent, true);
+  const rushCtx = contextOf(rush.office, rush.now);
+  const asks = (id: string) => authorize(rush.office, rushCtx, rush.office.participants.find((p) => p.id === id)!, { type: "SET_URGENT", taskId: rushId, urgent: true, byId: id }).allowed;
+  expect("the person who asked for the work may mark it urgent", asks("p-sam"), true);
+  expect("an untrusted request carries the mark only as a plain yes", JSON.stringify(parseAction({ type: "SUBMIT_REQUEST", title: "A", detail: "B", urgent: "yes" })).includes("urgent"), false);
+
+  console.log("\n-- the report --");
+  const demo = workReport(initialState.office);
+  expect("the demo's three tasks are counted", `${demo.filed} filed, ${demo.open} open, ${demo.completed} completed`, "3 filed, 2 open, 1 completed");
+  expect("both open ones wait for a person", demo.waitingOnAPerson, 2);
+  expect("for a question and for missing access", demo.halts.questions > 0 && demo.halts.access > 0, true);
+  expect("every agent has a line", demo.agents.length, initialState.office.participants.filter((p) => p.kind === "agent").length);
+  let told2 = (await reduce(withAi, { type: "SUBMIT_REQUEST", title: "Order 4820", detail: "One head.", requestedById: "p-dana" }, calm)).state;
+  const told2Id = told2.office.tasks.at(-1)!.id;
+  for (let i = 0; i < 3; i++) told2 = (await reduce(told2, { type: "ADVANCE", taskId: told2Id }, calm)).state;
+  told2 = (await reduce(told2, { type: "DECIDE", taskId: told2Id, byId: "p-dana", verdict: "approved" }, calm)).state;
+  const after = workReport(told2.office);
+  const mins = (ms: number | null) => (ms === null ? null : ms / 60_000);
+  expect("a task that went straight through is counted as such", after.straightThrough - demo.straightThrough, 1);
+  expect("time at each stage is taken from when the task moved", after.stages.map((x) => `${x.label} ${mins(x.median)}`).filter((x) => !x.endsWith("null")).length, 4);
+  expect("the person who decided the review is credited", after.people.find((p) => p.id === "p-dana")!.decisions - demo.people.find((p) => p.id === "p-dana")!.decisions, 1);
+  expect("lengths of time read as people say them", [span(null), span(20_000), span(60_000), span(12 * 60_000), span(200 * 60_000), span(5 * 86_400_000)].join(" | "), "none yet | 20 seconds | 1 minute | 12 minutes | 3 h 20 min | 5 days");
 
   console.log("\n-- waiting for a day --");
   const waitsFor = async (until: string) => {

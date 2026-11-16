@@ -279,7 +279,9 @@ export interface EngineState {
 }
 
 export type Action =
-  | { type: "SUBMIT_REQUEST"; title: string; detail: string; requestedById: ParticipantId }
+  | { type: "SUBMIT_REQUEST"; title: string; detail: string; requestedById: ParticipantId; urgent?: boolean }
+  /** A person marks a task urgent, or takes the mark off. */
+  | { type: "SET_URGENT"; taskId: TaskId; urgent: boolean; byId: ParticipantId }
   | { type: "ADVANCE"; taskId: TaskId }
   | {
       type: "ANSWER_QUESTION";
@@ -520,6 +522,7 @@ export async function reduce(
         history: [{ at: now, summary: `Request received in ${roomName(office, room)}` }],
         createdAt: now,
         closedAt: null,
+        ...(action.urgent ? { urgent: true } : {}),
       };
 
       const request: Message = {
@@ -534,7 +537,9 @@ export async function reduce(
       };
       emitted.push(request);
       office = { ...office, tasks: [...office.tasks, task], messages: [...office.messages, request] };
-      notes.push(`${task.id} opened in ${roomName(office, room)}${owner ? `, owned by ${owner.displayName}` : " with no eligible owner"}`);
+      notes.push(
+        `${task.id} opened in ${roomName(office, room)}${action.urgent ? ", marked urgent" : ""}${owner ? `, owned by ${owner.displayName}` : " with no eligible owner"}`,
+      );
 
       if (owner) {
         const run = await runAgent(office, task, "intake", owner, runtime, now, nextId);
@@ -970,6 +975,36 @@ export async function reduce(
     }
 
     // -- the review gate ----------------------------------------------------
+    case "SET_URGENT": {
+      const task = findTask(office, action.taskId);
+      const by = findParticipant(office, action.byId);
+      if (task.closedAt !== null || Boolean(task.urgent) === action.urgent) return done();
+      const { urgent: _was, ...plain } = task;
+      const said: Message = {
+        id: nextId("m"),
+        kind: "status",
+        taskId: task.id,
+        fromId: by.id,
+        audience: { to: "room", id: task.roomId },
+        roomId: task.roomId,
+        at: now,
+        body: action.urgent
+          ? `${by.displayName} marked this urgent. It goes ahead of other work.`
+          : `${by.displayName} took the urgent mark off.`,
+      };
+      emitted.push(said);
+      office = {
+        ...replaceTask(office, {
+          ...plain,
+          ...(action.urgent ? { urgent: true } : {}),
+          history: [...task.history, { at: now, summary: action.urgent ? `${by.displayName} marked it urgent` : `${by.displayName} took the urgent mark off`, messageId: said.id }],
+        }),
+        messages: [...office.messages, said],
+      };
+      notes.push(`${by.displayName} ${action.urgent ? "marked" : "unmarked"} ${task.id} ${action.urgent ? "urgent" : "as urgent"}`);
+      return done();
+    }
+
     case "WAKE_TASK": {
       const task = office.tasks.find((t) => t.id === action.taskId);
       if (!task || task.closedAt !== null || !task.wait) return done();
