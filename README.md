@@ -1693,8 +1693,10 @@ playbook.
   only as a note while it takes a step on a task.
   An AI agent reads what its rooms and their connected systems hold and
   replies. It cannot search a system or page through it.
-- A connected system is one of two kinds, each with a fixed set of
-  operations. A playbook's action has fixed field values.
+- A connected system has to describe itself in the format the sample services
+  use. No existing ordering, accounting or carrier system does, so each would
+  need a small adapter in front of it, and none has been tried. A playbook's
+  action has fixed field values.
 - The first step after a click is taken while the page waits, which is
   several seconds with a model. What follows runs in the background.
 - Work waiting to be carried forward is held in the server's memory. If the
@@ -1710,8 +1712,8 @@ playbook.
 - Browsers poll for changes every five seconds.
 - SQLite suits one server process. More than one would need a different
   database.
-- Rooms are rectangles placed against an existing room's wall. A room cannot
-  be moved or resized once it exists.
+- Rooms are rectangles placed along a corridor or against an existing room's
+  wall. A room cannot be moved or resized once it exists.
 - A person or agent who appears in tasks or messages cannot be removed until
   the work is cleared.
 - On a phone the interface shows one section at a time, chosen from a bar at
@@ -1719,6 +1721,27 @@ playbook.
   tables scroll sideways there.
 - The demo office shows a fixed demo clock that steps forward three minutes
   per action. Other offices use real time.
+
+### What a real office has that this one lacks
+
+Five jobs were run through an office of five AI agents and five sample
+systems on the deployed site: orders with a credit check, freight and an
+invoice, a factory order for a shortfall, a warranty call and a refused
+return. They completed with correct figures, and a person was asked only for
+what was theirs to decide. The same runs showed where the office stops short
+of a human one.
+
+| A real office has | Here |
+| --- | --- |
+| Memory across jobs: who paid late, which branch miscounts | Each task starts from the records and its own thread. Nothing learned on one job carries to the next unless a person writes it into a room's records. |
+| Initiative: someone notices stock running low and starts the work | Agents move only when a request is filed or a note reaches them. |
+| Time: due dates, a reminder on Friday, a job that waits for a delivery | A task has no date. An order that waits on stock arriving next month ends, and a person files the second half when the day comes. |
+| Conversation: two rooms talk a problem through | Agents leave each other notes of up to 60 words on a task. They cannot meet, and a reviewer cannot ask the worker a question without sending the work back. |
+| Parallel work: Finance and Purchasing on the same order at once | A task has one owner in one room. Colleagues help through notes, which is where most faults found in testing came from. |
+| Priority and load: this one is urgent, that desk is swamped | Tasks are taken in the order they arrive, and nothing shows how much each agent is carrying. |
+| Documents: a purchase order as a PDF, an email from the dealer | A request is a title and a paragraph. Nothing can be attached, and nothing is sent outside the office. |
+| A different path for different work | Every task passes all four stages. A stage with nothing to do says so in a line and passes it on. |
+| Reporting: how did we do last month | Every action is in the audit log, with no summary over it. |
 
 ## Run it
 
