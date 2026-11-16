@@ -187,7 +187,13 @@ export function parseAction(input: unknown): Action | null {
     case "DECIDE":
       return text(a.taskId, 40) &&
         (a.verdict === "approved" || a.verdict === "rejected" || a.verdict === "changes_requested")
-        ? { type: "DECIDE", taskId: a.taskId, byId: "", verdict: a.verdict }
+        ? {
+            type: "DECIDE",
+            taskId: a.taskId,
+            byId: "",
+            verdict: a.verdict,
+            ...(text(a.comment, 600) ? { comment: a.comment.trim() } : {}),
+          }
         : null;
     default:
       return null;

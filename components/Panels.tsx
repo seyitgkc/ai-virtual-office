@@ -200,6 +200,34 @@ function AnswerBox({ onSend }: { onSend: (body: string) => void }) {
   );
 }
 
+/** The reason a reviewer gives when the work is not finished and goes back. */
+function SendBackBox({ disabled, onSend }: { disabled: boolean; onSend: (comment: string) => void }) {
+  const [text, setText] = useState("");
+  const ready = !disabled && text.trim().length > 0;
+  return (
+    <form
+      className="answer-box"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready) onSend(text.trim());
+      }}
+    >
+      <textarea
+        aria-label="What has to change"
+        placeholder="Or say what has to change"
+        rows={2}
+        maxLength={600}
+        disabled={disabled}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <button type="submit" className="btn" disabled={!ready}>
+        Send back
+      </button>
+    </form>
+  );
+}
+
 const SAMPLE_REQUEST = {
   title: "Dealer order 4502: 4x multi-zone heads",
   detail:
@@ -719,6 +747,20 @@ function TaskInspector({
                 Reject
               </button>
             </fieldset>
+          )}
+          {awaitingDecision && (
+            <SendBackBox
+              disabled={!mayDecide}
+              onSend={(comment) =>
+                dispatch({
+                  type: "DECIDE",
+                  taskId: task.id,
+                  byId: supervisor.id,
+                  verdict: "changes_requested",
+                  comment,
+                })
+              }
+            />
           )}
 
           <button

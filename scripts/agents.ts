@@ -191,6 +191,67 @@ async function main(): Promise<void> {
   expect("the grant leaves the task waiting for a decision", reviewTask().status, "in_review");
   expect("and the note says so", granted.notes.some((n) => n.includes("It is ready for a decision.")), true);
 
+  console.log("\n-- work sent back from review --");
+  const withAi = {
+    ...initialState,
+    office: {
+      ...initialState.office,
+      participants: initialState.office.participants.map((p) => (p.kind === "agent" ? { ...p, agentType: "ai" as const, playbook: [] } : p)),
+    },
+  };
+  const silent = new Recorder(() => ({ questions: [], assumptions: [] }));
+  let back = (await reduce(withAi, { type: "SUBMIT_REQUEST", title: "Order 4750", detail: "One head.", requestedById: "p-dana" }, silent)).state;
+  const backId = back.office.tasks.at(-1)!.id;
+  const backTask = () => back.office.tasks.find((t) => t.id === backId)!;
+  for (let i = 0; i < 2; i++) back = (await reduce(back, { type: "ADVANCE", taskId: backId }, silent)).state;
+  const worker = backTask().ownerId;
+  const workRoom = backTask().roomId;
+  back = (await reduce(back, { type: "ADVANCE", taskId: backId }, silent)).state;
+  expect("the task reached review with someone else", backTask().stage === "review" && backTask().ownerId !== worker, true);
+  const returned = await reduce(back, { type: "DECIDE", taskId: backId, byId: "p-dana", verdict: "changes_requested", comment: "The freight is not booked." }, silent);
+  back = returned.state;
+  expect("sending it back returns it to the room that does the work", `${backTask().stage}/${backTask().status}/${backTask().roomId}`, `execution/in_progress/${workRoom}`);
+  expect("with whoever had it there", backTask().ownerId, worker);
+  const ruling = back.office.messages.findLast((m) => m.kind === "decision" && m.taskId === backId)!;
+  expect("the reason is said in that room", ruling.roomId === workRoom && ruling.body.includes("The freight is not booked."), true);
+  expect("and its agent takes the step again", returned.wake.some((w) => w.kind === "resume" && w.participantId === worker), true);
+  expect("the task is still open", backTask().closedAt, null);
+
+  console.log("\n-- a colleague's question does not cost the owner its turn --");
+  const ledgerSystem = {
+    id: "sys-test-ledger",
+    name: "Accounts ledger",
+    roomId: "finance",
+    description: "Dealer accounts.",
+    operations: [{ id: "record_payment", label: "Record a payment", method: "POST" as const, path: "/v1/payments", fields: [{ name: "amount", label: "Amount", hint: "100", place: "body" as const }] }],
+    needsApproval: true,
+  };
+  const withLedger = { ...withAi, office: { ...withAi.office, systems: [ledgerSystem] } };
+  const helping = new Recorder((input) => {
+    if (input.stage !== "execution") return { questions: [], assumptions: [] };
+    if (input.attending) {
+      return { questions: [], assumptions: [], actions: [{ systemId: ledgerSystem.id, operation: "record_payment", fields: { amount: "100" } }] };
+    }
+    const first = helping.inputs.filter((i) => i.stage === "execution" && !i.attending).length === 1;
+    return first
+      ? { questions: [], assumptions: [], notes: [{ toParticipantId: "p-ledger", body: "Please record the dealer's payment." }] }
+      : { questions: [], assumptions: [] };
+  });
+  let stalled = (await reduce(withLedger, { type: "SUBMIT_REQUEST", title: "Order 4760", detail: "One head.", requestedById: "p-dana" }, helping)).state;
+  const stalledId = stalled.office.tasks.at(-1)!.id;
+  const stalledTask = () => stalled.office.tasks.find((t) => t.id === stalledId)!;
+  stalled = (await reduce(stalled, { type: "ADVANCE", taskId: stalledId }, helping)).state;
+  const afterNote = await reduce(stalled, { type: "ADVANCE", taskId: stalledId }, helping);
+  stalled = afterNote.state;
+  const calledOn = afterNote.wake.find((w) => w.kind === "attend");
+  expect("the owner's note reaches its colleague", calledOn?.participantId, "p-ledger");
+  if (calledOn?.kind === "attend") stalled = (await reduce(stalled, { type: "AGENT_ATTEND", taskId: stalledId, participantId: calledOn.participantId, noteId: calledOn.noteId }, helping)).state;
+  expect("the colleague's request for approval halts the task", stalledTask().status, "blocked_question");
+  const settledBy = await reduce(stalled, { type: "ANSWER_QUESTION", questionId: stalledTask().openQuestionIds[0], answeredById: "p-dana", body: "Approve", chosenOption: "Approve" }, helping);
+  stalled = settledBy.state;
+  expect("approving it opens the task again", `${stalledTask().stage}/${stalledTask().status}`, "execution/in_progress");
+  expect("and the owner takes its step before the task moves on", settledBy.wake.some((w) => w.kind === "resume" && w.participantId === stalledTask().ownerId), true);
+
   console.log("\n-- repeated assumptions and halted drafts --");
   const guess = { assumed: "Standard delivery terms apply", because: "None were named", confidence: "medium" as const };
   const repeating = new Recorder((input) => ({

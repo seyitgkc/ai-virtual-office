@@ -122,6 +122,8 @@ pricing, and a finance approval before a quote goes out.
   when its question is answered, looks at a note a colleague left it, and
   hands a finished step on to the next stage by itself. A task runs until it
   reaches a real halt: a question, missing access, an approval or the review.
+  When a colleague's request for approval held the task, its owner takes its
+  step once more after the answer, so nothing it was waiting for is skipped.
 - **AI providers of your own.** A provider can belong to your account and be
   used in every office you sit in, so a key is entered once.
 - **A sample office with AI agents.** Anyone signed in can add the demo's
@@ -206,7 +208,10 @@ screen:
   reasoning and confidence. Confirming one closes it. Marking one wrong halts
   every task that rests on it and asks for the correct value.
 - **Review** always ends with a person. An agent can prepare the pricing sheet,
-  and only a human decision completes or rejects the task.
+  and only a human decision completes or rejects the task. A reviewer who
+  finds the work unfinished writes what has to change and sends it back. The
+  task returns to the room that carries work out, to whoever had it there,
+  and comes to review again once that is done.
 
 Every permission change records who made it and why. A grant made for one task
 counts only for work on that task and expires when the task closes, so an
@@ -339,7 +344,7 @@ permissions against roles:
 | --- | --- |
 | Manage access | Grant and revoke individual access rules and permission tokens. Escalations go to people with this permission. |
 | Hand work over | Give a task to a different owner. |
-| Decide reviews | Approve or reject work at the review stage. |
+| Decide reviews | Approve or reject work at the review stage, or send it back with what has to change. |
 | See everything | Read every message and the whole activity log. |
 | Invite people | Add a person to the office with a role and a desk. |
 | Manage people and agents | Add, configure and remove agents. Rename people, change roles, move desks. |
@@ -732,7 +737,7 @@ stateDiagram-v2
   in_progress --> in_review: advanced into Finance
   in_review --> completed: approved
   in_review --> rejected: rejected
-  in_review --> in_progress: changes requested
+  in_review --> in_progress: sent back to Fulfilment with a reason
   completed --> [*]
   rejected --> [*]
 ```

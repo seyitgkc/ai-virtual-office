@@ -294,6 +294,8 @@ export type Action =
       taskId: TaskId;
       byId: ParticipantId;
       verdict: "approved" | "rejected" | "changes_requested";
+      /** What has to change, when the work is sent back. */
+      comment?: string;
     }
   /** An agent takes its step again. Raised by the office, never by a person. */
   | { type: "AGENT_RESUME"; taskId: TaskId }
@@ -363,6 +365,22 @@ export function eligibleOwners(
   return office.participants.filter(
     (p) => canOwnWorkIn(p, room, ctx).effect === "allow",
   );
+}
+
+/**
+ * Who takes work that a reviewer sent back: whoever last had it in the room
+ * that carries work out, if they may still work there, or else an agent or a
+ * person who may.
+ */
+function ownerForRework(office: Office, task: Task, room: RoomId, ctx: AccessContext): Participant | null {
+  const able = eligibleOwners(office, room, { ...ctx, forTask: task.id });
+  const last = [...office.messages]
+    .reverse()
+    .find((m) => m.taskId === task.id && m.kind === "handoff" && m.toRoomId === room);
+  const before = last?.kind === "handoff" ? able.find((p) => p.id === last.toParticipantId) : undefined;
+  const seated = (p: Participant): number => (roomOf(office, p) === room ? 0 : 1);
+  const agents = able.filter((p) => p.kind === "agent").sort((a, b) => seated(a) - seated(b));
+  return before ?? agents[0] ?? able[0] ?? null;
 }
 
 function replaceTask(office: Office, updated: Task): Office {
@@ -560,7 +578,7 @@ export async function reduce(
           audience: supervisor ? { to: "participant", id: supervisor.id } : { to: "everyone" },
           roomId: task.roomId,
           at: now,
-          body: `${task.id} cannot move to ${targetSpec.label}: nobody may act in ${targetRoom}.`,
+          body: `${task.id} cannot move to ${targetSpec.label}: nobody may act in ${roomName(office, targetRoom)}.`,
           cause: "permission",
         };
         emitted.push(escalation);
@@ -570,12 +588,12 @@ export async function reduce(
             status: "blocked_permission",
             history: [
               ...task.history,
-              { at: now, summary: `No eligible owner in ${targetRoom}`, messageId: escalation.id },
+              { at: now, summary: `No eligible owner in ${roomName(office, targetRoom)}`, messageId: escalation.id },
             ],
           }),
           messages: [...office.messages, escalation],
         };
-        notes.push(`${task.id} blocked: no eligible owner in ${targetRoom}`);
+        notes.push(`${task.id} blocked: no eligible owner in ${roomName(office, targetRoom)}`);
         return done();
       }
 
@@ -608,7 +626,7 @@ export async function reduce(
           ...task.history,
           {
             at: now,
-            summary: `Moved to ${targetSpec.label} in ${targetRoom}, owned by ${carrier.displayName}`,
+            summary: `Moved to ${targetSpec.label} in ${roomName(office, targetRoom)}, owned by ${carrier.displayName}`,
             ...(decision ? { decision } : {}),
           },
         ],
@@ -731,6 +749,19 @@ export async function reduce(
             }
           }
         }
+      }
+      // A colleague's question held the task while its owner had more to do.
+      // With the task open again, the owner takes its step before it moves on.
+      const settled = findTask(office, task.id);
+      const owner = office.participants.find((p) => p.id === settled.ownerId);
+      if (
+        owner?.agentType === "ai" &&
+        asker?.id !== owner.id &&
+        settled.closedAt === null &&
+        settled.status === openStatus(settled.stage) &&
+        !stageSpec(settled.stage).humanGate
+      ) {
+        wake.push({ kind: "resume", taskId: task.id, participantId: owner.id });
       }
       return done();
     }
@@ -938,23 +969,60 @@ export async function reduce(
         return done();
       }
 
+      // Work that is sent back returns to the room that carries it out, to
+      // whoever had it there, and that room is where the reason is said.
+      const comment = action.comment?.trim() ?? "";
+      const workRoom = roomForStage(office, "execution");
+      const reworker =
+        action.verdict === "changes_requested" && workRoom ? ownerForRework(office, task, workRoom, ctx) : null;
+      const saidIn = reworker && workRoom ? workRoom : task.roomId;
+
       const ruling: Message = {
         id: nextId("m"),
         kind: "decision",
         taskId: task.id,
         fromId: by.id,
-        audience: { to: "room", id: task.roomId },
-        roomId: task.roomId,
+        audience: { to: "room", id: saidIn },
+        roomId: saidIn,
         at: now,
         body:
           action.verdict === "approved"
             ? "Approved."
             : action.verdict === "rejected"
               ? "Rejected."
-              : "Changes requested.",
+              : comment
+                ? `Sent back for changes: ${comment}`
+                : "Sent back for changes.",
         verdict: action.verdict,
       };
       emitted.push(ruling);
+
+      if (reworker && workRoom) {
+        office = {
+          ...replaceTask(office, {
+            ...task,
+            stage: "execution",
+            roomId: workRoom,
+            ownerId: reworker.id,
+            status: "in_progress",
+            history: [
+              ...task.history,
+              {
+                at: now,
+                summary: `${by.displayName} sent it back to ${roomName(office, workRoom)}, owned by ${reworker.displayName}`,
+                messageId: ruling.id,
+                decision,
+              },
+            ],
+          }),
+          messages: [...office.messages, ruling],
+        };
+        notes.push(
+          `${task.id} sent back by ${by.displayName} to ${stageSpec("execution").label} (${roomName(office, workRoom)}), owner ${reworker.displayName}`,
+        );
+        if (reworker.agentType === "ai") wake.push({ kind: "resume", taskId: task.id, participantId: reworker.id });
+        return done();
+      }
 
       const closed = action.verdict === "approved" || action.verdict === "rejected";
       office = {
