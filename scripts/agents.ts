@@ -251,6 +251,15 @@ async function main(): Promise<void> {
   stalled = settledBy.state;
   expect("approving it opens the task again", `${stalledTask().stage}/${stalledTask().status}`, "execution/in_progress");
   expect("and the owner takes its step before the task moves on", settledBy.wake.some((w) => w.kind === "resume" && w.participantId === stalledTask().ownerId), true);
+  if (calledOn?.kind === "attend") {
+    const again = { type: "AGENT_ATTEND" as const, taskId: stalledId, participantId: calledOn.participantId, noteId: calledOn.noteId };
+    stalled = (await reduce(stalled, again, helping)).state;
+    expect("the same approval is not asked for twice in one piece of work", stalledTask().status, "in_progress");
+    stalled = (await reduce(stalled, { type: "ADVANCE", taskId: stalledId }, helping)).state;
+    stalled = (await reduce(stalled, { type: "DECIDE", taskId: stalledId, byId: "p-dana", verdict: "changes_requested", comment: "The payment was lost. Record it again." }, helping)).state;
+    stalled = (await reduce(stalled, again, helping)).state;
+    expect("but it is asked for again once the work is sent back", stalledTask().status, "blocked_question");
+  }
 
   console.log("\n-- repeated assumptions and halted drafts --");
   const guess = { assumed: "Standard delivery terms apply", because: "None were named", confidence: "medium" as const };

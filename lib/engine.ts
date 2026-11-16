@@ -1201,12 +1201,17 @@ async function runAgent(
   let updated: Task = task;
 
   // On a step taken again, a status note or question the agent already put on
-  // this task is left out.
+  // this task is left out. Work that a reviewer sent back starts afresh: what
+  // was said before then may have to be said, or asked for, again.
+  const sentBackAt = office.messages.findLast(
+    (m) => m.taskId === task.id && m.kind === "decision" && m.verdict === "changes_requested",
+  )?.at ?? 0;
   const said = new Set(
     resumed
       ? office.messages.flatMap((m) =>
           m.taskId === task.id &&
           m.fromId === participant.id &&
+          m.at >= sentBackAt &&
           (m.kind === "status" || m.kind === "question" || m.kind === "note")
             ? [`${m.kind}:${m.body}`]
             : [],
