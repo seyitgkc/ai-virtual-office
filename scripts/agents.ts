@@ -275,6 +275,30 @@ async function main(): Promise<void> {
   expect("an agent kept out of a system's room cannot read it", await seen([]), "true false false");
   expect("shown in the agent's own room, it can be read but still not used", await seen(["fulfilment"]), "true true false");
 
+  console.log("\n-- waiting for a day --");
+  const waitsFor = async (until: string) => {
+    const dated = new Recorder((input) =>
+      input.stage === "execution" ? { questions: [], assumptions: [], wait: { until, reason: "Stock arrives." } } : { questions: [], assumptions: [] },
+    );
+    let at = (await reduce(withAi, { type: "SUBMIT_REQUEST", title: "Order 4780", detail: "One head.", requestedById: "p-dana" }, dated)).state;
+    const id = at.office.tasks.at(-1)!.id;
+    for (let i = 0; i < 2; i++) at = (await reduce(at, { type: "ADVANCE", taskId: id }, dated)).state;
+    return { at, id, dated };
+  };
+  const ahead = await waitsFor("2027-01-15");
+  const aheadTask = () => ahead.at.office.tasks.find((t) => t.id === ahead.id)!;
+  expect("a day ahead makes the task wait", `${aheadTask().status} ${aheadTask().wait?.reason}`, "in_progress Stock arrives.");
+  expect("and the agent is told what day it is", buildStepPrompt(ahead.dated.inputs.at(-1)!).includes("Today is "), true);
+  expect("a day that has passed does not", (await waitsFor("2020-01-15")).at.office.tasks.at(-1)!.wait, undefined);
+  expect("nor does something that is not a day", (await waitsFor("next Friday")).at.office.tasks.at(-1)!.wait, undefined);
+  const woken = await reduce(ahead.at, { type: "WAKE_TASK", taskId: ahead.id }, new Recorder(() => ({ questions: [], assumptions: [] })));
+  expect("when the wait ends the owner is woken", woken.wake.some((w) => w.kind === "resume" && w.participantId === aheadTask().ownerId), true);
+  expect("and the thread says the wait is over", woken.state.office.messages.at(-1)!.body.includes("is over: Stock arrives."), true);
+  const pushed = await reduce(ahead.at, { type: "ADVANCE", taskId: ahead.id }, new Recorder(() => ({ questions: [], assumptions: [] })));
+  expect("a person who moves the task on ends the wait", pushed.state.office.tasks.find((t) => t.id === ahead.id)!.wait, undefined);
+  expect("a reply with a day is read", toStepResult({ statusNote: "", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null, wait: { until: " 2027-01-15 ", reason: "Stock arrives." } }, vera).wait?.until, "2027-01-15");
+  expect("and one that is not a calendar day is dropped", toStepResult({ statusNote: "", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null, wait: { until: "mid January", reason: "Stock arrives." } }, vera).wait, undefined);
+
   console.log("\n-- repeated assumptions and halted drafts --");
   const guess = { assumed: "Standard delivery terms apply", because: "None were named", confidence: "medium" as const };
   const repeating = new Recorder((input) => ({

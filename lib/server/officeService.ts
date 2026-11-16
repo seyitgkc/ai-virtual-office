@@ -202,6 +202,7 @@ function restoreDemoPlaybooks(db: Db, office: Office): void {
 export function officeDatabase(): Db {
   const db = database();
   if (boot.__officeBooted) return db;
+  startClock();
   transaction(db, () => {
     if (demoLoginEnabled() && !hasOffice(db, DEMO_OFFICE_ID)) writeWholeOffice(db, initialState);
     ensureAdminAccount(db);
@@ -418,6 +419,7 @@ function auditSubject(action: Action, before: Office, after: Office): AuditSubje
     }
     case "ADVANCE":
     case "DECIDE":
+    case "WAKE_TASK":
       taskId = action.taskId;
       break;
     case "REASSIGN":
@@ -533,7 +535,7 @@ export function applyAction(session: Session, requested: Action): Promise<Office
 // ---------------------------------------------------------------------------
 
 /** One thing an agent does without a person asking: a wake, or handing a task on. */
-type Pending = Wake | { kind: "advance"; taskId: string };
+type Pending = Wake | { kind: "advance"; taskId: string } | { kind: "wake"; taskId: string };
 
 const STEPS_PER_RUN = 12;
 
@@ -571,15 +573,52 @@ function readyToHandOn(office: Office, taskIds: Set<string>, skip: Set<string>):
   if (!office.autoHandoff) return null;
   for (const task of office.tasks) {
     if (!taskIds.has(task.id) || skip.has(task.id)) continue;
-    if (task.closedAt !== null || task.status !== "in_progress") continue;
+    if (task.closedAt !== null || task.status !== "in_progress" || task.wait) continue;
     if (stageSpec(task.stage).humanGate || nextStage(task.stage) === null) continue;
     if (office.participants.find((p) => p.id === task.ownerId)?.kind === "agent") return task.id;
   }
   return null;
 }
 
+/**
+ * End every wait whose day has come, and let the owners carry on. Called on a
+ * timer, and by the checks with a time of their own. The demo office keeps a
+ * clock of its own that only moves with a click, so nothing in it is woken.
+ */
+export function wakeDueTasks(now: number = Date.now()): number {
+  const db = officeDatabase();
+  const due = all<{ id: string; office_id: string }>(
+    db,
+    "SELECT id, office_id FROM tasks WHERE wait_until IS NOT NULL AND wait_until <= ? AND closed_at IS NULL AND office_id <> ?",
+    now,
+    DEMO_OFFICE_ID,
+  );
+  const byOffice = new Map<string, string[]>();
+  for (const task of due) byOffice.set(task.office_id, [...(byOffice.get(task.office_id) ?? []), task.id]);
+  for (const [officeId, taskIds] of byOffice) {
+    carryOn(officeId, taskIds.map((taskId) => ({ kind: "wake", taskId })), taskIds);
+  }
+  return due.length;
+}
+
+const WAKE_EVERY_MS = 60_000;
+const clock = globalThis as unknown as { __officeClock?: ReturnType<typeof setInterval> };
+
+/** Start the timer that ends waits, once per server process. */
+function startClock(): void {
+  if (clock.__officeClock || process.env.OFFICE_CLOCK_OFF === "1") return;
+  clock.__officeClock = setInterval(() => {
+    try {
+      wakeDueTasks();
+    } catch (error) {
+      console.error("Waking waiting tasks failed.", error);
+    }
+  }, WAKE_EVERY_MS);
+  clock.__officeClock.unref();
+}
+
 /** Start, or add to, the background run for an office. */
-function carryOn(officeId: string, wakes: Wake[], taskIds: string[]): void {
+function carryOn(officeId: string, wakes: Pending[], taskIds: string[]): void {
   const state = loopState();
   if (state.paused || (wakes.length === 0 && taskIds.length === 0)) return;
   const earlier = state.runs.get(officeId) ?? Promise.resolve();
@@ -592,7 +631,7 @@ function carryOn(officeId: string, wakes: Wake[], taskIds: string[]): void {
   state.runs.set(officeId, run);
 }
 
-async function runPending(officeId: string, wakes: Wake[], taskIds: Set<string>): Promise<void> {
+async function runPending(officeId: string, wakes: Pending[], taskIds: Set<string>): Promise<void> {
   const waiting: Pending[] = [...wakes];
   const stuck = new Set<string>();
   for (let step = 0; step < STEPS_PER_RUN; step++) {
@@ -628,11 +667,14 @@ async function takeStep(
   stuck: Set<string>,
 ): Promise<{ wake: Wake[]; taskIds: string[] }> {
   const task = before.office.tasks.find((t) => t.id === next.taskId);
-  const agentId = next.kind === "advance" ? task?.ownerId : next.participantId;
-  const agent = before.office.participants.find((p) => p.id === agentId && p.kind === "agent");
+  const agentId = next.kind === "advance" || next.kind === "wake" ? task?.ownerId : next.participantId;
+  // A wait ends whoever owns the task. Everything else here is an agent's doing.
+  const agent = before.office.participants.find((p) => p.id === agentId && (p.kind === "agent" || next.kind === "wake"));
   if (!task || !agent) return { wake: [], taskIds: [] };
   const action: Action =
-    next.kind === "advance"
+    next.kind === "wake"
+      ? { type: "WAKE_TASK", taskId: task.id }
+      : next.kind === "advance"
       ? { type: "ADVANCE", taskId: task.id }
       : next.kind === "resume"
         ? { type: "AGENT_RESUME", taskId: task.id }

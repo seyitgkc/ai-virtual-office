@@ -60,7 +60,8 @@ export function authorize(
     case "SUBMIT_REQUEST":
       return mayActIn(office, ctx, actor, roomForStage(office, "intake")!);
 
-    case "ADVANCE": {
+    case "ADVANCE":
+    case "WAKE_TASK": {
       const task = office.tasks.find((t) => t.id === action.taskId);
       return task ? mayActIn(office, ctx, actor, task.roomId) : no("No such task.");
     }
@@ -120,6 +121,7 @@ export function stampActor(action: Action, actorId: string): Action {
     case "REASSIGN":
     case "RESOLVE_ASSUMPTION":
     case "DECIDE":
+    case "WAKE_TASK":
       return { ...action, byId: actorId };
     case "ADVANCE":
     case "AGENT_RESUME":
@@ -195,6 +197,8 @@ export function parseAction(input: unknown): Action | null {
             ...(text(a.comment, 600) ? { comment: a.comment.trim() } : {}),
           }
         : null;
+    case "WAKE_TASK":
+      return text(a.taskId, 40) ? { type: "WAKE_TASK", taskId: a.taskId, byId: "" } : null;
     default:
       return null;
   }

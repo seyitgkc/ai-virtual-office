@@ -17,7 +17,7 @@ import {
   type Task,
   type TaskStatus,
 } from "../lib/model";
-import { eligibleOwners, nextStage, roomForStage, stageSpec, type Action } from "../lib/engine";
+import { dayOf, eligibleOwners, nextStage, roomForStage, stageSpec, type Action } from "../lib/engine";
 import { authorize } from "../lib/policy";
 import { deskState } from "../lib/agentState";
 import type { DirectLine, FeedEntry, OfficeView, TokenView } from "../lib/view";
@@ -31,6 +31,12 @@ const STATUS: Record<TaskStatus, { label: string; accent: string }> = {
   completed: { label: "completed", accent: "#5fa87a" },
   rejected: { label: "rejected", accent: "#8a8a8a" },
 };
+
+/** How a task's state is shown. One that waits for a day says so in place of "in progress". */
+const statusOf = (task: Task): { label: string; accent: string } =>
+  task.wait && task.closedAt === null && task.status === "in_progress"
+    ? { label: `waiting until ${dayOf(task.wait.until)}`, accent: "#8a93a0" }
+    : STATUS[task.status];
 
 const time = (ms: number): string =>
   new Date(ms).toLocaleTimeString("en-CA", {
@@ -343,7 +349,7 @@ export function TaskList({
           </button>
         )}
         {tasks.map((task) => {
-          const s = STATUS[task.status];
+          const s = statusOf(task);
           return (
             <button
               key={task.id}
@@ -580,7 +586,7 @@ function TaskInspector({
       }).allowed
     : false;
 
-  const s = STATUS[task.status];
+  const s = statusOf(task);
   // Review is closed by a person's decision. Any open, unblocked task at
   // that stage is waiting for one.
   const awaitingDecision =
@@ -802,6 +808,22 @@ function TaskInspector({
                 })
               }
             />
+          )}
+
+          {task.wait && task.closedAt === null && (
+            <div className="waiting">
+              <p>
+                Waiting until {dayOf(task.wait.until)}. {task.wait.reason}
+              </p>
+              <button
+                className="btn"
+                disabled={!mayAdvance.allowed}
+                title={mayAdvance.allowed ? undefined : mayAdvance.reason}
+                onClick={() => dispatch({ type: "WAKE_TASK", taskId: task.id })}
+              >
+                Carry on now
+              </button>
+            </div>
           )}
 
           <button

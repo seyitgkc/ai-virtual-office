@@ -629,6 +629,12 @@ export interface Task {
   history: TaskEvent[];
   createdAt: number;
   closedAt: number | null;
+  /**
+   * Set while the task's next move has a date: stock due in, a visit booked,
+   * a payment expected. The task stays with its owner and is not handed on
+   * until that time, when the owner is woken to carry on.
+   */
+  wait?: { until: number; reason: string };
 }
 
 // ---------------------------------------------------------------------------

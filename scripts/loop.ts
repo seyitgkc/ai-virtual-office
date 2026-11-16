@@ -18,6 +18,8 @@ function expect(label: string, actual: unknown, wanted: unknown): void {
   console.log(`${ok ? "pass" : "FAIL"}  ${label}${ok ? "" : `  (got ${String(actual)})`}`);
 }
 
+const inTwentyDays = new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10);
+
 async function main(): Promise<void> {
   const folder = mkdtempSync(join(tmpdir(), "office-loop-"));
   const adminPassword = randomBytes(18).toString("base64url");
@@ -105,6 +107,12 @@ async function main(): Promise<void> {
       if (input.stage === "planning") {
         return { statusNote: "Planned it.", questions: [], assumptions: [], notes: [{ toParticipantId: ledger, body: "Check this dealer's credit." }] };
       }
+      if (input.stage === "execution" && input.task.title.includes("wait")) {
+        const over = input.priorMessages.some((m) => m.body.includes("is over") || m.body.includes("ended the wait"));
+        return over
+          ? { statusNote: "The stock is in. Ordered the rest.", questions: [], assumptions: [] }
+          : { statusNote: "Shipped what is here.", questions: [], assumptions: [], wait: { until: inTwentyDays, reason: "The factory order arrives, and the rest can be ordered." } };
+      }
       return { statusNote: `${who} did ${input.stage}${answered ? " with the answer" : ""}.`, questions: [], assumptions: [] };
     },
   };
@@ -133,6 +141,32 @@ async function main(): Promise<void> {
   expect("and does not leave the same note twice", view.office.messages.filter((m) => m.kind === "note" && m.body === "Check this dealer's credit.").length, 1);
   expect("the activity log shows the agents' own steps", view.feed.some((f) => f.text.includes("moved to Review")), true);
   expect("a person cannot raise an agent's wake-up themselves", await refusal(async () => service.applyAction(await owner(), { type: "AGENT_RESUME", taskId: done.id })), 403);
+
+  console.log("\n-- a task that waits for a day --");
+  steps.length = 0;
+  view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Order, wait for stock", detail: "Eight units, four now.", requestedById: "" });
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  let waiting = taskOf(view, "Order, wait for stock");
+  expect("the task stays where the work is, and is not handed on", `${waiting.stage} ${waiting.status}`, "execution in_progress");
+  expect("it knows the day and what it waits for", `${new Date(waiting.wait?.until ?? 0).toISOString().slice(0, 10)} ${waiting.wait?.reason}`, `${inTwentyDays} The factory order arrives, and the rest can be ordered.`);
+  expect("the thread says so", view.office.messages.some((m) => m.taskId === waiting.id && m.body.startsWith("Waiting until ")), true);
+  expect("nothing is woken before the day", service.wakeDueTasks(Date.now() + 19 * 86_400_000), 0);
+  expect("on the day, the task is woken", service.wakeDueTasks(Date.now() + 21 * 86_400_000), 1);
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  waiting = taskOf(view, "Order, wait for stock");
+  expect("its agent takes the step again and does what was waiting", view.office.messages.some((m) => m.taskId === waiting.id && m.body === "The stock is in. Ordered the rest."), true);
+  expect("the wait is over", waiting.wait, undefined);
+  expect("and the task then goes on to review by itself", `${waiting.stage} ${waiting.status}`, "review in_review");
+  expect("it is not woken a second time", service.wakeDueTasks(Date.now() + 22 * 86_400_000), 0);
+
+  view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Second order, wait for stock", detail: "Four units.", requestedById: "" });
+  await service.agentsIdle();
+  view = await service.applyAction(await owner(), { type: "WAKE_TASK", taskId: taskOf(service.getView(await owner()), "Second order, wait for stock").id });
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  expect("a person can end a wait early, and the work carries on", `${taskOf(view, "Second order, wait for stock").stage} ${view.office.messages.some((m) => m.body.includes("ended the wait early"))}`, "review true");
 
   console.log("\n-- two colleagues answer the same agent --");
   steps.length = 0;

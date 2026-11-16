@@ -144,6 +144,7 @@ export const StepSchema = z.object({
   ),
   notes: z.array(z.object({ to: z.string(), body: z.string() })),
   output: z.object({ label: z.string(), body: z.string() }).nullable(),
+  wait: z.object({ until: z.string(), reason: z.string() }).nullable().optional(),
 });
 
 export type RawStep = z.infer<typeof StepSchema>;
@@ -207,6 +208,11 @@ Acting in a connected system:
 - A system's live records are what is true now. An order, booking, invoice or other record that the thread mentions and the live records no longer show does not exist any more: say so, and do not build on it.
 - If the thread shows the action was already done, and the live records do not contradict it, do not ask for it again. If you may not act in that system, ask for the action anyway: your supervisor will be asked to allow it. Some systems hold every action until a person approves it, and you will be told the outcome. Leave "actions" empty otherwise.
 
+Work that has to wait for a day:
+- Some work cannot be finished today: stock that arrives next month, a visit booked for Monday, a payment promised by Friday. When the rest of your step depends on such a day, do what can be done now, then set "wait" to that day and a reason of at most 30 words saying what happens then. The task stays with you, and you take the step again on that day.
+- Take the day from the request, the thread or the records. Never make one up. Wait only for something with a day attached, and only when your step has more to do after it. Set "wait" to null otherwise.
+- When you take a step after a wait has ended, read the live records first and do what was waiting.
+
 Telling people and colleagues:
 - You can leave a note for one person or one other agent by adding it to "notes" with their id and what they need to know, in at most 60 words. Do this only when it matters to them and neither your handoff, your output nor the thread already says it: a risk for whoever takes the next stage, a detail the reviewer should check, something the requester should hear now. A note asks for nothing and blocks nothing. An agent you leave a note for looks at it soon after and may do its own part, such as an action in a system that is its to use, so a note is the way to pass something to a colleague in another room. Most steps need none, so leave "notes" empty unless one is called for.
 
@@ -244,6 +250,15 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
   lines.push(`Task ${task.id}: ${asData("title", task.title)}`);
   lines.push(`Request: ${asData("request", task.detail)}`);
   lines.push(`Your step: ${stageSpec(stage).label}, working in the room "${task.roomId}".`);
+  if (input.now !== undefined) {
+    const today = new Date(input.now);
+    const day = today.toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
+    const weekday = today.toLocaleDateString("en-CA", { weekday: "long", timeZone: "America/Toronto" });
+    lines.push(`Today is ${weekday}, ${day}.`);
+  }
+  if (task.wait) {
+    lines.push(`This task was set to wait until ${new Date(task.wait.until).toLocaleDateString("en-CA", { timeZone: "America/Toronto" })}: ${asData("wait", task.wait.reason)}`);
+  }
   lines.push("");
   lines.push("Stages of a task, in order:");
   for (const s of surroundings.stages) {
@@ -391,6 +406,12 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
     .map((n) => ({ toParticipantId: n.to, body: clip(n.body, 400) }));
 
   const statusNote = clip(raw.statusNote, 300);
+  // A day the rest of the step waits for. Anything that is not a calendar day
+  // with a reason is dropped, and the engine checks that the day lies ahead.
+  const wait =
+    raw.wait && /^\d{4}-\d{2}-\d{2}$/.test(raw.wait.until.trim()) && raw.wait.reason.trim()
+      ? { until: raw.wait.until.trim(), reason: clip(raw.wait.reason, 200) }
+      : undefined;
   const output =
     raw.output && raw.output.body.trim().length > 0
       ? { label: clip(raw.output.label, 60) || "Output", body: clip(raw.output.body, 1200) }
@@ -404,13 +425,14 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
     ...(actions.length > 0 ? { actions } : {}),
     ...(notes.length > 0 ? { notes } : {}),
     ...(output ? { output } : {}),
+    ...(wait ? { wait } : {}),
   };
 }
 
 export const JSON_INSTRUCTIONS = `
 
 Reply with one JSON object and nothing else. It must have exactly these fields:
-"statusNote" (string), "questions" (array of objects with "body", "toParticipantId", "blocking" and "options"), "assumptions" (array of objects with "assumed", "because" and "confidence" as "low", "medium" or "high"), "needs" (array of objects with "room", "scope" as "enter", "read" or "act", and "purpose"), "actions" (array of objects with "system", "operation" and "fields", where "fields" is an array of objects with "name" and "value"), "notes" (array of objects with "to" and "body"), and "output" (an object with "label" and "body", or null). Use empty arrays where there is nothing to report.`;
+"statusNote" (string), "questions" (array of objects with "body", "toParticipantId", "blocking" and "options"), "assumptions" (array of objects with "assumed", "because" and "confidence" as "low", "medium" or "high"), "needs" (array of objects with "room", "scope" as "enter", "read" or "act", and "purpose"), "actions" (array of objects with "system", "operation" and "fields", where "fields" is an array of objects with "name" and "value"), "notes" (array of objects with "to" and "body"), "output" (an object with "label" and "body", or null), and "wait" (an object with "until" as a day written YYYY-MM-DD and "reason", or null). Use empty arrays where there is nothing to report.`;
 
 /** Pull the JSON object out of a reply that may be wrapped in a code fence. */
 export function parseReply(text: string): unknown {

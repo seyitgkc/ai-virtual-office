@@ -97,6 +97,10 @@ export const PIPELINE: StageSpec[] = [
 const roomName = (office: Office, id: RoomId): string =>
   office.floorplan.rooms.find((r) => r.id === id)?.name ?? id;
 
+/** A day as people write it: 7 December 2026. */
+export const dayOf = (at: number): string =>
+  new Date(at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "America/Toronto" });
+
 export const roomForStage = (office: Office, stage: WorkflowStage): RoomId | null =>
   stage === "done" ? null : office.stageRooms[stage];
 
@@ -155,6 +159,8 @@ export interface AgentStepInput {
    */
   priorMessages: Message[];
   surroundings: AgentSurroundings;
+  /** The office's time when the step is taken. */
+  now?: number;
   /**
    * What the connected systems this agent may read hold right now, one line
    * per record. Fetched by the server just before the step; absent elsewhere.
@@ -217,6 +223,11 @@ export interface AgentStepResult {
   /** Things to tell one person or agent each. They block nothing. */
   notes?: DraftNote[];
   output?: { label: string; body: string };
+  /**
+   * The rest of this step has a date. `until` is a calendar day, YYYY-MM-DD.
+   * The task stays where it is until then, and its owner takes the step again.
+   */
+  wait?: { until: string; reason: string };
 }
 
 /** One operation to carry out in a connected system, on behalf of a task. */
@@ -298,6 +309,11 @@ export type Action =
       /** What has to change, when the work is sent back. */
       comment?: string;
     }
+  /**
+   * End a task's wait. Raised by the office when the day comes, or by a
+   * person who does not want to wait for it.
+   */
+  | { type: "WAKE_TASK"; taskId: TaskId; byId?: ParticipantId }
   /** An agent takes its step again. Raised by the office, never by a person. */
   | { type: "AGENT_RESUME"; taskId: TaskId }
   /** An agent looks at a note left for it. Raised by the office, never by a person. */
@@ -617,8 +633,10 @@ export async function reduce(
         office = { ...office, messages: [...office.messages, handoff] };
       }
 
+      // Whoever moves a task on has decided not to wait any longer.
+      const { wait: _waited, ...moving } = task;
       const moved: Task = {
-        ...task,
+        ...moving,
         stage: target,
         roomId: targetRoom,
         ownerId: carrier.id,
@@ -922,6 +940,39 @@ export async function reduce(
     }
 
     // -- the review gate ----------------------------------------------------
+    case "WAKE_TASK": {
+      const task = office.tasks.find((t) => t.id === action.taskId);
+      if (!task || task.closedAt !== null || !task.wait) return done();
+      const by = action.byId ? office.participants.find((p) => p.id === action.byId) : undefined;
+      const { wait, ...rest } = task;
+      const said: Message = {
+        id: nextId("m"),
+        kind: "status",
+        taskId: task.id,
+        fromId: by?.id ?? task.ownerId ?? "system",
+        audience: { to: "room", id: task.roomId },
+        roomId: task.roomId,
+        at: now,
+        body: by
+          ? `${by.displayName} ended the wait early. It was waiting until ${dayOf(wait.until)}: ${wait.reason}`
+          : `The wait until ${dayOf(wait.until)} is over: ${wait.reason}`,
+      };
+      emitted.push(said);
+      office = {
+        ...replaceTask(office, {
+          ...rest,
+          history: [...task.history, { at: now, summary: by ? `${by.displayName} ended the wait` : "The wait ended", messageId: said.id }],
+        }),
+        messages: [...office.messages, said],
+      };
+      notes.push(by ? `${by.displayName} ended the wait on ${task.id}` : `${task.id}: the wait until ${dayOf(wait.until)} is over`);
+      const owner = office.participants.find((p) => p.id === task.ownerId);
+      if (owner?.agentType === "ai" && task.status === openStatus(task.stage) && !stageSpec(task.stage).humanGate) {
+        wake.push({ kind: "resume", taskId: task.id, participantId: owner.id });
+      }
+      return done();
+    }
+
     case "AGENT_RESUME": {
       const task = office.tasks.find((t) => t.id === action.taskId);
       const owner = office.participants.find((p) => p.id === task?.ownerId);
@@ -1183,6 +1234,7 @@ async function runAgent(
     participant,
     priorMessages: prior,
     surroundings,
+    now,
     ...(afterAction ? { afterAction } : {}),
     ...(attending && attending.fromId !== "system" ? { attending: { fromId: attending.fromId, body: attending.body } } : {}),
   });
@@ -1535,6 +1587,34 @@ async function runAgent(
         },
       ],
     };
+  }
+
+  // The owner's step says afresh whether the task waits for a day. A step that
+  // names none ends a wait set earlier. Nothing waits at a halt, at a stage a
+  // person closes, or on the word of an agent that only came for a note.
+  if (!attending) {
+    const { wait: _earlier, ...unwaiting } = updated;
+    updated = unwaiting;
+    const until = result.wait ? Date.parse(`${result.wait.until.trim()}T14:00:00Z`) : NaN;
+    const reason = result.wait?.reason.trim().slice(0, 200) ?? "";
+    const open = updated.status === openStatus(stage) && !stageSpec(stage).humanGate;
+    if (open && reason && Number.isFinite(until) && until > now && until < now + 366 * 86_400_000) {
+      updated = { ...updated, wait: { until, reason } };
+      const body = `Waiting until ${dayOf(until)}: ${reason}`;
+      if (!emitted.some((m) => m.body === body) && !office.messages.some((m) => m.taskId === task.id && m.body === body && m.at >= sentBackAt)) {
+        emitted.push({
+          id: nextId("m"),
+          kind: "status",
+          taskId: task.id,
+          fromId: participant.id,
+          audience: { to: "room", id: task.roomId },
+          roomId: task.roomId,
+          at: now,
+          body,
+        });
+      }
+      notes.push(`${task.id} waits until ${dayOf(until)}: ${reason}`);
+    }
   }
 
   const after: Office = { ...replaceTask(office, updated), messages: [...office.messages, ...emitted] };

@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -344,7 +344,11 @@ CREATE TABLE tasks (
   status       TEXT NOT NULL CHECK (status IN ('requested', 'in_progress', 'blocked_permission',
                  'blocked_question', 'in_review', 'completed', 'rejected')),
   created_at   INTEGER NOT NULL,
-  closed_at    INTEGER
+  closed_at    INTEGER,
+  -- Set while the task waits for a day: when it ends, and what it waits for.
+  wait_until   INTEGER,
+  wait_reason  TEXT,
+  CHECK ((wait_until IS NULL) = (wait_reason IS NULL))
 ) STRICT;
 
 -- ---------------------------------------------------------------- access
@@ -1096,5 +1100,10 @@ CREATE TABLE system_shown_rooms (
   position  INTEGER NOT NULL,
   PRIMARY KEY (system_id, room_id)
 ) STRICT;
+`,
+  // Version 13 lets a task wait for a day.
+  12: /* sql */ `
+ALTER TABLE tasks ADD COLUMN wait_until INTEGER;
+ALTER TABLE tasks ADD COLUMN wait_reason TEXT;
 `,
 };
