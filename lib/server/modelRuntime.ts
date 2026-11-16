@@ -75,8 +75,14 @@ function explain(error: unknown, who: string): Error {
   if (error instanceof Anthropic.APIError) {
     return new Error(`${who}: the provider returned an error (${error.status ?? "unknown"}).`);
   }
-  return error instanceof Error ? error : new Error(String(error));
+  // Anything else broke between here and the provider, such as a reply cut
+  // off part way. The raw error means nothing to the people reading the feed.
+  return new Error(`${who}: the connection to the provider was lost before it answered.`);
 }
+
+/** True when a call failed on the way, so asking again may well succeed. */
+const lostOnTheWay = (error: unknown): boolean =>
+  !(error instanceof Anthropic.APIError) || error instanceof Anthropic.APIConnectionError;
 
 /**
  * Check that a key works and that the provider knows the model, without
@@ -197,6 +203,7 @@ Acting in a connected system:
 - Some rooms have a connected system, such as a storefront or a carrier. Its live records are shown with the records when you can read its room. To do something in a system, add an entry to "actions" with the system's id, one of its operations, and a value for every field of that operation, taken from the request, the thread or the records.
 - Act only when your step calls for it and nothing is left to guess. If the request, the thread or your own plan says something must be checked, confirmed or approved before the action, do not take the action until the thread shows that it was done. Ask, or leave a note for whoever has to do it.
 - An action is not done until the thread shows the system's answer. In your status note, output and notes, say that you have asked for it, never that it is done. Where a system is marked as holding actions for approval, a person decides first.
+- You take the step again as soon as the system has answered. Tell a colleague about an action then, with its result. Leave no note about it in the step that asks for it.
 - If the thread shows the action was already done, do not ask for it again. If you may not act in that system, ask for the action anyway: your supervisor will be asked to allow it. Some systems hold every action until a person approves it, and you will be told the outcome. Leave "actions" empty otherwise.
 
 Telling people and colleagues:
@@ -205,7 +212,8 @@ Telling people and colleagues:
 Your reply:
 - "statusNote" is one plain sentence saying what you did in this step.
 - Give "output" only when the step produced something a colleague will use, such as a plan, a check, a draft or a summary. Keep its label under eight words and its body under 120 words. Otherwise set it to null.
-- Write plain sentences. No headings, bullet lists or emphasis marks.`;
+- Write plain sentences. No headings, bullet lists or emphasis marks.
+- Call rooms, people and systems by their names in what you write. Their ids belong only in the fields that ask for an id.`;
 
 /** The standing instructions with the fixed marker. Each real call makes its own. */
 export const SYSTEM_PROMPT = systemPrompt(FIXED_MARKER);
@@ -523,7 +531,8 @@ export class ModelRuntime implements ConversationRuntime {
     const who = input.participant.displayName;
     const marker = dataMarker();
     let problem = "";
-    // A reply that cannot be read is asked for once more before giving up.
+    // A reply that cannot be read, or that was lost on the way, is asked for
+    // once more before giving up.
     for (let attempt = 0; attempt < 2; attempt++) {
       let response;
       try {
@@ -534,6 +543,7 @@ export class ModelRuntime implements ConversationRuntime {
           messages: [{ role: "user", content: buildStepPrompt(input, marker) }],
         });
       } catch (error) {
+        if (attempt === 0 && lostOnTheWay(error)) continue;
         throw explain(error, `${who} could not answer`);
       }
       if (response.stop_reason === "refusal") {
