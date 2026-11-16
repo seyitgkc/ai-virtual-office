@@ -257,7 +257,7 @@ async function main(): Promise<void> {
     expect("the order is cancelled and the shipment is not", w.standing(), "SH");
     expect("so the task stays open", `${taskOf(stuck, r.id).status} ${taskOf(stuck, r.id).closedAt}`, "blocked_question null");
     const q = openQuestion(stuck, r.id);
-    expect("the person is told what is still in place, and why", q.body.includes("Still in place: (1)") && q.body.includes("booked shipment SH-1002") && q.body.includes("it has left the dock"), true);
+    expect("the person is told what is still in place, and why", q.body.includes("Still in place: (1)") && q.body.includes("booked shipment SH-1002") && q.body.includes("Still in place because Freight carrier refused to cancel shipment: it has left the dock."), true);
     expect("and what was taken back", q.body.includes("Taken back: (1)") && q.body.includes("placed order SO-1001"), true);
     expect("and is asked what next", q.kind === "question" && q.options?.join(" | "), `${TRY_AGAIN} | ${CLOSE_AS_IS}`);
     expect("in words that say it could not be taken back", q.body.startsWith("Not everything this rejected task did could be taken back."), true);
@@ -286,6 +286,7 @@ async function main(): Promise<void> {
     expect("the system is never asked", w.calls.includes("cancel_order:SO-0007"), false);
     expect("the thread says why it was not done", stuck.office.messages.some((m) => m.taskId === r.id && m.body.includes("not done, because it named SO-0007, and what this task made in Storefront is SO-1001")), true);
     expect("and the person is asked what next", openQuestion(stuck, r.id).body.includes("placed order SO-1001"), true);
+    expect("with the reason in a sentence that reads", openQuestion(stuck, r.id).body.includes("Still in place because it was not done, because it named SO-0007"), true);
   }
 
   console.log("\n-- something the system cannot take back --");

@@ -151,9 +151,9 @@ export function whyStanding(office: Office, task: Task, deed: Deed, doer: Partic
   if (!asked) return doer.kind === "agent" ? `${doer.displayName} could not be asked to do this` : "a person did it";
   const since = after(office, task, asked);
   const refusal = since.findLast((m) => reported(m) && !m.did.ok && m.did.systemId === deed.message.did.systemId && m.fromId === doer.id);
-  if (refusal) return summaryOf(refusal as StatusMessage, deed.system);
+  if (refusal) return `${deed.system.name} ${summaryOf(refusal as StatusMessage, deed.system)}`;
   const held = since.findLast((m) => m.kind === "status" && m.fromId === doer.id && m.body.startsWith(`${deed.system?.name}: not done`));
-  if (held) return summaryOf(held as StatusMessage, deed.system);
+  if (held) return `it was ${summaryOf(held as StatusMessage, deed.system)}`;
   const answer = since.findLast((m) => m.kind === "note" && m.fromId === doer.id);
   if (answer) return `${doer.displayName} said: ${answer.body.replace(/\s+/g, " ").trim().replace(/\.+$/, "")}`;
   return `${doer.displayName} did not act on it`;
