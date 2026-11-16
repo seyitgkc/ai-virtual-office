@@ -26,10 +26,11 @@ supervisor does not read logs to find out why work is stuck. They look at the
 floor.
 
 **How a team uses it.** Someone files a request. Agents carry it forward and
-hand it on by themselves. A person is brought in at exactly four points: when
-an agent asks a question, when it needs access it does not hold, when it wants
-to do something in an outside system that needs approval, and at the final
-review. Everything else moves without a click.
+hand it on by themselves. A person is brought in at five points: when an
+agent asks a question, when it needs access it does not hold, when it wants
+to do something in an outside system that needs approval, at the final
+review, and after a rejection, to say what should happen to an order or a
+booking the task had already made. Everything else moves without a click.
 
 **What to try first.**
 
@@ -389,8 +390,10 @@ participant's permission tokens, with *Copy token* and *Revoke token*.
 **Activity** (bottom left) is a plain-language log of what each action did,
 limited to rooms you can read.
 
-**Supervisor controls** (title card). *Invite* adds a person. *Settings* opens
-the set-up screen described next.
+**Supervisor controls** (title card). *Inbox* opens what is waiting on you.
+*Invite* adds a person. *Report* shows how the office is doing, for people
+who see everything. *Settings* opens the set-up screen described next. They
+stay on screen while you walk the office.
 
 ### Settings
 
@@ -415,7 +418,7 @@ belong to your account, whichever office you are in, come after.
 | Your offices | none | See every office your account has a seat in. Open another one. Add a new, empty office, or a sample office with AI agents. Remove one you manage. |
 | Your AI providers | none, with a password account | Add, edit, test and remove providers that belong to your account. They can be used in every office you have a seat in. |
 
-A tab appears only for someone whose role carries its permission.
+A page appears only for someone whose role carries its permission.
 
 **Permissions.** A role carries any of eleven permissions, ticked in a table of
 permissions against roles:
@@ -1774,6 +1777,37 @@ what exists, and what a real deployment would add.
   SH-5001 under it in the carrier. The reviewing agent noticed the storefront
   recorded list price where tier 2 applied, asked a person how to handle it,
   and had Billing confirm the figures. No task halted for access.
+- An office of five AI agents and five connected systems on the deployed
+  site, run through its newer parts with real models:
+  - Urgent work: of three requests filed within a second, the urgent one,
+    filed last, was taken second.
+  - A document: a request that said only to place the order as the attached
+    purchase order lists became order SO-1001 with both lines from the
+    document.
+  - Standing work: a weekly request filed itself 28 seconds after it fell
+    due and ran through to review.
+  - Earlier work: on a new order for a dealer, the agents named the closed
+    task that last dealt with that dealer, and said that the payment it
+    recorded was no longer on the ledger.
+  - A kept record: a line kept in Fulfilment's records was followed on the
+    next two tasks that passed through that room.
+  - A wait: a task set itself to wait for a day five weeks off, kept the
+    wait through restarts, and its agent picked the right work up again when
+    the wait was ended by hand.
+- Winding up a rejected task, on the deployed site:
+  - An order with its freight and invoice was rejected and answered with
+    "Undo all of them". The three agents voided the invoice, cancelled the
+    shipment and cancelled the order, newest first, and the task closed by
+    itself 22 seconds after the answer. The three systems' own records
+    showed all of it gone.
+  - A second was answered in the reviewer's own words, to cancel the freight
+    and the invoice and keep the order. The agents did that, the office
+    asked what next because the order still stood, and "Close it as it
+    stands" closed it.
+  - A factory order that had been moved to air freight was rejected. The
+    cancellation waited for approval, was approved, and was refused by the
+    supplier portal because the order had left. The person was told both
+    reasons and asked what next.
 - Several AI providers per office, each with an encrypted, write-only API key
   and a connection test.
 - Many offices per account, each isolated, with adding, switching and
@@ -1794,11 +1828,12 @@ what exists, and what a real deployment would add.
   demo says so on its title card and on its request form.
 - All business data: dealers, branches, stock, pricing tiers, people. The
   records in `lib/referenceData.ts` are invented.
-- The storefront and the carrier. They are real HTTP services with keys,
+- The five sample services: storefront, freight carrier, accounts ledger,
+  supplier portal and service desk. They are real HTTP services with keys,
   validation, refusals and repeat-safe requests, and the office talks to them
-  as it would to any other. Their catalogue, stock and rates are invented, and
-  they keep their data in memory: it returns to the sample state when a
-  service restarts and once a day.
+  as it would to any other. Their catalogue, stock, accounts and rates are
+  invented, and they keep their data in memory: it returns to the sample
+  state when a service restarts and once a day.
 
 The stored data says which is which. Every agent is labelled as an AI agent or
 a playbook agent, and every output message records whether it came from a
@@ -1812,19 +1847,26 @@ playbook.
   itself only the connection test has been run, which correctly reported a
   rejected key. No step has been run with a working Anthropic key, because
   none was available while this was written.
+- The office ending a wait by itself on the day, on the deployed site. The
+  one task waiting there is due on 21 December 2026. The check scripts cover
+  it with a clock of their own.
+- An agent that cannot be reached while a rejected task is wound up, on the
+  deployed site. The check scripts cover it: three tries, then the person is
+  asked.
 
 **Proposed**
 
-- Connectors for named products such as Shopify, WooCommerce or an accounting
-  package. A new kind is a list of operations in `lib/systems.ts` and an
-  adapter in `lib/server/systems.ts`.
+- Adapters for named products such as Shopify, WooCommerce or an accounting
+  package. Each would be a small service in front of the product that
+  describes it in the format the sample services use. The office itself
+  needs no change for a new system.
 - Lookups an AI agent chooses for itself during a step. Today it is shown a
   fixed snapshot of each system it may read.
 - More playbook conditions, such as the answer to an earlier question.
 - A drag-and-drop floorplan editor. Rooms are added today through a form.
 - Workflows with a different number of stages.
 - Live updates pushed to the browser. Today each browser re-reads the office
-  every five seconds.
+  every five seconds, and every second and a half while agents are at work.
 
 ## Security
 
@@ -1929,7 +1971,8 @@ playbook.
 - When a connected system refuses or cannot be reached, the thread says so and
   the task carries on. It does not halt.
 - No password reset and no email. An administrator would issue a new invite.
-- Browsers poll for changes every five seconds.
+- Browsers poll for changes every five seconds, and every second and a half
+  while agents are at work. A tab that is not in view does not poll.
 - SQLite suits one server process. More than one would need a different
   database.
 - Rooms are rectangles placed along a corridor or against an existing room's
