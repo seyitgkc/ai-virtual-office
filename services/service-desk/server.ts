@@ -99,6 +99,7 @@ export function serviceDesk(apiKey: string): Server {
     tickets.unshift(ticket);
     return {
       summary: `opened ${ticket.id} (${ticket.priority}) for ${account} on unit ${serial}, a ${unit.sku} delivered ${delivered(unit)} and ${warranty(unit)}.`,
+      record: ticket.id,
       ticket,
     };
   }
@@ -143,7 +144,7 @@ export function serviceDesk(apiKey: string): Server {
     const ticket = findTicket(need(input, "ticket", "a ticket number"));
     ticket.resolution = need(input, "resolution", "how it was resolved");
     ticket.status = "closed";
-    return { summary: `closed ${ticket.id}: ${ticket.resolution}.`, ticket };
+    return { summary: `closed ${ticket.id}: ${ticket.resolution}.`, record: ticket.id, ticket };
   }
 
   return serve({

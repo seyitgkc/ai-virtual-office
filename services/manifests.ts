@@ -28,6 +28,7 @@ export const STOREFRONT: Manifest = {
     {
       id: "cancel_order",
       label: "Cancel an order",
+      undoes: "place_order",
       method: "POST",
       path: "/v1/orders/{order}/cancel",
       fields: [inPath("order", "Order number", "SO-1001")],
@@ -57,6 +58,7 @@ export const CARRIER: Manifest = {
     {
       id: "cancel_shipment",
       label: "Cancel a shipment",
+      undoes: "book_shipment",
       method: "POST",
       path: "/v1/shipments/{shipment}/cancel",
       fields: [inPath("shipment", "Shipment number", "SH-5001")],
@@ -67,7 +69,7 @@ export const CARRIER: Manifest = {
 export const LEDGER: Manifest = {
   name: "Accounts ledger",
   description:
-    "Dealer accounts as accounting sees them: pricing tier, credit limit, what is owed, payment record and credit holds, with invoices and payments. Use it to check whether a dealer is good for an order before it is placed, to raise the invoice once an order exists, and to record a payment. An invoice takes the list amount and applies the dealer's tier discount itself. It is refused when the account is on hold or the invoice would take the dealer past the credit limit, and an order can be invoiced only once. Putting an account on hold stops all further invoices, so do it only on a clear instruction.",
+    "Dealer accounts as accounting sees them: pricing tier, credit limit, what is owed, payment record and credit holds, with invoices and payments. Use it to check whether a dealer is good for an order before it is placed, to raise the invoice once an order exists, to void an invoice that should not stand, and to record a payment. A payment cannot be taken back here. An invoice takes the list amount and applies the dealer's tier discount itself. It is refused when the account is on hold or the invoice would take the dealer past the credit limit, and an order can be invoiced only once. Putting an account on hold stops all further invoices, so do it only on a clear instruction.",
   recordsPath: "/v1/summary",
   operations: [
     {
@@ -81,6 +83,14 @@ export const LEDGER: Manifest = {
         body("listAmount", "Amount at list price (CAD)", "5674"),
         body("freight", "Freight (CAD)", "141.30"),
       ],
+    },
+    {
+      id: "void_invoice",
+      label: "Void an invoice",
+      undoes: "raise_invoice",
+      method: "POST",
+      path: "/v1/invoices/{invoice}/void",
+      fields: [inPath("invoice", "Invoice number", "INV-3001"), body("reason", "Reason", "The order was cancelled")],
     },
     {
       id: "record_payment",
@@ -130,6 +140,7 @@ export const SUPPLIER: Manifest = {
     {
       id: "cancel_purchase_order",
       label: "Cancel a purchase order",
+      undoes: "raise_purchase_order",
       method: "POST",
       path: "/v1/purchase-orders/{order}/cancel",
       fields: [inPath("order", "Purchase order number", "PO-7001")],
@@ -171,6 +182,7 @@ export const SERVICE_DESK: Manifest = {
     {
       id: "close_ticket",
       label: "Close a ticket",
+      undoes: "open_ticket",
       method: "POST",
       path: "/v1/tickets/{ticket}/close",
       fields: [inPath("ticket", "Ticket number", "TK-4001"), body("resolution", "How it was resolved", "Unit replaced")],

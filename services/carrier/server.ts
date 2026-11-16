@@ -84,6 +84,7 @@ export function carrier(apiKey: string): Server {
     shipments.unshift(shipment);
     return {
       summary: `booked shipment ${shipment.id} for ${reference}: ${from} to ${to}, ${weightKg} kg by ${level.code}, ${cad(shipment.cost)}, ${count(level.transitDays, "day")} in transit, tracking ${shipment.tracking}.`,
+      record: shipment.id,
       shipment,
     };
   }
@@ -93,7 +94,7 @@ export function carrier(apiKey: string): Server {
     const shipment = shipments.find((s) => s.id === id);
     if (!shipment) throw new Refusal(404, "unknown_shipment", `No shipment ${id}.`);
     shipment.status = "cancelled";
-    return { summary: `cancelled shipment ${shipment.id}.`, shipment };
+    return { summary: `cancelled shipment ${shipment.id}.`, record: shipment.id, shipment };
   }
 
   return serve({

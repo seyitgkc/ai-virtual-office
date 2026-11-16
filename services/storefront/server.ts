@@ -130,7 +130,7 @@ export function storefront(apiKey: string): Server {
       placedAt: new Date().toISOString(),
     };
     orders.unshift(order);
-    return { summary: `placed order ${order.id} ${describe(order)}.`, order };
+    return { summary: `placed order ${order.id} ${describe(order)}.`, record: order.id, order };
   }
 
   function cancelOrder(input: Json): Done {
@@ -144,7 +144,7 @@ export function storefront(apiKey: string): Server {
       }
       order.status = "cancelled";
     }
-    return { summary: `cancelled order ${order.id} and returned its stock to ${order.branch}.`, order };
+    return { summary: `cancelled order ${order.id} and returned its stock to ${order.branch}.`, record: order.id, order };
   }
 
   return serve({

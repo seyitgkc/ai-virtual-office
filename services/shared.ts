@@ -28,6 +28,8 @@ export interface Operation {
   method: "POST" | "PUT" | "DELETE";
   path: string;
   fields: Field[];
+  /** The operation this one reverses, when it is the way to take that one back. */
+  undoes?: string;
 }
 
 export interface Manifest {
@@ -50,9 +52,15 @@ export class Refusal extends Error {
 
 export type Json = Record<string, unknown>;
 
-/** What an operation answers: a sentence for people, and the record it made or changed. */
+/**
+ * What an operation answers: a sentence for people, and the record it made or
+ * changed. `record` is that record's number. An operation that takes another
+ * back answers with the number of the record it took back, so a caller can
+ * tell which one no longer stands.
+ */
 export interface Done {
   summary: string;
+  record?: string;
   [key: string]: unknown;
 }
 

@@ -4,6 +4,9 @@
  * move that balance. It keeps its data in memory, so a restart brings the
  * sample data back.
  *
+ * An invoice raised by mistake can be voided, which takes it off the balance.
+ * A payment cannot be taken back here: that is a refund, made by a person.
+ *
  * Beyond what every sample service offers (see ../shared.ts):
  *   GET /v1/accounts   the accounts
  *   GET /v1/invoices   invoices, newest first
@@ -53,6 +56,7 @@ const round = (amount: number): number => Math.round(amount * 100) / 100;
 export function ledger(apiKey: string): Server {
   let book = accounts();
   let invoices: Invoice[] = [];
+  let voided: string[] = [];
   let payments: { id: string; account: string; amount: number; on: string; released: boolean }[] = [];
   let paid = 8000;
   let sequence = 3000;
@@ -101,6 +105,27 @@ export function ledger(apiKey: string): Server {
     account.balance = round(account.balance + total);
     return {
       summary: `raised invoice ${invoice.id} on ${account.id} for ${reference}: ${cad(listAmount)} at list less ${cad(discount)} for tier ${account.tier}${freight > 0 ? `, plus ${cad(freight)} freight` : ""}, ${cad(total)} due on ${invoice.dueOn}. The account now has ${standing(account)}.`,
+      record: invoice.id,
+      invoice,
+    };
+  }
+
+  function voidInvoice(input: Json): Done {
+    const id = need(input, "invoice", "an invoice number").toUpperCase();
+    const reason = need(input, "reason", "a reason");
+    const invoice = invoices.find((i) => i.id === id);
+    if (!invoice) {
+      const gone = voided.find((v) => v === id);
+      if (gone) return { summary: `invoice ${id} was already voided.`, record: id };
+      throw new Refusal(404, "unknown_invoice", `No invoice ${id}.`);
+    }
+    const account = find(invoice.account);
+    invoices = invoices.filter((i) => i.id !== id);
+    voided.push(id);
+    account.balance = round(Math.max(0, account.balance - invoice.total));
+    return {
+      summary: `voided invoice ${invoice.id} for ${invoice.reference} (${reason}), taking ${cad(invoice.total)} off ${account.id}. The account now has ${standing(account)}.`,
+      record: invoice.id,
       invoice,
     };
   }
@@ -117,6 +142,7 @@ export function ledger(apiKey: string): Server {
     if (released) account.onHold = null;
     payments.unshift({ id: `PAY-${++paid}`, account: account.id, amount, on: dayFromNow(0), released });
     return {
+      record: `PAY-${paid}`,
       summary: `recorded a payment of ${cad(amount)} from ${account.id}. The account now has ${standing(account)}${released ? ", and its credit hold is released" : account.onHold ? ", and it is still on hold" : ""}.`,
       account,
     };
@@ -158,11 +184,12 @@ export function ledger(apiKey: string): Server {
         "No payments are on record.",
       ),
     ],
-    operations: { raise_invoice: raiseInvoice, record_payment: recordPayment, set_credit_hold: setHold },
+    operations: { raise_invoice: raiseInvoice, void_invoice: voidInvoice, record_payment: recordPayment, set_credit_hold: setHold },
     reads: { "/v1/accounts": () => ({ accounts: book }), "/v1/invoices": () => ({ invoices: invoices.slice(0, 50) }) },
     reset: () => {
       book = accounts();
       invoices = [];
+      voided = [];
       payments = [];
       sequence = 3000;
       paid = 8000;

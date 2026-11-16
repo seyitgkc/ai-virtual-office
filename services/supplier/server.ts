@@ -103,7 +103,7 @@ export function supplier(apiKey: string): Server {
         : shipsNow === 0
           ? `none can ship from the current run, so all ${quantity} are backordered and arrive on ${order.backorderArrivesOn}`
           : `${shipsNow} arrive on ${order.arrivesOn} and ${backordered} are backordered until ${order.backorderArrivesOn}`;
-    return { summary: `raised ${order.id} for ${quantity} x ${sku} to ${branch} at ${cad(order.cost)}: ${split}.`, order };
+    return { summary: `raised ${order.id} for ${quantity} x ${sku} to ${branch} at ${cad(order.cost)}: ${split}.`, record: order.id, order };
   }
 
   function expedite(input: Json): Done {
@@ -125,14 +125,14 @@ export function supplier(apiKey: string): Server {
 
   function cancel(input: Json): Done {
     const order = findOrder(need(input, "order", "a purchase order number"));
-    if (order.status === "cancelled") return { summary: `${order.id} was already cancelled.`, order };
+    if (order.status === "cancelled") return { summary: `${order.id} was already cancelled.`, record: order.id, order };
     if (order.expedited) {
       throw new Refusal(409, "in_the_air", `${order.id} was moved to air freight and has left the factory, so it can no longer be cancelled.`);
     }
     const item = items.find((i) => i.sku === order.sku);
     if (item) item.ready += order.shipsNow;
     order.status = "cancelled";
-    return { summary: `cancelled ${order.id} for ${order.quantity} x ${order.sku}.`, order };
+    return { summary: `cancelled ${order.id} for ${order.quantity} x ${order.sku}.`, record: order.id, order };
   }
 
   return serve({
