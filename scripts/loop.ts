@@ -313,7 +313,8 @@ async function main(): Promise<void> {
   for (const title of ["Order, slow one", "Order, slow two", "Order, quick"]) {
     view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title, detail: "One unit.", requestedById: "" });
   }
-  expect("a click does not wait for a model", Date.now() - began < 300, true);
+  // Three clicks that each waited for a slow model would take over a second.
+  expect("a click does not wait for a model", Date.now() - began < 1000, true);
   expect("the task is with its agent, who owes the first step", `${taskOf(view, "Order, quick").stage} ${taskOf(view, "Order, quick").owed}`, "intake true");
   const iris = view.office.participants.find((p) => p.displayName === "Iris")!.id;
   expect("the agent is on one task with the other two waiting", JSON.stringify(view.agentLoad[iris] ?? null), JSON.stringify({ taskId: taskOf(view, "Order, slow one").id, forNote: false, waiting: 2, queued: [taskOf(view, "Order, slow two").id, taskOf(view, "Order, quick").id] }));
@@ -337,8 +338,11 @@ async function main(): Promise<void> {
   console.log("\n-- urgent work goes first --");
   steps.length = 0;
   const taken: string[] = [];
+  // The first step is long, so that the urgent request is sure to arrive
+  // while the agent is still on it, however slow the machine is.
   slowFor = (input) => {
     if (input.stage === "intake" && input.task.title.startsWith("Queue")) taken.push(input.task.title);
+    if (input.stage === "intake" && input.task.title === "Queue one") return 1500;
     return input.task.title.startsWith("Queue") ? 60 : 0;
   };
   for (const title of ["Queue one", "Queue two", "Queue three"]) {
