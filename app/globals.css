@@ -665,6 +665,26 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 }
 .task-ref:hover { color: #cfe3f3; border-bottom-style: solid; }
 
+/* A task at a glance, shown beside wherever it is named. */
+.task-card {
+  position: fixed; z-index: 40; max-height: calc(100vh - 16px); overflow: auto;
+  background: rgba(20, 23, 28, 0.98); color: #e8e6e1;
+  border: 1px solid rgba(255,255,255,0.16); border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0,0,0,0.55); padding: 12px 13px 13px;
+  font-size: 11.5px; line-height: 1.45;
+}
+.task-card-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.task-card-head .id { font-size: 10.5px; letter-spacing: 0.06em; color: rgba(232,230,225,0.55); margin-right: 2px; }
+.task-card-head .chip.urgent { margin-left: 0; }
+.task-card-title { font-size: 13px; line-height: 1.35; margin-bottom: 5px; }
+.task-card-request { margin: 0 0 8px; color: rgba(232,230,225,0.66); }
+.task-card .kv { font-size: 11px; }
+.task-card .kv span:last-child { max-width: 68%; }
+.task-card .note { margin: 8px 0 0; }
+.task-card .at-work { margin-top: 8px; }
+.task-card-open { width: 100%; margin: 10px 0 0; }
+.task-card-foot { margin-top: 10px; font-size: 10.5px; color: rgba(232,230,225,0.5); }
+
 /* Who is at work on the open task. */
 .at-work {
   margin-top: 8px; padding: 6px 9px; font-size: 11px; line-height: 1.5;

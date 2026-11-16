@@ -24,20 +24,10 @@ import { authorize } from "../lib/policy";
 import { atWorkOn, deskState } from "../lib/agentState";
 import { taskLabel, withTaskLabels } from "../lib/taskLabels";
 import { TaskText } from "./TaskText";
+import { KindBadge, statusOf, URGENT_ACCENT } from "./TaskCard";
+
+export { KindBadge };
 import type { DirectLine, FeedEntry, OfficeView, TokenView } from "../lib/view";
-
-const STATUS: Record<TaskStatus, { label: string; accent: string }> = {
-  requested: { label: "requested", accent: "#8a93a0" },
-  in_progress: { label: "in progress", accent: "#6ea9d9" },
-  blocked_question: { label: "needs an answer", accent: "#e0a23f" },
-  blocked_permission: { label: "needs access", accent: "#e0614f" },
-  in_review: { label: "in review", accent: "#9b8ad9" },
-  completed: { label: "completed", accent: "#5fa87a" },
-  rejected: { label: "rejected", accent: "#8a8a8a" },
-};
-
-/** The colour of the mark on urgent work. */
-const URGENT_ACCENT = "#e0614f";
 
 /** The work list offers search and these filters once it holds more tasks than this. */
 const WORK_FILTER_FROM = 5;
@@ -62,14 +52,6 @@ const WORK_FILTERS: Record<WorkFilter, { label: string; hint: string; keeps: (ta
   done: { label: "Closed", hint: "Tasks that were completed or rejected", keeps: (task) => task.closedAt !== null },
 };
 
-/** How a task's state is shown. One that waits for a day says so in place of "in progress". */
-const statusOf = (task: Task): { label: string; accent: string } =>
-  task.wait && task.closedAt === null && task.status === "in_progress"
-    ? { label: `waiting until ${dayOf(task.wait.until)}`, accent: "#8a93a0" }
-    : task.windUp && task.closedAt === null
-      ? { label: task.status === "blocked_question" ? "rejected, needs an answer" : "rejected, winding up", accent: task.status === "blocked_question" ? "#e0a23f" : "#8a8a8a" }
-      : STATUS[task.status];
-
 const time = (ms: number): string =>
   new Date(ms).toLocaleTimeString("en-CA", {
     hour: "2-digit",
@@ -81,15 +63,6 @@ const time = (ms: number): string =>
 // ---------------------------------------------------------------------------
 
 /** Says whether a participant is a person, an AI agent or a playbook agent. */
-export function KindBadge({ kind, agentType }: Pick<Participant, "kind" | "agentType">) {
-  const playbook = kind === "agent" && agentType !== "ai";
-  return (
-    <span className="kind-badge" data-kind={kind} data-playbook={playbook}>
-      {kind === "human" ? "Human" : playbook ? "Playbook" : "AI"}
-    </span>
-  );
-}
-
 /** What kind of participant this is, in words. */
 export const kindName = (p: Pick<Participant, "kind" | "agentType">): string =>
   p.kind === "human" ? "Human" : p.agentType === "ai" ? "AI agent" : "Playbook agent";
@@ -125,6 +98,35 @@ export function TitleCard({
   inboxCount: number;
   onInbox: () => void;
 }) {
+  const who = (
+    <div className="who">
+      <div>
+        Signed in as <strong>{viewer.displayName}</strong>
+        <span>{viewer.title}</span>
+      </div>
+      <div className="who-actions">
+        <button className="btn" onClick={onInbox} data-count={inboxCount > 0}>
+          Inbox{inboxCount > 0 ? ` (${inboxCount})` : ""}
+        </button>
+        {viewer.permissions.includes("invite_people") && (
+          <button className="btn" onClick={onInvite}>
+            Invite
+          </button>
+        )}
+        {viewer.permissions.includes("see_everything") && (
+          <button className="btn" onClick={onReport}>
+            Report
+          </button>
+        )}
+        <button className="btn" onClick={onSettings}>
+          Settings
+        </button>
+        <button className="btn" onClick={onSignOut}>
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
   if (mode === "walk") {
     return (
       <div className="panel" id="title">
@@ -147,9 +149,7 @@ export function TitleCard({
         <button className="btn mode" onClick={onToggleMode}>
           Back to overview
         </button>
-        <button className="btn mode" onClick={onInbox} data-count={inboxCount > 0}>
-          Inbox{inboxCount > 0 ? ` (${inboxCount})` : ""}
-        </button>
+        {who}
       </div>
     );
   }
@@ -189,33 +189,7 @@ export function TitleCard({
       <button className="btn primary mode" onClick={onToggleMode}>
         Walk the office
       </button>
-      <div className="who">
-        <div>
-          Signed in as <strong>{viewer.displayName}</strong>
-          <span>{viewer.title}</span>
-        </div>
-        <div className="who-actions">
-          <button className="btn" onClick={onInbox} data-count={inboxCount > 0}>
-            Inbox{inboxCount > 0 ? ` (${inboxCount})` : ""}
-          </button>
-          {viewer.permissions.includes("invite_people") && (
-            <button className="btn" onClick={onInvite}>
-              Invite
-            </button>
-          )}
-          {viewer.permissions.includes("see_everything") && (
-            <button className="btn" onClick={onReport}>
-              Report
-            </button>
-          )}
-          <button className="btn" onClick={onSettings}>
-            Settings
-          </button>
-          <button className="btn" onClick={onSignOut}>
-            Sign out
-          </button>
-        </div>
-      </div>
+      {who}
     </div>
   );
 }
@@ -446,6 +420,20 @@ export function TaskList({
   const [composing, setComposing] = useState(false);
   const [search, setSearch] = useState("");
   const [show, setShow] = useState<WorkFilter>("all");
+  const list = useRef<HTMLDivElement>(null);
+  // A task opened from somewhere else is brought into view in the list. If
+  // the search or the filter is hiding it, they are cleared first.
+  useEffect(() => {
+    if (!selectedId) return;
+    const row = (): Element | null | undefined => list.current?.querySelector('.task[data-selected="true"]');
+    if (!row() && tasks.some((t) => t.id === selectedId)) {
+      setSearch("");
+      setShow("all");
+    }
+    const shown = window.requestAnimationFrame(() => row()?.scrollIntoView({ block: "nearest" }));
+    return () => window.cancelAnimationFrame(shown);
+    // Only a change of task moves the list. New messages must not.
+  }, [selectedId]);
   // A handful of tasks need no finding. The controls appear once there are more.
   const crowded = tasks.length > WORK_FILTER_FROM;
   const wanted = search.trim().toLowerCase();
@@ -456,7 +444,7 @@ export function TaskList({
     ? ordered.filter(
         (task) =>
           WORK_FILTERS[show].keeps(task) &&
-          (wanted === "" || `${task.id} ${task.title} ${task.detail}`.toLowerCase().includes(wanted)),
+          (wanted === "" || `${taskLabel({ tasks }, task.id)} ${task.title} ${task.detail}`.toLowerCase().includes(wanted)),
       )
     : ordered;
 
@@ -466,7 +454,7 @@ export function TaskList({
         <span>Work in the office</span>
         <span>{tasks.filter((t) => t.closedAt === null).length} open</span>
       </div>
-      <div className="panel-body">
+      <div className="panel-body" ref={list}>
         {composing ? (
           <RequestForm
             sample={isDemoOffice}
@@ -536,15 +524,7 @@ export function TaskList({
   );
 }
 
-export function Feed({
-  feed,
-  office,
-  onOpenTask,
-}: {
-  feed: FeedEntry[];
-  office: Office;
-  onOpenTask: (taskId: string) => void;
-}) {
+export function Feed({ feed, office }: { feed: FeedEntry[]; office: Office }) {
   return (
     <div className="panel" id="feed">
       <div className="panel-head">
@@ -554,7 +534,7 @@ export function Feed({
         {feed.length === 0 && <div className="empty">Nothing yet.</div>}
         {feed.map((e) => (
           <div key={e.id} className="feed-row">
-            <TaskText office={office} text={e.text} onOpen={onOpenTask} />
+            <TaskText office={office} text={e.text} />
           </div>
         ))}
       </div>
@@ -582,11 +562,8 @@ export function Inspector({
   setup,
   keepRecord,
   agentLoad,
-  onOpenTask,
   onClear,
 }: {
-  /** Opens another task, when one is named in a thread. */
-  onOpenTask: (taskId: string) => void;
   /** What each agent is on and has waiting, to say who is at work on a task. */
   agentLoad: OfficeView["agentLoad"];
   /** Adds a line to a room's records. Null when the viewer may not manage rooms. */
@@ -615,6 +592,8 @@ export function Inspector({
   if (task) {
     return (
       <TaskInspector
+        // A task opened from elsewhere starts at its top, not where the last one was left.
+        key={task.id}
         office={office}
         ctx={ctx}
         task={task}
@@ -622,7 +601,6 @@ export function Inspector({
         hidden={hiddenMessages[task.id] ?? 0}
         dispatch={dispatch}
         keepRecord={keepRecord}
-        onOpenTask={onOpenTask}
         atWork={atWorkOn(task.id, agentLoad, (id) => office.participants.find((p) => p.id === id)?.displayName ?? "An agent")}
         onClear={onClear}
       />
@@ -708,10 +686,8 @@ function TaskInspector({
   dispatch,
   keepRecord,
   atWork,
-  onOpenTask,
   onClear,
 }: {
-  onOpenTask: (taskId: string) => void;
   office: Office;
   ctx: AccessContext;
   task: Task;
@@ -892,7 +868,7 @@ function TaskInspector({
                 <div className="meta">
                   {openQuestion.fromId === "system" ? "The office" : name(openQuestion.fromId as string)} is waiting
                 </div>
-                <TaskText office={office} text={openQuestion.body} onOpen={onOpenTask} current={task.id} />
+                <TaskText office={office} text={openQuestion.body} />
               </div>
               {(openQuestion.options ?? ["Confirmed"]).map((opt) => (
                 <button
@@ -929,7 +905,7 @@ function TaskInspector({
             <fieldset className="moves" disabled={!mayManageAccess && !mayReassign}>
               <div className="note esc">
                 <div className="meta">{name(escalation.fromId as string)} is blocked</div>
-                <TaskText office={office} text={escalation.body} onOpen={onOpenTask} current={task.id} />
+                <TaskText office={office} text={escalation.body} />
               </div>
               <button
                 className="btn primary"
@@ -1183,7 +1159,7 @@ function TaskInspector({
             </div>
           )}
           {thread.map((m) => (
-            <ThreadLine key={m.id} message={m} name={name} keepRecord={keepRecord} rooms={recordRooms} office={office} onOpenTask={onOpenTask} />
+            <ThreadLine key={m.id} message={m} name={name} keepRecord={keepRecord} rooms={recordRooms} office={office} />
           ))}
         </div>
       </div>
@@ -1271,7 +1247,6 @@ function ThreadLine({
   keepRecord,
   rooms,
   office,
-  onOpenTask,
 }: {
   message: Message;
   name: (id: string) => string;
@@ -1279,7 +1254,6 @@ function ThreadLine({
   /** The rooms a record can be kept in. */
   rooms: Room[];
   office: Office;
-  onOpenTask: (taskId: string) => void;
 }) {
   const [keeping, setKeeping] = useState(false);
   const [keptIn, setKeptIn] = useState<string | null>(null);
@@ -1314,7 +1288,7 @@ function ThreadLine({
           </button>
         )}
       </div>
-      <TaskText office={office} text={message.body} onOpen={onOpenTask} current={message.taskId} />
+      <TaskText office={office} text={message.body} />
       {keepable && keeping && keepRecord && (
         <KeepBox
           office={office}

@@ -15,6 +15,7 @@ import { Inbox, inboxCount } from "./Inbox";
 import { InviteDialog } from "./InviteDialog";
 import { Settings } from "./Settings";
 import { taskLabel } from "../lib/taskLabels";
+import { TaskContext } from "./TaskCard";
 
 /** On a phone one section shows at a time. A wide screen shows them all. */
 type Sheet = "office" | "work" | "detail" | "activity";
@@ -140,6 +141,18 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
       : null;
 
   return (
+    <TaskContext.Provider
+      value={{
+        office,
+        agentLoad: view.agentLoad,
+        openTaskId: selectedTaskId,
+        openTask: (id) => {
+          setSelectedTaskId(id);
+          setSelectedPersonId(null);
+          setSheet("detail");
+        },
+      }}
+    >
     <main className="office" data-pending={pending} data-sheet={sheet}>
       <Scene
         office={office}
@@ -220,15 +233,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
             participantAlert={participantAlert}
           />
         ) : (
-          <Feed
-            feed={feed}
-            office={office}
-            onOpenTask={(id) => {
-              setSelectedTaskId(id);
-              setSelectedPersonId(null);
-              setSheet("detail");
-            }}
-          />
+          <Feed feed={feed} office={office} />
         )}
       </div>
 
@@ -248,10 +253,6 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         dispatch={dispatch}
         onTokenOperation={tokenOperation}
         setup={setup}
-        onOpenTask={(id) => {
-          setSelectedTaskId(id);
-          setSelectedPersonId(null);
-        }}
         agentLoad={view.agentLoad}
         keepRecord={
           view.viewer.permissions.includes("manage_rooms")
@@ -353,5 +354,6 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         />
       )}
     </main>
+    </TaskContext.Provider>
   );
 }

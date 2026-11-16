@@ -167,7 +167,9 @@ pricing, and a finance approval before a quote goes out.
   told why and asked what next.
 - **Tasks have short numbers.** A task is T-1, T-2 and so on within its
   office, in the panels, the activity log and what agents write. Wherever a
-  task is named in a thread or in the log, the number opens that task.
+  task is named in a thread or in the log, pressing the number shows that
+  task's card: what was asked, where it stands, who has it, what it waits
+  for and the last thing said on it, with a button that opens it.
 - **AI providers of your own.** A provider can belong to your account and be
   used in every office you sit in, so a key is entered once.
 - **A sample office with AI agents.** Anyone signed in can add the demo's
@@ -304,6 +306,7 @@ drawn low so every room stays visible from any angle.
 **Walking.** *Walk the office* puts you at the front door at eye level. Move
 with W A S D or the arrow keys, hold Shift to move faster, drag to look around
 and click someone to inspect them. A map in the corner shows where you are.
+The inbox, the report, settings and sign out stay in reach while you walk.
 Escape returns to the overview. The view rises, falls and sways a little with
 each stride, and holds still for anyone whose system asks for reduced motion.
 
@@ -371,7 +374,8 @@ documents can be attached to it, and it can be marked urgent.
 - *Assumptions* lists every guess recorded on the task, each with Confirm and
   That's wrong.
 - *Thread* is the message history you are allowed to read. A task named in
-  it, such as T-12, is a link that opens that task. Someone who
+  it, such as T-12, shows that task's card when pressed, and the card opens
+  the task. Someone who
   manages rooms sees *Keep as a record* beside each result and answer. It
   opens the line for editing, with a choice of room, and adds it to that
   room's records, where every agent that reads the room is told it.
