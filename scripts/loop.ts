@@ -92,6 +92,8 @@ async function main(): Promise<void> {
   const ledger = `p-ledger-${suffix}`;
   const steps: string[] = [];
   let failAt: string | null = null;
+  /** How many times a colleague looking at a note fails before it answers. */
+  let failNotes = 0;
   let slowFor: (input: AgentStepInput) => number = () => 0;
   const atOnce = new Map<string, number>();
   let most = 0;
@@ -111,6 +113,10 @@ async function main(): Promise<void> {
         atOnce.set(who, (atOnce.get(who) ?? 0) - 1);
       }
       if (failAt === input.stage) throw new Error(`${who} could not answer: the provider could not be reached.`);
+      if (input.attending && failNotes > 0) {
+        failNotes--;
+        throw new Error(`${who} could not answer: the provider could not be reached.`);
+      }
       if (input.attending) {
         return { statusNote: "Checked the credit as asked.", questions: [], assumptions: [], notes: [{ toParticipantId: input.attending.fromId, body: "Credit is fine." }] };
       }
@@ -233,6 +239,45 @@ async function main(): Promise<void> {
   expect("once the provider is back, the office asks the agent again", service.carryOnIdleWork(), 1);
   await service.agentsIdle();
   expect("and the task goes on from there with the step taken", `${taskOf(service.getView(await owner()), "Order, plain").stage} ${steps.join(" ")}`, "review Iris:intake Atlas:planning Atlas:planning Ledger:note Atlas:planning Vera:execution Ledger:review");
+
+  console.log("\n-- a colleague's part that fails --");
+  const written = (title: string) =>
+    (all(db, "SELECT kind, tries FROM pending_work WHERE task_id = ?", taskOf(view, title).id) as { kind: string; tries: number }[])
+      .map((r) => `${r.kind} ${r.tries}`)
+      .join(", ");
+  steps.length = 0;
+  failNotes = 1;
+  view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Order, colleague fails", detail: "Two units.", requestedById: "" });
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  expect("the task is not handed on without the colleague's part", taskOf(view, "Order, colleague fails").stage, "planning");
+  expect("what the colleague still owes is written down, with one try used", written("Order, colleague fails"), "attend 1");
+  expect("and the log says it will be asked again", view.feed.some((f) => f.text.includes("could not carry") && f.text.includes("The office will ask again in a minute.")), true);
+  // The server stops and starts: nothing is left in memory.
+  service.forgetQueues();
+  expect("after a restart the office finds the work again", service.carryOnIdleWork() >= 1, true);
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  expect("the colleague does its part, and the task goes on with it", `${taskOf(view, "Order, colleague fails").stage} ${steps.filter((x) => x === "Ledger:note").length}`, "review 2");
+  expect("nothing is left written down", written("Order, colleague fails"), "");
+
+  steps.length = 0;
+  failNotes = 99;
+  view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Order, colleague keeps failing", detail: "Two units.", requestedById: "" });
+  await service.agentsIdle();
+  for (let i = 0; i < 4; i++) {
+    service.carryOnIdleWork();
+    await service.agentsIdle();
+  }
+  view = service.getView(await owner());
+  expect("after three tries the colleague is not asked again", `${steps.filter((x) => x === "Ledger:note").length} ${written("Order, colleague keeps failing")}`, "3 attend 3");
+  expect("the task stays where it is", taskOf(view, "Order, colleague keeps failing").stage, "planning");
+  expect("and the log says a person has to act", view.feed.some((f) => f.text.includes("That was try 3 of 3, so the task stays where it is until a person acts on it.")), true);
+  failNotes = 0;
+  view = await service.applyAction(await owner(), { type: "SET_URGENT", taskId: taskOf(view, "Order, colleague keeps failing").id, urgent: true, byId: "" });
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  expect("once a person acts on the task it is tried again and goes on", taskOf(view, "Order, colleague keeps failing").stage, "review");
 
   console.log("\n-- each agent works through a queue of its own --");
   steps.length = 0;

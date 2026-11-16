@@ -543,7 +543,7 @@ export async function applyAction(session: Session, requested: Action): Promise<
           notes: result.notes,
         });
       });
-      carryOn(before.office.id, [...result.wake, ...deferred], changedTasks(before.office, result.state.office), true);
+      carryOn(before.office.id, [...result.wake, ...deferred], changedTasks(before.office, result.state.office), true, true);
       return { view: buildView(db, result.state, session) };
     });
     if (!("needed" in outcome)) return outcome.view;
@@ -639,6 +639,11 @@ export function pauseAgents(paused: boolean): void {
   loopState().paused = paused;
 }
 
+/** For tests: lose everything held in memory, as a restart of the server would. */
+export function forgetQueues(): void {
+  loopState().offices.clear();
+}
+
 /** Resolves once no agent is working in the background. */
 export async function agentsIdle(): Promise<void> {
   const state = loopState();
@@ -721,10 +726,20 @@ export function carryOnIdleWork(): number {
   if (state.paused) return 0;
   let picked = 0;
   for (const { id } of all<{ id: string }>(db, "SELECT id FROM offices WHERE id <> ?", DEMO_OFFICE_ID)) {
+    // First whatever is written down and not in anyone's hands: a piece of
+    // work that failed and has tries left, or that a restart interrupted.
+    const back = recover(id, workOf(id));
+    if (back > 0) {
+      picked += back;
+      stir(id);
+    }
     if (busy(state.offices.get(id))) continue;
     const loaded = loadEngineState(db, id);
     if (!loaded) continue;
-    const idle = loaded.office.tasks.filter((t) => (idlePushes.get(t.id) ?? 0) < IDLE_PUSHES);
+    // A task with anything still written down for an agent is left alone
+    // here: either it was just put back above, or its tries have run out.
+    const held = new Set(outstanding(id));
+    const idle = loaded.office.tasks.filter((t) => !held.has(t.id) && (idlePushes.get(t.id) ?? 0) < IDLE_PUSHES);
     // An agent that owes a step and has nothing queued is asked again. This
     // is also how a step that failed for a passing reason gets another try.
     const owing = idle.find(
@@ -761,10 +776,11 @@ function startClock(): void {
 
 /**
  * Give an office's agents what an action left for them, and follow the tasks
- * it touched. `afresh` is set when a person acted: whatever kept those tasks
- * from moving is forgotten, and they may take their full number of steps again.
+ * it touched. `afresh` forgets whatever kept those tasks from moving and lets
+ * them take their full number of steps again. `byAPerson` also gives work that
+ * was given up on its tries back.
  */
-function carryOn(officeId: string, wakes: Pending[], taskIds: string[], afresh = false): void {
+function carryOn(officeId: string, wakes: Pending[], taskIds: string[], afresh = false, byAPerson = false): void {
   if (loopState().paused || (wakes.length === 0 && taskIds.length === 0)) return;
   const work = workOf(officeId);
   for (const id of taskIds) {
@@ -773,13 +789,94 @@ function carryOn(officeId: string, wakes: Pending[], taskIds: string[], afresh =
       work.stuck.delete(id);
       work.steps.delete(id);
     }
+    // A person has acted on the task, so whatever was given up on is tried
+    // again. The office's own pushes do not earn that: they are the tries.
+    if (byAPerson) run(officeDatabase(), "UPDATE pending_work SET tries = 0 WHERE task_id = ?", id);
   }
-  for (const wake of wakes) hand(work, wake);
+  for (const wake of wakes) hand(officeId, work, wake);
+  if (byAPerson) recover(officeId, work);
   stir(officeId);
 }
 
+// What agents have been given is also written down, one row per item, until
+// it is done. The queues above are how the work is carried out. The rows are
+// how it is found again after a failure or a restart, and how the office
+// knows that a task still has a colleague's part outstanding.
+
+/** How often a piece of work is tried before it is left for a person. */
+const TRIES = 3;
+
+const rowKey = (wake: Wake): [string, string, string, string] => [
+  wake.participantId,
+  wake.taskId,
+  wake.kind,
+  wake.kind === "attend" ? wake.noteId : "",
+];
+
+function writeDown(officeId: string, wake: Wake): void {
+  run(
+    officeDatabase(),
+    `INSERT OR IGNORE INTO pending_work (office_id, participant_id, task_id, kind, note_id, after_action, tries, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+    officeId,
+    ...rowKey(wake),
+    wake.afterAction ? 1 : 0,
+    Date.now(),
+  );
+}
+
+function cross(wake: Wake, outcome: "done" | "failed"): void {
+  run(
+    officeDatabase(),
+    outcome === "done"
+      ? "DELETE FROM pending_work WHERE participant_id = ? AND task_id = ? AND kind = ? AND note_id = ?"
+      : "UPDATE pending_work SET tries = tries + 1 WHERE participant_id = ? AND task_id = ? AND kind = ? AND note_id = ?",
+    ...rowKey(wake),
+  );
+}
+
+/** Tasks that still have something written down for an agent, done or given up on. */
+function outstanding(officeId: string): string[] {
+  return all<{ task_id: string }>(
+    officeDatabase(),
+    "SELECT DISTINCT task_id FROM pending_work WHERE office_id = ?",
+    officeId,
+  ).map((r) => r.task_id);
+}
+
+/**
+ * Put back on the queues whatever is written down and is neither queued nor
+ * being worked on: work that failed and has tries left, and work that was in
+ * hand when the server stopped. Returns how many pieces it put back.
+ */
+function recover(officeId: string, work: OfficeWork): number {
+  const rows = all<{ participant_id: string; task_id: string; kind: "resume" | "attend"; note_id: string; after_action: number }>(
+    officeDatabase(),
+    "SELECT participant_id, task_id, kind, note_id, after_action FROM pending_work WHERE office_id = ? AND tries < ? ORDER BY created_at",
+    officeId,
+    TRIES,
+  );
+  let put = 0;
+  for (const r of rows) {
+    const wake: Wake =
+      r.kind === "attend"
+        ? { kind: "attend", taskId: r.task_id, participantId: r.participant_id, noteId: r.note_id, ...(r.after_action ? { afterAction: true } : {}) }
+        : { kind: "resume", taskId: r.task_id, participantId: r.participant_id, ...(r.after_action ? { afterAction: true } : {}) };
+    const queue = work.queues.get(wake.participantId) ?? [];
+    if (work.current.get(wake.participantId) === wake.taskId || queue.some((w) => same(w, wake))) continue;
+    queue.push(wake);
+    work.queues.set(wake.participantId, queue);
+    work.following.add(wake.taskId);
+    put++;
+  }
+  return put;
+}
+
+const same = (a: Wake, b: Wake): boolean =>
+  a.kind === b.kind && a.taskId === b.taskId && a.participantId === b.participantId && (a.kind !== "attend" || (b.kind === "attend" && a.noteId === b.noteId));
+
 /** Put one piece of work where it belongs: on an agent's queue, or on the office's own desk. */
-function hand(work: OfficeWork, next: Pending): void {
+function hand(officeId: string, work: OfficeWork, next: Pending): void {
   work.following.add(next.taskId);
   if (next.kind === "advance" || next.kind === "wake") {
     work.desk.push(next);
@@ -787,13 +884,11 @@ function hand(work: OfficeWork, next: Pending): void {
   }
   // Something new for an agent to look at is a reason to try the task again.
   work.stuck.delete(next.taskId);
+  writeDown(officeId, next);
   const queue = work.queues.get(next.participantId) ?? [];
   // Two answers arriving for the same agent are one reason to take the step
   // again, with both in front of it.
-  const already = queue.some(
-    (w) => w.kind === next.kind && w.taskId === next.taskId && (w.kind !== "attend" || (next.kind === "attend" && w.noteId === next.noteId)),
-  );
-  if (!already) queue.push(next);
+  if (!queue.some((w) => same(w, next))) queue.push(next);
   work.queues.set(next.participantId, queue);
 }
 
@@ -827,7 +922,14 @@ async function workThrough(officeId: string, agentId: string): Promise<void> {
       did = true;
       work.current.set(agentId, next.taskId);
       if (next.kind === "attend") work.attending.set(agentId, next.taskId);
-      await carryOut(officeId, next).catch((error) => console.error("An agent's step failed.", error));
+      const outcome = await carryOut(officeId, next).catch((error): "failed" => {
+        console.error("An agent's step failed.", error);
+        return "failed";
+      });
+      // The same thing may have been asked for again while this was under
+      // way. It stays written down until that one is done too.
+      const again = (work.queues.get(agentId) ?? []).some((w) => same(w, next));
+      if (outcome === "failed" || !again) cross(next, outcome);
       work.current.delete(agentId);
       work.attending.delete(agentId);
       stir2(officeId, work);
@@ -908,7 +1010,9 @@ function stir2(officeId: string, work: OfficeWork): void {
 function handOn(officeId: string, work: OfficeWork): Pending | null {
   const loaded = loadEngineState(officeDatabase(), officeId);
   if (!loaded) return null;
-  const inHand = new Set<string>(work.current.values());
+  // A task with anything outstanding for an agent stays where it is. That
+  // covers a colleague's part that failed, until it is done or a person steps in.
+  const inHand = new Set<string>([...work.current.values(), ...outstanding(officeId)]);
   for (const queue of work.queues.values()) for (const item of queue) inHand.add(item.taskId);
   const taskId = readyToHandOn(loaded.office, work.following, new Set([...work.stuck, ...inHand]));
   return taskId ? { kind: "advance", taskId } : null;
@@ -1020,27 +1124,30 @@ async function fetch(real: AgentRuntime, fetched: Fetched, needed: Needed): Prom
 const TURNS = 8;
 
 /** Carry out one piece of background work, and pass on what it leaves for others. */
-async function carryOut(officeId: string, next: Pending): Promise<void> {
+async function carryOut(officeId: string, next: Pending): Promise<"done" | "failed"> {
   const work = workOf(officeId);
   const fetched: Fetched = { performs: new Map() };
   const real = runtimeFor(officeDatabase(), officeId);
 
   for (let turn = 0; turn < TURNS; turn++) {
     const outcome = await inTurn(async () => takeTurn(officeId, work, next, real, fetched, turn >= TURNS - 3));
-    if (outcome === null) return;
+    // Work that no longer applies, such as a wake for a task since handed on, is done with.
+    if (outcome === null) return "done";
+    if (outcome === "failed") return "failed";
     if (!(outcome instanceof Needed)) {
       for (const id of outcome.taskIds) work.following.add(id);
-      for (const wake of outcome.wake) hand(work, wake);
+      for (const wake of outcome.wake) hand(officeId, work, wake);
       stir2(officeId, work);
-      return;
+      return "done";
     }
     try {
       await fetch(real, fetched, outcome);
     } catch (error) {
       await inTurn(async () => leaveForAPerson(officeId, work, next, error));
-      return;
+      return "failed";
     }
   }
+  return "failed";
 }
 
 /** The task and the one acting on it for a piece of background work, or null when it no longer applies. */
@@ -1081,7 +1188,7 @@ async function takeTurn(
   real: AgentRuntime,
   fetched: Fetched,
   lenient: boolean,
-): Promise<{ wake: Wake[]; taskIds: string[] } | Needed | null> {
+): Promise<{ wake: Wake[]; taskIds: string[] } | Needed | "failed" | null> {
   const db = officeDatabase();
   const loaded = loadEngineState(db, officeId);
   if (!loaded) return null;
@@ -1102,7 +1209,7 @@ async function takeTurn(
   } catch (error) {
     if (error instanceof Needed) return error;
     leaveForAPerson(officeId, work, next, error);
-    return null;
+    return "failed";
   }
   work.steps.set(task.id, (work.steps.get(task.id) ?? 0) + 1);
   const moved = result.state.office.tasks.find((t) => t.id === task.id);
@@ -1132,13 +1239,29 @@ function leaveForAPerson(officeId: string, work: OfficeWork, next: Pending, erro
   work.stuck.add(next.taskId);
   if (!loaded || !subject) return;
   const { task, actor, action } = subject;
+  // This failure is about to be counted. One short of the limit means it is the last try.
+  const tried =
+    next.kind === "resume" || next.kind === "attend"
+      ? (get<{ tries: number }>(
+          db,
+          "SELECT tries FROM pending_work WHERE participant_id = ? AND task_id = ? AND kind = ? AND note_id = ?",
+          ...rowKey(next),
+        )?.tries ?? 0) + 1
+      : 0;
   recordAudit(db, {
     officeId,
     officeClock: loaded.clockStepMinutes === 0 ? Date.now() : loaded.now,
     actorId: actor.id,
     actionType: action.type,
     subject: { ...NO_SUBJECT, taskId: task.id, subjectParticipantId: actor.id, roomId: task.roomId },
-    notes: [`${actor.displayName} could not carry ${task.id} forward: ${error instanceof Error ? error.message : String(error)}`],
+    notes: [
+      `${actor.displayName} could not carry ${task.id} forward: ${error instanceof Error ? error.message : String(error)}` +
+        (tried >= TRIES
+          ? ` That was try ${tried} of ${TRIES}, so the task stays where it is until a person acts on it.`
+          : tried > 0
+            ? " The office will ask again in a minute."
+            : ""),
+    ],
   });
 }
 

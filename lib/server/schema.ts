@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -353,6 +353,23 @@ CREATE TABLE tasks (
   -- 1 when a person marked the task urgent, which puts it ahead on every queue.
   urgent       INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1)),
   CHECK ((wait_until IS NULL) = (wait_reason IS NULL))
+) STRICT;
+
+-- What an agent has been given and has not finished: taking its step on a
+-- task, or looking at a note. A row is written when the work is handed out
+-- and removed when it is done, so it can be found again after a failure or a
+-- restart. A task with a row here is not handed on to the next stage.
+CREATE TABLE pending_work (
+  office_id      TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  participant_id TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  task_id        TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL CHECK (kind IN ('resume', 'attend')),
+  -- The note an agent is to look at. Empty when it takes its own step.
+  note_id        TEXT NOT NULL DEFAULT '',
+  after_action   INTEGER NOT NULL DEFAULT 0 CHECK (after_action IN (0, 1)),
+  tries          INTEGER NOT NULL DEFAULT 0,
+  created_at     INTEGER NOT NULL,
+  PRIMARY KEY (participant_id, task_id, kind, note_id)
 ) STRICT;
 
 -- ---------------------------------------------------------------- access
@@ -1117,5 +1134,24 @@ ALTER TABLE tasks ADD COLUMN step_owed INTEGER NOT NULL DEFAULT 0 CHECK (step_ow
   // Version 15 lets a person mark a task urgent.
   14: /* sql */ `
 ALTER TABLE tasks ADD COLUMN urgent INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0, 1));
+`,
+  // Version 16 writes down what each agent has been given, until it is done.
+  15: /* sql */ `
+-- What an agent has been given and has not finished: taking its step on a
+-- task, or looking at a note. A row is written when the work is handed out
+-- and removed when it is done, so it can be found again after a failure or a
+-- restart. A task with a row here is not handed on to the next stage.
+CREATE TABLE pending_work (
+  office_id      TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  participant_id TEXT NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  task_id        TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL CHECK (kind IN ('resume', 'attend')),
+  -- The note an agent is to look at. Empty when it takes its own step.
+  note_id        TEXT NOT NULL DEFAULT '',
+  after_action   INTEGER NOT NULL DEFAULT 0 CHECK (after_action IN (0, 1)),
+  tries          INTEGER NOT NULL DEFAULT 0,
+  created_at     INTEGER NOT NULL,
+  PRIMARY KEY (participant_id, task_id, kind, note_id)
+) STRICT;
 `,
 };
