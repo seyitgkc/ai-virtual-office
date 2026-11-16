@@ -10,7 +10,7 @@
  */
 import type { Server } from "node:http";
 import { SUPPLIER } from "../manifests.ts";
-import { cad, dayFromNow, need, needNumber, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
+import { cad, dayFromNow, need, needNumber, orNone, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
 
 interface Item {
   sku: string;
@@ -143,9 +143,12 @@ export function supplier(apiKey: string): Server {
         (i) =>
           `Product ${i.sku}, ${i.name}: ${cad(i.unitCost)} each at cost, smallest order ${i.minimumOrder}, cases of ${i.caseSize}, ${i.leadDays} days to arrive. ${i.ready} can ship from the current run; more follows in ${i.nextRunDays} days.`,
       ),
-      ...orders.slice(0, 8).map(
+      ...orNone(
+        orders.slice(0, 8).map(
         (o) =>
           `Purchase order ${o.id} (${o.status}${o.expedited ? ", by air" : ""}): ${o.quantity} x ${o.sku} to ${o.branch}, ${cad(o.cost)}. ${o.shipsNow} arrive on ${o.arrivesOn}${o.backordered > 0 ? `, ${o.backordered} backordered until ${o.backorderArrivesOn}` : ""}.`,
+      ),
+        "No purchase orders are on record.",
       ),
     ],
     operations: { raise_purchase_order: raise, expedite_order: expedite, cancel_purchase_order: cancel },

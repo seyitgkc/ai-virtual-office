@@ -86,6 +86,12 @@ export const cad = (amount: number): string =>
 /** A number with its unit: 1 day, 3 days. */
 export const count = (n: number, unit: string): string => `${n} ${unit}${n === 1 ? "" : "s"}`;
 
+/**
+ * The lines of a list, or one line saying there are none. A reader told that
+ * nothing is on record does not go on believing something it heard earlier.
+ */
+export const orNone = (lines: string[], none: string): string[] => (lines.length > 0 ? lines : [none]);
+
 /** A calendar date some days from now, as YYYY-MM-DD. */
 export const dayFromNow = (days: number): string => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 

@@ -9,7 +9,7 @@
  */
 import type { Server } from "node:http";
 import { CARRIER } from "../manifests.ts";
-import { cad, count, need, needNumber, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
+import { cad, count, need, orNone, needNumber, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
 
 interface ServiceLevel {
   code: string;
@@ -103,8 +103,11 @@ export function carrier(apiKey: string): Server {
       ...SERVICES.map(
         (s) => `Service "${s.code}" (${s.name}): ${cad(s.baseCharge)} plus ${cad(s.perKg)} per kg, ${count(s.transitDays, "day")} in transit.`,
       ),
-      ...shipments.slice(0, 8).map(
+      ...orNone(
+        shipments.slice(0, 8).map(
         (s) => `Shipment ${s.id} (${s.status}): reference ${s.reference}, ${s.from} to ${s.to}, ${s.weightKg} kg by ${s.service}, ${cad(s.cost)}.`,
+      ),
+        "No shipments are on record.",
       ),
     ],
     operations: { book_shipment: book, cancel_shipment: cancel },

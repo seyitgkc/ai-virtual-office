@@ -10,7 +10,7 @@
  */
 import type { Server } from "node:http";
 import { SERVICE_DESK } from "../manifests.ts";
-import { count, dayFromNow, need, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
+import { count, dayFromNow, need, orNone, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
 
 interface Unit {
   serial: string;
@@ -152,9 +152,12 @@ export function serviceDesk(apiKey: string): Server {
     records: () => [
       `Warranty is ${WARRANTY_MONTHS} months from delivery. Technicians work Monday to Friday, ${VISITS_PER_DAY} visits a day, with a day's notice.`,
       ...units.map((u) => `Unit ${u.serial}: ${u.sku}, sold to ${u.account}, delivered ${delivered(u)}, ${warranty(u)}.`),
-      ...tickets.slice(0, 8).map(
+      ...orNone(
+        tickets.slice(0, 8).map(
         (t) =>
           `Ticket ${t.id} (${t.status}, ${t.priority}): ${t.account}, unit ${t.serial}, "${t.problem}"${t.returnNumber ? `, return ${t.returnNumber}` : ""}${t.visitOn ? `, visit on ${t.visitOn}` : ""}${t.resolution ? `, resolved: ${t.resolution}` : ""}.`,
+      ),
+        "No tickets are on record.",
       ),
     ],
     operations: { open_ticket: open, authorize_return: authorizeReturn, schedule_visit: scheduleVisit, close_ticket: close },

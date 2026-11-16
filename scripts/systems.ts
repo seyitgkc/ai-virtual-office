@@ -114,6 +114,7 @@ async function main(): Promise<void> {
   console.log("\n-- the supplier portal --");
   const factory = supplier(key);
   const factoryUrl = await listen(factory);
+  expect("a service with nothing of a kind on record says so", (await api(`${factoryUrl}/v1/summary`)).data.lines.includes("No purchase orders are on record."), true);
   const purchase = (sku: string, quantity: number, branch = "Laval") => api(`${factoryUrl}/v1/purchase-orders`, "POST", { sku, quantity, branch });
   expect("an order below the minimum is refused", (await purchase("GREE-CU-24", 2)).data.error.code, "below_minimum");
   expect("an order that is not whole cases is refused", (await purchase("GREE-MZ-12", 7)).data.error.code, "not_whole_cases");

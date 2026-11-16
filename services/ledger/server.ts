@@ -10,7 +10,7 @@
  */
 import type { Server } from "node:http";
 import { LEDGER } from "../manifests.ts";
-import { cad, dayFromNow, need, needNumber, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
+import { cad, dayFromNow, need, orNone, needNumber, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
 
 interface Account {
   id: string;
@@ -147,9 +147,15 @@ export function ledger(apiKey: string): Server {
         (a) =>
           `Account ${a.id}, ${a.name}: tier ${a.tier}, net ${a.termsDays} days, ${standing(a)}, ${a.latePayments === 0 ? "pays on time" : `${a.latePayments} late payment${a.latePayments === 1 ? "" : "s"} this year`}${a.onHold ? `. ON CREDIT HOLD: ${a.onHold}` : ""}.`,
       ),
-      ...invoices.slice(0, 8).map((i) => `Invoice ${i.id}: ${i.account}, for ${i.reference}, ${cad(i.total)} due on ${i.dueOn}.`),
-      ...payments.slice(0, 8).map(
+      ...orNone(
+        invoices.slice(0, 8).map((i) => `Invoice ${i.id}: ${i.account}, for ${i.reference}, ${cad(i.total)} due on ${i.dueOn}.`),
+        "No invoices are on record.",
+      ),
+      ...orNone(
+        payments.slice(0, 8).map(
         (p) => `Payment ${p.id}: ${cad(p.amount)} from ${p.account} on ${p.on}${p.released ? ", which released its credit hold" : ""}.`,
+      ),
+        "No payments are on record.",
       ),
     ],
     operations: { raise_invoice: raiseInvoice, record_payment: recordPayment, set_credit_hold: setHold },

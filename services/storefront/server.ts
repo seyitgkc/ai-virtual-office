@@ -9,7 +9,7 @@
  */
 import type { Server } from "node:http";
 import { STOREFRONT } from "../manifests.ts";
-import { cad, need, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
+import { cad, need, orNone, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
 
 interface Product {
   sku: string;
@@ -155,7 +155,10 @@ export function storefront(apiKey: string): Server {
         const stock = Object.entries(p.stock).map(([branch, quantity]) => `${branch} ${quantity}`).join(", ");
         return `Product ${p.sku}, ${p.name}: list price ${cad(p.listPrice)}, ${p.weightKg} kg each. In stock: ${stock}.`;
       }),
-      ...orders.slice(0, 8).map((o) => `Order ${o.id} (${o.status}) ${describe(o)}.`),
+      ...orNone(
+        orders.slice(0, 8).map((o) => `Order ${o.id} (${o.status}) ${describe(o)}.`),
+        "No orders are on record.",
+      ),
     ],
     operations: { place_order: placeOrder, cancel_order: cancelOrder },
     reads: { "/v1/products": () => ({ products }), "/v1/orders": () => ({ orders: orders.slice(0, 50) }) },
