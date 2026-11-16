@@ -5,6 +5,7 @@
  * the sample office built on one. Models are scripted stand-ins, so nothing
  * leaves the machine. Run: npx tsx scripts/loop.ts
  */
+import { atWorkOn } from "../lib/agentState";
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -289,7 +290,10 @@ async function main(): Promise<void> {
   expect("a click does not wait for a model", Date.now() - began < 300, true);
   expect("the task is with its agent, who owes the first step", `${taskOf(view, "Order, quick").stage} ${taskOf(view, "Order, quick").owed}`, "intake true");
   const iris = view.office.participants.find((p) => p.displayName === "Iris")!.id;
-  expect("the agent is on one task with the other two waiting", JSON.stringify(view.agentLoad[iris] ?? null), JSON.stringify({ taskId: taskOf(view, "Order, slow one").id, waiting: 2 }));
+  expect("the agent is on one task with the other two waiting", JSON.stringify(view.agentLoad[iris] ?? null), JSON.stringify({ taskId: taskOf(view, "Order, slow one").id, forNote: false, waiting: 2, queued: [taskOf(view, "Order, slow two").id, taskOf(view, "Order, quick").id] }));
+  const nameOf = (id: string): string => view.office.participants.find((p) => p.id === id)?.displayName ?? id;
+  expect("the task in hand says who is on it", atWorkOn(taskOf(view, "Order, slow one").id, view.agentLoad, nameOf).join(" "), "Iris is working on this now.");
+  expect("one behind it says how long the line is", atWorkOn(taskOf(view, "Order, quick").id, view.agentLoad, nameOf).join(" "), "Iris takes this up after 2 other tasks.");
   // While agents are in the middle of slow steps, a person's click still goes through at once.
   await new Promise((resolve) => setTimeout(resolve, 500));
   const clicked = Date.now();

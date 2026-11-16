@@ -456,6 +456,12 @@ async function main(): Promise<void> {
   expect("but what the reviewer found outstanding is said, with how to make it wait", late.office.messages.at(-1)!.body.includes("still to do on 15 January 2027: The second order is placed then. A task cannot wait at this stage. Send it back"), true);
   const spoken = readReply(JSON.stringify({ statusNote: "Shipped five.", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null, wait: { until: "2027-01-15T00:00:00Z", reason: "Stock arrives." } }));
   expect("a wait in a model's own reply survives being read", "step" in spoken ? JSON.stringify(toStepResult(spoken.step, vera).wait) : "unread", JSON.stringify({ until: "2027-01-15", reason: "Stock arrives." }));
+  const longNote = Array.from({ length: 110 }, (_, i) => `word${i}`).join(" ");
+  const wordy2 = readReply(JSON.stringify({ statusNote: "", questions: [], assumptions: [], needs: [], actions: [], notes: [{ to: "p-atlas", body: longNote }], output: null, wait: null }));
+  expect("a note of over a hundred words reaches a colleague whole", "step" in wordy2 ? toStepResult(wordy2.step, vera).notes?.[0]?.body : "unread", longNote);
+  const endless = readReply(JSON.stringify({ statusNote: "", questions: [], assumptions: [], needs: [], actions: [], notes: [{ to: "p-atlas", body: "x".repeat(3000) }], output: null, wait: null }));
+  expect("and one with no end is cut", "step" in endless ? toStepResult(endless.step, vera).notes?.[0]?.body.length : "unread", 900);
+  expect("agents are told how long a note may be", SYSTEM_PROMPT.includes("in at most 120 words"), true);
   const without = readReply(JSON.stringify({ statusNote: "Shipped five.", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null }));
   expect("and a reply that leaves it out is still read", "step" in without ? toStepResult(without.step, vera).wait : "unread", undefined);
   expect("a reply with a day is read", toStepResult({ statusNote: "", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null, wait: { until: " 2027-01-15 ", reason: "Stock arrives." } }, vera).wait?.until, "2027-01-15");

@@ -1,4 +1,5 @@
 import type { AccessScope, Office, Permission, TaskId } from "./model";
+import type { AgentLoad } from "./agentState";
 import type { StandingView } from "./standing";
 
 export interface FeedEntry {
@@ -129,8 +130,12 @@ export interface OfficeView {
   isDemoOffice: boolean;
   /** True while agents are carrying work forward in the background. */
   agentsAtWork: boolean;
-  /** For each agent with work in hand: the task it is on, and how many more wait behind it. */
-  agentLoad: Record<string, { taskId: string | null; waiting: number }>;
+  /**
+   * For each agent with work in hand: the task it is on, whether only to
+   * answer a note there, and the tasks waiting behind it in the order it
+   * will take them.
+   */
+  agentLoad: AgentLoad;
   accessTokens: TokenView[];
   /** Sign-in accounts. Empty unless the viewer manages people. */
   accounts: { participantId: string; email: string; hasPassword: boolean }[];

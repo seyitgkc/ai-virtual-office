@@ -121,3 +121,28 @@ export function statusReply(office: Office, agent: Participant, asker: Participa
       return `${intro} ${where} The last thing I did: ${state.detail}${others}`;
   }
 }
+
+/** What each agent is on and has waiting, as the office reports it. */
+export type AgentLoad = Record<string, { taskId: string | null; forNote: boolean; waiting: number; queued: string[] }>;
+
+/**
+ * Who is at work on a task right now: the agent taking its step, colleagues
+ * answering a note on it, and those who have it waiting behind other work.
+ */
+export function atWorkOn(taskId: string, load: AgentLoad, name: (id: string) => string): string[] {
+  const lines: string[] = [];
+  for (const [id, l] of Object.entries(load)) {
+    if (l.taskId === taskId) lines.push(`${name(id)} is ${l.forNote ? "answering a note on this" : "working on this"} now.`);
+  }
+  for (const [id, l] of Object.entries(load)) {
+    const place = l.queued.indexOf(taskId);
+    if (place < 0 || l.taskId === taskId) continue;
+    const ahead = place + (l.taskId === null ? 0 : 1);
+    lines.push(
+      ahead === 0
+        ? `${name(id)} is about to take this up.`
+        : `${name(id)} takes this up after ${ahead} other ${ahead === 1 ? "task" : "tasks"}.`,
+    );
+  }
+  return lines;
+}

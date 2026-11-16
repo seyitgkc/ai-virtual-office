@@ -665,14 +665,23 @@ function stirred(): void {
 /** Whether agents are working in the background in this office right now. */
 const agentsAtWork = (officeId: string): boolean => busy(loopState().offices.get(officeId));
 
-/** What each agent in an office is on, and how much is waiting behind it. */
-export function agentLoad(officeId: string): Record<string, { taskId: string | null; waiting: number }> {
+/** What each agent in an office is on, and what is waiting behind it. */
+export function agentLoad(officeId: string): OfficeView["agentLoad"] {
   const work = loopState().offices.get(officeId);
-  const load: Record<string, { taskId: string | null; waiting: number }> = {};
+  const load: OfficeView["agentLoad"] = {};
   if (!work) return load;
-  for (const [agent, taskId] of work.current) load[agent] = { taskId, waiting: 0 };
+  for (const [agent, taskId] of work.current) {
+    load[agent] = { taskId, forNote: work.attending.get(agent) === taskId, waiting: 0, queued: [] };
+  }
   for (const [agent, queue] of work.queues) {
-    if (queue.length > 0 || load[agent]) load[agent] = { taskId: load[agent]?.taskId ?? null, waiting: queue.length };
+    if (queue.length === 0 && !load[agent]) continue;
+    const now = load[agent];
+    load[agent] = {
+      taskId: now?.taskId ?? null,
+      forNote: now?.forNote ?? false,
+      waiting: queue.length,
+      queued: queue.map((wake) => wake.taskId),
+    };
   }
   return load;
 }

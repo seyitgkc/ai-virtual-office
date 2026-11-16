@@ -21,7 +21,7 @@ import {
 } from "../lib/model";
 import { dayOf, eligibleOwners, nextStage, roomForStage, stageSpec, type Action } from "../lib/engine";
 import { authorize } from "../lib/policy";
-import { deskState } from "../lib/agentState";
+import { atWorkOn, deskState } from "../lib/agentState";
 import type { DirectLine, FeedEntry, OfficeView, TokenView } from "../lib/view";
 
 const STATUS: Record<TaskStatus, { label: string; accent: string }> = {
@@ -569,8 +569,11 @@ export function Inspector({
   onTokenOperation,
   setup,
   keepRecord,
+  agentLoad,
   onClear,
 }: {
+  /** What each agent is on and has waiting, to say who is at work on a task. */
+  agentLoad: OfficeView["agentLoad"];
   /** Adds a line to a room's records. Null when the viewer may not manage rooms. */
   keepRecord: KeepRecord | null;
   /** What a new office still needs, for whoever is setting it up. */
@@ -604,6 +607,7 @@ export function Inspector({
         hidden={hiddenMessages[task.id] ?? 0}
         dispatch={dispatch}
         keepRecord={keepRecord}
+        atWork={atWorkOn(task.id, agentLoad, (id) => office.participants.find((p) => p.id === id)?.displayName ?? "An agent")}
         onClear={onClear}
       />
     );
@@ -687,6 +691,7 @@ function TaskInspector({
   hidden,
   dispatch,
   keepRecord,
+  atWork,
   onClear,
 }: {
   office: Office;
@@ -697,6 +702,8 @@ function TaskInspector({
   hidden: number;
   dispatch: (a: Action) => void;
   keepRecord: KeepRecord | null;
+  /** Who is working on this task at the moment, one line each. */
+  atWork: string[];
   onClear: () => void;
 }) {
   // A record is kept in a room, so only rooms this person reads are offered.
@@ -820,6 +827,13 @@ function TaskInspector({
               <span>{name(task.requestedById)}</span>
             </div>
           </div>
+          {atWork.length > 0 && (
+            <div className="at-work" aria-live="polite">
+              {atWork.map((line) => (
+                <div key={line}>{line}</div>
+              ))}
+            </div>
+          )}
         </div>
 
         {((task.documents?.length ?? 0) > 0 || (task.closedAt === null && mayAttach.allowed)) && (

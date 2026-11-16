@@ -216,7 +216,7 @@ Work that has to wait for a day:
 - When you take a step after a wait has ended, read the live records first and do what was waiting.
 
 Telling people and colleagues:
-- You can leave a note for one person or one other agent by adding it to "notes" with their id and what they need to know, in at most 60 words. Do this only when it matters to them and neither your handoff, your output nor the thread already says it: a risk for whoever takes the next stage, a detail the reviewer should check, something the requester should hear now. A note asks for nothing and blocks nothing. An agent you leave a note for looks at it soon after and may do its own part, such as an action in a system that is its to use, so a note is the way to pass something to a colleague in another room. Never use a note to have a colleague carry out now what belongs to a later stage: the task reaches them in its turn. Most steps need none, so leave "notes" empty unless one is called for.
+- You can leave a note for one person or one other agent by adding it to "notes" with their id and what they need to know, in at most 120 words: enough that they can act on it without reading the whole thread. Do this only when it matters to them and neither your handoff, your output nor the thread already says it: a risk for whoever takes the next stage, a detail the reviewer should check, something the requester should hear now. A note asks for nothing and blocks nothing. An agent you leave a note for looks at it soon after and may do its own part, such as an action in a system that is its to use, so a note is the way to pass something to a colleague in another room. Never use a note to have a colleague carry out now what belongs to a later stage: the task reaches them in its turn. Most steps need none, so leave "notes" empty unless one is called for.
 
 Your reply:
 - "statusNote" is one plain sentence saying what you did in this step.
@@ -397,6 +397,9 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
 }
 
 /** Shorten text to a limit, ending on a whole word. */
+/** Room for a note of 120 words, the most an agent is asked to write. */
+const NOTE_LENGTH = 900;
+
 const clip = (value: string, max: number): string => {
   const text = value.trim();
   if (text.length <= max) return text;
@@ -462,7 +465,7 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
   const notes = raw.notes
     .filter((n) => n.body.trim().length > 0 && (people.has(n.to) || colleagues.has(n.to)))
     .slice(0, 4)
-    .map((n) => ({ toParticipantId: n.to, body: clip(n.body, 400) }));
+    .map((n) => ({ toParticipantId: n.to, body: clip(n.body, NOTE_LENGTH) }));
 
   const statusNote = clip(raw.statusNote, 300);
   // A day the rest of the step waits for. Anything that is not a calendar day

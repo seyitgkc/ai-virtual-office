@@ -239,6 +239,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         dispatch={dispatch}
         onTokenOperation={tokenOperation}
         setup={setup}
+        agentLoad={view.agentLoad}
         keepRecord={
           view.viewer.permissions.includes("manage_rooms")
             ? (roomId, record) => adminOp({ type: "KEEP_ROOM_RECORD", roomId, record })
