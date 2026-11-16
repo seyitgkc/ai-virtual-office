@@ -101,6 +101,24 @@ const DOOR_WIDTH = 1.4;
 const MIN_ROOM = 4;
 const MAX_ROOM = 24;
 
+/** Names for an agent whose name was left empty. */
+export const AGENT_NAMES = [
+  "Ada", "Arlo", "Basil", "Cleo", "Dara", "Elio", "Esme", "Felix", "Greta", "Hugo",
+  "Ines", "Juno", "Kai", "Lena", "Milo", "Nadia", "Nico", "Orla", "Pia", "Quinn",
+  "Rafa", "Remy", "Sana", "Tess", "Theo", "Uma", "Vito", "Wren", "Yara", "Zeno",
+];
+
+/**
+ * A name nobody in the office has yet. Which one is drawn from the new
+ * agent's id, so the choice varies without this file reaching for chance.
+ */
+function spareName(office: Office, seed: string): string {
+  const taken = new Set(office.participants.map((p) => p.displayName.toLowerCase()));
+  const free = AGENT_NAMES.filter((n) => !taken.has(n.toLowerCase()));
+  const draw = [...seed].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) >>> 0, 7);
+  return free.length > 0 ? free[draw % free.length] : `Agent ${office.participants.length + 1}`;
+}
+
 const named = (value: string, what: string, max = 60): string => {
   const text = value.trim();
   if (text.length < 2 || text.length > max) refuse(`Enter ${what} (2 to ${max} characters).`);
@@ -336,7 +354,8 @@ export function applyAdminOp(
       };
 
     case "ADD_AGENT": {
-      const displayName = named(op.displayName, "the agent's name");
+      const suffix = newId();
+      const displayName = op.displayName.trim() ? named(op.displayName, "the agent's name") : spareName(office, suffix);
       const title = named(op.title, "the agent's title");
       const role = findRole(op.roleId);
       const room = findRoom(op.roomId);
@@ -344,7 +363,6 @@ export function applyAdminOp(
       if (op.agentType !== "ai" && op.agentType !== "playbook") refuse("Choose what kind of agent this is.");
       const spot = freeDeskSpot(floorplan, room.id) ?? refuse(`${room.name} has no space for another desk.`);
 
-      const suffix = newId();
       const desk: Desk = {
         id: `desk-${suffix}`,
         roomId: room.id,
@@ -831,10 +849,13 @@ export function parseAdminOp(input: unknown): AdminOp | null {
     case "SET_AUTO_HANDOFF":
       return typeof o.on === "boolean" ? { type: "SET_AUTO_HANDOFF", on: o.on } : null;
     case "ADD_AGENT":
-      return text(o.displayName) && text(o.title) && text(o.roleId, 60) && text(o.roomId, 60)
+      return (text(o.displayName) || o.displayName === "" || o.displayName === undefined) &&
+        text(o.title) &&
+        text(o.roleId, 60) &&
+        text(o.roomId, 60)
         ? {
             type: "ADD_AGENT",
-            displayName: o.displayName,
+            displayName: text(o.displayName) ? o.displayName : "",
             title: o.title,
             roleId: o.roleId,
             roomId: o.roomId,

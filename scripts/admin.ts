@@ -2,7 +2,7 @@
  * Checks the admin operations: rooms, roles, people and agents, and an office
  * built from nothing. Run: npx tsx scripts/admin.ts
  */
-import { AdminError, applyAdminOp, blankOffice, parseAdminOp, permissionFor, type AdminOp } from "../lib/admin";
+import { AGENT_NAMES, AdminError, applyAdminOp, blankOffice, parseAdminOp, permissionFor, type AdminOp } from "../lib/admin";
 import { reduce } from "../lib/engine";
 import { PlaybookRuntime } from "../lib/playbook";
 import { obstacles, planExtent, roomAt, stepWalker } from "../lib/geometry";
@@ -256,6 +256,14 @@ async function main(): Promise<void> {
   expect("in the room that hosts intake", first.roomId, mainRoom);
   expect("ids it generates carry the office's own tag", first.id, "T-ab12-1");
   expect("an agent with an empty playbook says plainly that it did nothing", run.state.office.messages.some((m) => m.body.includes("has no playbook step for this")), true);
+
+  const unnamed = { type: "ADD_AGENT" as const, displayName: "", title: "Helper", roleId: memberRole, roomId: mainRoom, capabilities: [], agentType: "playbook" as const };
+  const withOne = apply(blank, unnamed, me);
+  const withTwo = apply(withOne, unnamed, me);
+  const drawn = [withOne.participants.at(-1)!.displayName, withTwo.participants.at(-1)!.displayName];
+  expect("an agent added without a name is given one from the list", drawn.every((n) => AGENT_NAMES.includes(n)), true);
+  expect("and no two agents are given the same one", drawn[0] !== drawn[1], true);
+  expect("an empty name passes the check on what the browser sends", parseAdminOp({ ...unnamed })?.type, "ADD_AGENT");
 
   console.log("\n-- untrusted input --");
   expect("unknown operations are rejected", parseAdminOp({ type: "DROP_EVERYTHING" }), null);

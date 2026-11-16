@@ -279,7 +279,12 @@ function AddAgent({
       >
         <label>
           Name
-          <input value={displayName} maxLength={60} onChange={(e) => setDisplayName(e.target.value)} required />
+          <input
+            value={displayName}
+            maxLength={60}
+            placeholder="Leave empty and one is picked"
+            onChange={(e) => setDisplayName(e.target.value)}
+          />
         </label>
         <label>
           Title
