@@ -1583,11 +1583,7 @@ async function runAgent(
 
   // Notes come after anything done in a system, so a note that speaks of an
   // order follows the order in the thread.
-  // An AI agent that has just acted takes the step again with the system's
-  // answer, and tells its colleagues then. A note written before the answer
-  // could only say that something was asked for.
-  const answerComing = acted && !afterAction && participant.agentType === "ai";
-  if (!answerComing) for (const draft of (result.notes ?? []).slice(0, 2)) tell(draft.toParticipantId, draft.body);
+  for (const draft of (result.notes ?? []).slice(0, 2)) tell(draft.toParticipantId, draft.body);
   for (const { to, need } of passedOn.slice(0, 2)) {
     tell(
       to.id,

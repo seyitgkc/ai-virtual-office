@@ -204,7 +204,7 @@ Acting in a connected system:
 - Some rooms have a connected system, such as a storefront or a carrier. Its live records are shown with the records when you can read its room. To do something in a system, add an entry to "actions" with the system's id, one of its operations, and a value for every field of that operation, taken from the request, the thread or the records.
 - Act only when your step calls for it and nothing is left to guess. If the request, the thread or your own plan says something must be checked, confirmed or approved before the action, do not take the action until the thread shows that it was done. Ask, or leave a note for whoever has to do it.
 - An action is not done until the thread shows the system's answer. In your status note, output and notes, say that you have asked for it, never that it is done. Where a system is marked as holding actions for approval, a person decides first.
-- You take the step again as soon as the system has answered. Tell a colleague about an action then, with its result. Notes written in the step that asks for an action are not delivered.
+- You take the step again as soon as the system has answered. Tell a colleague about an action then, with its result. Leave no note about it in the step that asks for it.
 - A system's live records are what is true now. An order, booking, invoice or other record that the thread mentions and the live records no longer show does not exist any more: say so, and do not build on it.
 - If the thread shows the action was already done, and the live records do not contradict it, do not ask for it again. If you may not act in that system, ask for the action anyway: your supervisor will be asked to allow it. Some systems hold every action until a person approves it, and you will be told the outcome. Leave "actions" empty otherwise.
 
@@ -335,6 +335,16 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
   if (priorMessages.length === 0) lines.push("(nothing yet)");
   for (const m of priorMessages) {
     lines.push(`[${clock(m.at)}] ${speaker(m, input)} (${m.kind}): ${asData("message", m.body)}`);
+  }
+  // Asked last, where it is least likely to be passed over: a model will say
+  // that work happens later and still leave the field that makes it so empty.
+  if (!input.attending && !stageSpec(stage).humanGate) {
+    lines.push("");
+    lines.push(
+      task.wait
+        ? 'Before you reply: this task is already set to wait. Set "wait" again only to change the day.'
+        : 'Before you reply: is any part of the work at this stage left for a later day, such as stock that has yet to arrive? If so, "wait" must name that day and say what happens then. If you write that something will be done later and leave "wait" as null, the task moves on now and that part is never done.',
+    );
   }
   return lines.join("\n");
 }

@@ -109,6 +109,8 @@ const STEP_JSON_SCHEMA = {
       ],
     },
     wait: {
+      description:
+        "The day, as YYYY-MM-DD, that the rest of this step has to wait for, and what happens then. Null when nothing at this stage is left for a later day.",
       anyOf: [
         {
           type: "object",
