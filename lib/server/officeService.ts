@@ -8,7 +8,20 @@
  */
 import { randomUUID } from "node:crypto";
 import { AdminError, applyAdminOp, blankOffice, permissionFor, type AdminOp } from "../admin";
-import { nextStage, reduce, stageSpec, type Action, type AgentRuntime, type EngineState, type Wake } from "../engine";
+import {
+  nextStage,
+  Postponed,
+  reduce,
+  stageSpec,
+  type Action,
+  type AgentRuntime,
+  type AgentStepInput,
+  type AgentStepResult,
+  type EngineState,
+  type SystemCall,
+  type SystemOutcome,
+  type Wake,
+} from "../engine";
 import { initialState } from "../initialState";
 import { statusReply } from "../agentState";
 import {
@@ -18,6 +31,7 @@ import {
   type AccessContext,
   type Office,
   type Participant,
+  type Task,
   type Permission,
 } from "../model";
 import { runPlaybook } from "../playbook";
@@ -337,6 +351,7 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
     })),
     isDemoOffice: isDemoOffice(office.id),
     agentsAtWork: agentsAtWork(office.id),
+    agentLoad: agentLoad(office.id),
     feed: feedFor(db, state, viewer),
     hiddenMessages,
     // Keys never leave the server. The list is for people who connect
@@ -486,38 +501,57 @@ export function recordAudit(
   });
 }
 
-/** Apply one action on behalf of the signed-in person and return their view. */
-export function applyAction(session: Session, requested: Action): Promise<OfficeView> {
-  return inTurn(async () => {
-    const db = officeDatabase();
-    const before = loadOffice(db, session);
-    const actor = viewerOf(before.office, session);
-    const action = stampActor(requested, actor.id);
-    const verdict = authorize(before.office, contextOf(before.office, before.now), actor, action);
-    if (!verdict.allowed) throw new OfficeError(403, verdict.reason);
+/**
+ * Apply one action on behalf of the signed-in person and return their view.
+ *
+ * The click does not wait for a model. An AI agent the action calls on is
+ * given the work on its queue and takes it up in the background. Only what a
+ * person has just approved in a connected system is carried out before the
+ * click returns, and that too outside the turn in which the office changes.
+ */
+export async function applyAction(session: Session, requested: Action): Promise<OfficeView> {
+  const fetched: Fetched = { performs: new Map() };
+  for (let turn = 0; ; turn++) {
+    const outcome = await inTurn(async (): Promise<{ view: OfficeView } | { needed: Needed; real: AgentRuntime }> => {
+      const db = officeDatabase();
+      const before = loadOffice(db, session);
+      const actor = viewerOf(before.office, session);
+      const action = stampActor(requested, actor.id);
+      const verdict = authorize(before.office, contextOf(before.office, before.now), actor, action);
+      if (!verdict.allowed) throw new OfficeError(403, verdict.reason);
 
-    let result;
+      const real = runtimeFor(db, before.office.id);
+      const { runtime, deferred } = turnRuntime(real, fetched, null, turn >= TURNS - 3);
+      let result;
+      try {
+        result = await reduce(before, action, runtime);
+      } catch (error) {
+        if (error instanceof Needed && turn < TURNS) return { needed: error, real };
+        throw new OfficeError(409, error instanceof Error ? error.message : "That action could not be applied.");
+      }
+
+      transaction(db, () => {
+        saveEngineState(db, before, result.state);
+        syncAccessTokens(db);
+        recordAudit(db, {
+          officeId: before.office.id,
+          officeClock: result.state.now,
+          actorId: actor.id,
+          actionType: action.type,
+          subject: auditSubject(action, before.office, result.state.office),
+          notes: result.notes,
+        });
+      });
+      carryOn(before.office.id, [...result.wake, ...deferred], changedTasks(before.office, result.state.office), true);
+      return { view: buildView(db, result.state, session) };
+    });
+    if (!("needed" in outcome)) return outcome.view;
     try {
-      result = await reduce(before, action, runtimeFor(db, before.office.id));
+      await fetch(outcome.real, fetched, outcome.needed);
     } catch (error) {
       throw new OfficeError(409, error instanceof Error ? error.message : "That action could not be applied.");
     }
-
-    transaction(db, () => {
-      saveEngineState(db, before, result.state);
-      syncAccessTokens(db);
-      recordAudit(db, {
-        officeId: before.office.id,
-        officeClock: result.state.now,
-        actorId: actor.id,
-        actionType: action.type,
-        subject: auditSubject(action, before.office, result.state.office),
-        notes: result.notes,
-      });
-    });
-    carryOn(before.office.id, result.wake, changedTasks(before.office, result.state.office));
-    return buildView(db, result.state, session);
-  });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -525,25 +559,79 @@ export function applyAction(session: Session, requested: Action): Promise<Office
 //
 // An agent does not only act at the moment a person clicks. After each action
 // the office looks at what agents now have in front of them: an answer to a
-// question, a note from a colleague, a finished step that can go to the next
-// stage. That work runs in the background, one step at a time, in the same
-// queue as people's actions, so a click returns at once and the office is
-// never changed by two things at the same moment.
+// question, a note from a colleague, a task handed to them. Each agent has a
+// queue of its own and works through it one item at a time, the way a person
+// at a desk does, while its colleagues work through theirs.
 //
-// It is bounded. A run takes a limited number of steps, every halt stays a
-// halt, and a step that fails is logged and left for a person.
+// The office itself is only ever changed by one thing at a time. What takes
+// long, asking a model or calling a connected system, is done outside that
+// turn: the office works out what has to be asked, lets go, asks, and then
+// applies the answer to the office as it stands by then. So a slow model
+// holds up the agent that is waiting for it, and nobody else.
+//
+// It is bounded. A task takes a limited number of steps between a person's
+// actions, every halt stays a halt, and a step that fails is logged and left
+// for a person.
 // ---------------------------------------------------------------------------
 
-/** One thing an agent does without a person asking: a wake, or handing a task on. */
+/** One thing done without a person asking: an agent's wake, ending a wait, or handing a task on. */
 type Pending = Wake | { kind: "advance"; taskId: string } | { kind: "wake"; taskId: string };
 
-const STEPS_PER_RUN = 12;
+/** Steps a task may take in the background between a person's actions on it. */
+const STEPS_PER_TASK = 40;
+
+/** What is under way in one office. */
+interface OfficeWork {
+  /** What each agent has in front of it, in the order it arrived. */
+  queues: Map<string, Wake[]>;
+  /** The task each agent is working on right now. */
+  current: Map<string, string>;
+  /** Of those, the tasks an agent is on only because of a note. */
+  attending: Map<string, string>;
+  /** Agents that are working through their queue. Each has one worker, never two. */
+  working: Set<string>;
+  /** Things the office does itself, which take no time: ending a wait, a handoff. */
+  desk: Pending[];
+  /** Tasks the office hands on by itself once their agents have finished with them. */
+  following: Set<string>;
+  /** Tasks left for a person: a handoff went nowhere, a step failed, or the limit was reached. */
+  stuck: Set<string>;
+  /** Background steps taken on each task since a person last acted on it. */
+  steps: Map<string, number>;
+  settling: boolean;
+  settleAgain: boolean;
+}
 
 const loop = globalThis as unknown as {
-  __officeLoop?: { paused: boolean; runs: Map<string, Promise<void>> };
+  __officeLoop?: { paused: boolean; offices: Map<string, OfficeWork>; idle: (() => void)[] };
 };
-const loopState = (): { paused: boolean; runs: Map<string, Promise<void>> } =>
-  (loop.__officeLoop ??= { paused: process.env.OFFICE_AGENTS_PAUSED === "1", runs: new Map() });
+const loopState = (): { paused: boolean; offices: Map<string, OfficeWork>; idle: (() => void)[] } =>
+  (loop.__officeLoop ??= { paused: process.env.OFFICE_AGENTS_PAUSED === "1", offices: new Map(), idle: [] });
+
+function workOf(officeId: string): OfficeWork {
+  const state = loopState();
+  let work = state.offices.get(officeId);
+  if (!work) {
+    work = {
+      queues: new Map(),
+      current: new Map(),
+      attending: new Map(),
+      working: new Set(),
+      desk: [],
+      following: new Set(),
+      stuck: new Set(),
+      steps: new Map(),
+      settling: false,
+      settleAgain: false,
+    };
+    state.offices.set(officeId, work);
+  }
+  return work;
+}
+
+const queued = (work: OfficeWork): number => [...work.queues.values()].reduce((sum, q) => sum + q.length, 0);
+const busy = (work: OfficeWork | undefined): boolean =>
+  work !== undefined && (work.current.size > 0 || work.desk.length > 0 || work.settling || queued(work) > 0);
 
 /** For tests: stop agents carrying work forward, or let them again. */
 export function pauseAgents(paused: boolean): void {
@@ -552,15 +640,32 @@ export function pauseAgents(paused: boolean): void {
 
 /** Resolves once no agent is working in the background. */
 export async function agentsIdle(): Promise<void> {
-  for (;;) {
-    const runs = [...loopState().runs.values()];
-    if (runs.length === 0) return;
-    await Promise.allSettled(runs);
+  const state = loopState();
+  while ([...state.offices.values()].some(busy)) {
+    await new Promise<void>((resolve) => state.idle.push(resolve));
   }
 }
 
+/** Let anyone waiting for quiet know that something has finished. */
+function stirred(): void {
+  const state = loopState();
+  for (const resolve of state.idle.splice(0)) resolve();
+}
+
 /** Whether agents are working in the background in this office right now. */
-const agentsAtWork = (officeId: string): boolean => loopState().runs.has(officeId);
+const agentsAtWork = (officeId: string): boolean => busy(loopState().offices.get(officeId));
+
+/** What each agent in an office is on, and how much is waiting behind it. */
+export function agentLoad(officeId: string): Record<string, { taskId: string | null; waiting: number }> {
+  const work = loopState().offices.get(officeId);
+  const load: Record<string, { taskId: string | null; waiting: number }> = {};
+  if (!work) return load;
+  for (const [agent, taskId] of work.current) load[agent] = { taskId, waiting: 0 };
+  for (const [agent, queue] of work.queues) {
+    if (queue.length > 0 || load[agent]) load[agent] = { taskId: load[agent]?.taskId ?? null, waiting: queue.length };
+  }
+  return load;
+}
 
 /** Ids of tasks an action created or changed. */
 function changedTasks(before: Office, after: Office): string[] {
@@ -573,7 +678,7 @@ function readyToHandOn(office: Office, taskIds: Set<string>, skip: Set<string>):
   if (!office.autoHandoff) return null;
   for (const task of office.tasks) {
     if (!taskIds.has(task.id) || skip.has(task.id)) continue;
-    if (task.closedAt !== null || task.status !== "in_progress" || task.wait) continue;
+    if (task.closedAt !== null || task.status !== "in_progress" || task.wait || task.owed) continue;
     if (stageSpec(task.stage).humanGate || nextStage(task.stage) === null) continue;
     if (office.participants.find((p) => p.id === task.ownerId)?.kind === "agent") return task.id;
   }
@@ -604,7 +709,7 @@ export function wakeDueTasks(now: number = Date.now()): number {
 /**
  * Pick up work that nothing is carrying. A task an agent has finished with at
  * its stage should have been handed on at once. When it was not, because the
- * server restarted mid-run or a turn was lost, it would sit until a person
+ * server restarted in the middle of things, it would sit until a person
  * noticed. Each task is given a few such pushes and then left for a person.
  */
 export function carryOnIdleWork(): number {
@@ -613,16 +718,19 @@ export function carryOnIdleWork(): number {
   if (state.paused) return 0;
   let picked = 0;
   for (const { id } of all<{ id: string }>(db, "SELECT id FROM offices WHERE id <> ?", DEMO_OFFICE_ID)) {
-    if (state.runs.has(id)) continue;
+    if (busy(state.offices.get(id))) continue;
     const loaded = loadEngineState(db, id);
     if (!loaded) continue;
-    const idle = loaded.office.tasks
-      .filter((t) => (idlePushes.get(t.id) ?? 0) < IDLE_PUSHES)
-      .map((t) => t.id);
-    const ready = readyToHandOn(loaded.office, new Set(idle), new Set());
+    const idle = loaded.office.tasks.filter((t) => (idlePushes.get(t.id) ?? 0) < IDLE_PUSHES);
+    // An agent that owes a step and has nothing queued is asked again. This
+    // is also how a step that failed for a passing reason gets another try.
+    const owing = idle.find(
+      (t) => t.owed && t.closedAt === null && loaded.office.participants.find((p) => p.id === t.ownerId)?.agentType === "ai",
+    );
+    const ready = owing?.id ?? readyToHandOn(loaded.office, new Set(idle.map((t) => t.id)), new Set());
     if (!ready) continue;
     idlePushes.set(ready, (idlePushes.get(ready) ?? 0) + 1);
-    carryOn(id, [], [ready]);
+    carryOn(id, owing?.ownerId ? [{ kind: "resume", taskId: owing.id, participantId: owing.ownerId }] : [], [ready], true);
     picked++;
   }
   return picked;
@@ -634,7 +742,7 @@ const idlePushes = new Map<string, number>();
 const WAKE_EVERY_MS = 60_000;
 const clock = globalThis as unknown as { __officeClock?: ReturnType<typeof setInterval> };
 
-/** Start the timer that ends waits, once per server process. */
+/** Start the timer that ends waits and picks up idle work, once per server process. */
 function startClock(): void {
   if (clock.__officeClock || process.env.OFFICE_CLOCK_OFF === "1") return;
   clock.__officeClock = setInterval(() => {
@@ -648,107 +756,363 @@ function startClock(): void {
   clock.__officeClock.unref();
 }
 
-/** Start, or add to, the background run for an office. */
-function carryOn(officeId: string, wakes: Pending[], taskIds: string[]): void {
-  const state = loopState();
-  if (state.paused || (wakes.length === 0 && taskIds.length === 0)) return;
-  const earlier = state.runs.get(officeId) ?? Promise.resolve();
-  const run: Promise<void> = earlier
-    .then(() => runPending(officeId, wakes, new Set(taskIds)))
-    .catch((error) => console.error("An agent run failed.", error))
-    .finally(() => {
-      if (state.runs.get(officeId) === run) state.runs.delete(officeId);
-    });
-  state.runs.set(officeId, run);
+/**
+ * Give an office's agents what an action left for them, and follow the tasks
+ * it touched. `afresh` is set when a person acted: whatever kept those tasks
+ * from moving is forgotten, and they may take their full number of steps again.
+ */
+function carryOn(officeId: string, wakes: Pending[], taskIds: string[], afresh = false): void {
+  if (loopState().paused || (wakes.length === 0 && taskIds.length === 0)) return;
+  const work = workOf(officeId);
+  for (const id of taskIds) {
+    work.following.add(id);
+    if (afresh) {
+      work.stuck.delete(id);
+      work.steps.delete(id);
+    }
+  }
+  for (const wake of wakes) hand(work, wake);
+  stir(officeId);
 }
 
-async function runPending(officeId: string, wakes: Pending[], taskIds: Set<string>): Promise<void> {
-  const waiting: Pending[] = [...wakes];
-  const stuck = new Set<string>();
-  for (let step = 0; step < STEPS_PER_RUN; step++) {
-    // Each step takes its own turn in the queue, so people's actions fit in between.
-    const more = await inTurn(async () => {
-      const db = officeDatabase();
-      const loaded = loadEngineState(db, officeId);
-      if (!loaded) return null;
-      const before = loaded.clockStepMinutes === 0 ? { ...loaded, now: Date.now() } : loaded;
-      const handOn = waiting.length === 0 ? readyToHandOn(before.office, taskIds, stuck) : null;
-      const next: Pending | undefined = waiting.shift() ?? (handOn ? { kind: "advance", taskId: handOn } : undefined);
-      if (!next) return null;
-      return takeStep(db, before, next, stuck);
-    });
-    if (more === null) return;
-    // Two answers arriving for the same agent are one reason to take the step
-    // again, with both in front of it.
-    for (const wake of more.wake) {
-      const queued = waiting.some(
-        (w) => w.kind === "resume" && wake.kind === "resume" && w.taskId === wake.taskId && w.participantId === wake.participantId,
-      );
-      if (!queued) waiting.push(wake);
+/** Put one piece of work where it belongs: on an agent's queue, or on the office's own desk. */
+function hand(work: OfficeWork, next: Pending): void {
+  work.following.add(next.taskId);
+  if (next.kind === "advance" || next.kind === "wake") {
+    work.desk.push(next);
+    return;
+  }
+  // Something new for an agent to look at is a reason to try the task again.
+  work.stuck.delete(next.taskId);
+  const queue = work.queues.get(next.participantId) ?? [];
+  // Two answers arriving for the same agent are one reason to take the step
+  // again, with both in front of it.
+  const already = queue.some(
+    (w) => w.kind === next.kind && w.taskId === next.taskId && (w.kind !== "attend" || (next.kind === "attend" && w.noteId === next.noteId)),
+  );
+  if (!already) queue.push(next);
+  work.queues.set(next.participantId, queue);
+}
+
+/** Start every agent that has something waiting and is free, and let the office do its own part. */
+function stir(officeId: string): void {
+  const work = workOf(officeId);
+  for (const [agentId, queue] of work.queues) {
+    if (queue.length > 0 && !work.working.has(agentId)) void workThrough(officeId, agentId);
+  }
+  void settle(officeId);
+}
+
+/** One agent works through its queue, one item at a time. */
+async function workThrough(officeId: string, agentId: string): Promise<void> {
+  const work = workOf(officeId);
+  if (work.working.has(agentId)) return;
+  work.working.add(agentId);
+  try {
+    for (;;) {
+      const queue = work.queues.get(agentId) ?? [];
+      // An owner does not take its step again while colleagues are still
+      // looking at notes on that task: it waits and hears them all at once.
+      const at = queue.findIndex((item) => item.kind !== "resume" || !colleaguesAt(work, item.taskId, agentId));
+      if (at === -1) break;
+      const [next] = queue.splice(at, 1);
+      work.current.set(agentId, next.taskId);
+      if (next.kind === "attend") work.attending.set(agentId, next.taskId);
+      await carryOut(officeId, next).catch((error) => console.error("An agent's step failed.", error));
+      work.current.delete(agentId);
+      work.attending.delete(agentId);
+      stir2(officeId, work);
+      void settle(officeId);
     }
-    for (const id of more.taskIds) taskIds.add(id);
+  } finally {
+    work.working.delete(agentId);
+    work.current.delete(agentId);
+    work.attending.delete(agentId);
+    if ((work.queues.get(agentId)?.length ?? 0) === 0) work.queues.delete(agentId);
+    void settle(officeId);
+    stirred();
   }
 }
 
-/** Apply one background step and store it. A failure is logged for people to see. */
-async function takeStep(
-  db: Db,
-  before: EngineState,
-  next: Pending,
-  stuck: Set<string>,
-): Promise<{ wake: Wake[]; taskIds: string[] }> {
-  const task = before.office.tasks.find((t) => t.id === next.taskId);
-  const agentId = next.kind === "advance" || next.kind === "wake" ? task?.ownerId : next.participantId;
+/** Whether another agent is looking at a note on this task, or has one waiting. */
+function colleaguesAt(work: OfficeWork, taskId: string, agentId: string): boolean {
+  for (const [other, queue] of work.queues) {
+    if (other !== agentId && queue.some((item) => item.kind === "attend" && item.taskId === taskId)) return true;
+  }
+  for (const [other, at] of work.attending) if (other !== agentId && at === taskId) return true;
+  return false;
+}
+
+/**
+ * The office's own part: ending waits, and handing on each followed task that
+ * no agent has anything left to do on.
+ */
+async function settle(officeId: string): Promise<void> {
+  const work = workOf(officeId);
+  if (work.settling) {
+    work.settleAgain = true;
+    return;
+  }
+  work.settling = true;
+  try {
+    do {
+      work.settleAgain = false;
+      for (;;) {
+        const next = work.desk.shift() ?? (await inTurn(async () => handOn(officeId, work)));
+        if (!next) break;
+        await carryOut(officeId, next).catch((error) => console.error("A handoff failed.", error));
+      }
+    } while (work.settleAgain);
+  } finally {
+    work.settling = false;
+    stir2(officeId, work);
+    stirred();
+  }
+}
+
+/** After the office's own part, agents may have new work. Start them without settling again. */
+function stir2(officeId: string, work: OfficeWork): void {
+  for (const [agentId, queue] of work.queues) {
+    if (queue.length > 0 && !work.working.has(agentId)) void workThrough(officeId, agentId);
+  }
+}
+
+/** The next task to hand on: one that is followed and that nobody is still busy with. */
+function handOn(officeId: string, work: OfficeWork): Pending | null {
+  const loaded = loadEngineState(officeDatabase(), officeId);
+  if (!loaded) return null;
+  const inHand = new Set<string>(work.current.values());
+  for (const queue of work.queues.values()) for (const item of queue) inHand.add(item.taskId);
+  const taskId = readyToHandOn(loaded.office, work.following, new Set([...work.stuck, ...inHand]));
+  return taskId ? { kind: "advance", taskId } : null;
+}
+
+/** What a turn found it has to fetch before it can go on. */
+class Needed extends Postponed {
+  constructor(
+    readonly need:
+      | { kind: "step"; input: AgentStepInput; signature: string }
+      | { kind: "perform"; call: SystemCall; key: string },
+  ) {
+    super("An answer has to be fetched first.");
+  }
+}
+
+/** What has been fetched so far for one piece of work. */
+interface Fetched {
+  step?: { signature: string; result: AgentStepResult };
+  performs: Map<string, SystemOutcome>;
+}
+
+/** What an agent was shown, reduced to what would make its answer out of date. */
+const signatureOf = (input: AgentStepInput): string =>
+  [
+    input.task.id,
+    input.participant.id,
+    input.stage,
+    input.task.status,
+    input.afterAction ? "after" : "",
+    input.attending?.noteId ?? "",
+    input.priorMessages.length,
+  ].join("|");
+
+const performKey = (call: SystemCall): string =>
+  JSON.stringify([call.taskId, call.systemId, call.operation, Object.entries(call.fields).sort()]);
+
+/**
+ * The runtime for one turn. It answers only from what has already been
+ * fetched, and says what is missing otherwise, so a turn never waits on a
+ * model or a connected system.
+ *
+ * `own` names the agent whose step this turn is for. Any other AI agent's
+ * step that the turn would call for is put on that agent's queue.
+ */
+function turnRuntime(
+  real: AgentRuntime,
+  fetched: Fetched,
+  own: { participantId: string; taskId: string } | null,
+  /** Use what was fetched even if the office has moved on since. */
+  lenient: boolean,
+): { runtime: AgentRuntime; deferred: Wake[] } {
+  const deferred: Wake[] = [];
+  let ownTaken = false;
+  return {
+    deferred,
+    runtime: {
+      async step(input) {
+        // A playbook agent answers at once from its written steps.
+        if (input.participant.agentType !== "ai") return real.step(input);
+        if (own && !ownTaken && input.participant.id === own.participantId && input.task.id === own.taskId) {
+          ownTaken = true;
+          const signature = signatureOf(input);
+          if (fetched.step && (lenient || fetched.step.signature === signature)) return fetched.step.result;
+          throw new Needed({ kind: "step", input, signature });
+        }
+        deferred.push(
+          input.attending
+            ? {
+                kind: "attend",
+                taskId: input.task.id,
+                participantId: input.participant.id,
+                noteId: input.attending.noteId,
+                ...(input.afterAction ? { afterAction: true } : {}),
+              }
+            : {
+                kind: "resume",
+                taskId: input.task.id,
+                participantId: input.participant.id,
+                ...(input.afterAction ? { afterAction: true } : {}),
+              },
+        );
+        return { questions: [], assumptions: [], later: true };
+      },
+      async perform(call) {
+        const key = performKey(call);
+        const outcome = fetched.performs.get(key);
+        if (outcome) return outcome;
+        throw new Needed({ kind: "perform", call, key });
+      },
+    },
+  };
+}
+
+/** Fetch what a turn was missing. This is the slow part, and runs outside any turn. */
+async function fetch(real: AgentRuntime, fetched: Fetched, needed: Needed): Promise<void> {
+  const { need } = needed;
+  if (need.kind === "step") {
+    fetched.step = { signature: need.signature, result: await real.step(need.input) };
+  } else {
+    fetched.performs.set(
+      need.key,
+      real.perform ? await real.perform(need.call) : { ok: false, summary: "it is not reachable from here, so nothing was done" },
+    );
+  }
+}
+
+/** How many times a piece of work is tried again because the office moved on while it was fetched. */
+const TURNS = 8;
+
+/** Carry out one piece of background work, and pass on what it leaves for others. */
+async function carryOut(officeId: string, next: Pending): Promise<void> {
+  const work = workOf(officeId);
+  const fetched: Fetched = { performs: new Map() };
+  const real = runtimeFor(officeDatabase(), officeId);
+
+  for (let turn = 0; turn < TURNS; turn++) {
+    const outcome = await inTurn(async () => takeTurn(officeId, work, next, real, fetched, turn >= TURNS - 3));
+    if (outcome === null) return;
+    if (!(outcome instanceof Needed)) {
+      for (const id of outcome.taskIds) work.following.add(id);
+      for (const wake of outcome.wake) hand(work, wake);
+      stir2(officeId, work);
+      return;
+    }
+    try {
+      await fetch(real, fetched, outcome);
+    } catch (error) {
+      await inTurn(async () => leaveForAPerson(officeId, work, next, error));
+      return;
+    }
+  }
+}
+
+/** The task and the one acting on it for a piece of background work, or null when it no longer applies. */
+function subjectOf(office: Office, next: Pending): { task: Task; actor: Participant; action: Action } | null {
+  const task = office.tasks.find((t) => t.id === next.taskId);
+  if (!task) return null;
+  const actorId = next.kind === "advance" || next.kind === "wake" ? task.ownerId : next.participantId;
   // A wait ends whoever owns the task. Everything else here is an agent's doing.
-  const agent = before.office.participants.find((p) => p.id === agentId && (p.kind === "agent" || next.kind === "wake"));
-  if (!task || !agent) return { wake: [], taskIds: [] };
+  const actor = office.participants.find((p) => p.id === actorId && (p.kind === "agent" || next.kind === "wake"));
+  if (!actor) return null;
+  // A wake for an agent that has since handed the task on is not for whoever holds it now.
+  if (next.kind === "resume" && task.ownerId !== next.participantId) return null;
   const action: Action =
     next.kind === "wake"
       ? { type: "WAKE_TASK", taskId: task.id }
       : next.kind === "advance"
-      ? { type: "ADVANCE", taskId: task.id }
-      : next.kind === "resume"
-        ? { type: "AGENT_RESUME", taskId: task.id }
-        : { type: "AGENT_ATTEND", taskId: task.id, participantId: agent.id, noteId: next.noteId };
-  const subject: AuditSubject = { ...NO_SUBJECT, taskId: task.id, subjectParticipantId: agent.id, roomId: task.roomId };
+        ? { type: "ADVANCE", taskId: task.id }
+        : next.kind === "resume"
+          ? { type: "AGENT_RESUME", taskId: task.id, ...(next.afterAction ? { afterAction: true } : {}) }
+          : {
+              type: "AGENT_ATTEND",
+              taskId: task.id,
+              participantId: actor.id,
+              noteId: next.noteId,
+              ...(next.afterAction ? { afterAction: true } : {}),
+            };
+  return { task, actor, action };
+}
 
+/**
+ * One turn at a piece of background work: apply it to the office as it stands
+ * and store the result, or say what has to be fetched first.
+ */
+async function takeTurn(
+  officeId: string,
+  work: OfficeWork,
+  next: Pending,
+  real: AgentRuntime,
+  fetched: Fetched,
+  lenient: boolean,
+): Promise<{ wake: Wake[]; taskIds: string[] } | Needed | null> {
+  const db = officeDatabase();
+  const loaded = loadEngineState(db, officeId);
+  if (!loaded) return null;
+  const before = loaded.clockStepMinutes === 0 ? { ...loaded, now: Date.now() } : loaded;
+  const subject = subjectOf(before.office, next);
+  if (!subject) return null;
+  const { task, actor, action } = subject;
+  if ((work.steps.get(task.id) ?? 0) >= STEPS_PER_TASK) {
+    work.stuck.add(task.id);
+    return null;
+  }
+
+  const own = next.kind === "resume" || next.kind === "attend" ? { participantId: actor.id, taskId: task.id } : null;
+  const { runtime, deferred } = turnRuntime(real, fetched, own, lenient);
   let result;
   try {
-    result = await reduce(before, action, runtimeFor(db, before.office.id));
+    result = await reduce(before, action, runtime);
   } catch (error) {
-    // The task is left where it is, and is not tried again in this run.
-    stuck.add(task.id);
-    recordAudit(db, {
-      officeId: before.office.id,
-      officeClock: before.now,
-      actorId: agent.id,
-      actionType: action.type,
-      subject,
-      notes: [
-        `${agent.displayName} could not carry ${task.id} forward: ${error instanceof Error ? error.message : String(error)}`,
-      ],
-    });
-    return { wake: [], taskIds: [] };
+    if (error instanceof Needed) return error;
+    leaveForAPerson(officeId, work, next, error);
+    return null;
   }
+  work.steps.set(task.id, (work.steps.get(task.id) ?? 0) + 1);
   const moved = result.state.office.tasks.find((t) => t.id === task.id);
   // A handoff that went nowhere, for want of anyone to take it, is not repeated.
-  if (next.kind === "advance" && moved?.stage === task.stage) stuck.add(task.id);
-  // After taking its step again, the task may be handed on, but not taken again.
-  if (next.kind === "resume" && moved?.status !== "in_progress") stuck.add(task.id);
+  if (next.kind === "advance" && moved?.stage === task.stage) work.stuck.add(task.id);
 
   transaction(db, () => {
     saveEngineState(db, before, result.state);
     syncAccessTokens(db);
     recordAudit(db, {
-      officeId: before.office.id,
+      officeId,
       officeClock: result.state.now,
-      actorId: agent.id,
+      actorId: actor.id,
       actionType: action.type,
-      subject,
+      subject: { ...NO_SUBJECT, taskId: task.id, subjectParticipantId: actor.id, roomId: task.roomId },
       notes: result.notes,
     });
   });
-  return { wake: result.wake, taskIds: changedTasks(before.office, result.state.office) };
+  return { wake: [...result.wake, ...deferred], taskIds: changedTasks(before.office, result.state.office) };
+}
+
+/** A piece of work failed. The task is left where it is, and people are told why. */
+function leaveForAPerson(officeId: string, work: OfficeWork, next: Pending, error: unknown): void {
+  const db = officeDatabase();
+  const loaded = loadEngineState(db, officeId);
+  const subject = loaded ? subjectOf(loaded.office, next) : null;
+  work.stuck.add(next.taskId);
+  if (!loaded || !subject) return;
+  const { task, actor, action } = subject;
+  recordAudit(db, {
+    officeId,
+    officeClock: loaded.clockStepMinutes === 0 ? Date.now() : loaded.now,
+    actorId: actor.id,
+    actionType: action.type,
+    subject: { ...NO_SUBJECT, taskId: task.id, subjectParticipantId: actor.id, roomId: task.roomId },
+    notes: [`${actor.displayName} could not carry ${task.id} forward: ${error instanceof Error ? error.message : String(error)}`],
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -995,8 +1359,10 @@ export function useChatReply(reply: ((system: string, turns: { content: string }
  * what both of them may read. A playbook agent has no model and reports where
  * its work stands. Nothing else in the office changes.
  */
-export function sendDirectMessage(session: Session, toId: string, said: string): Promise<OfficeView> {
-  return inTurn(async () => {
+export async function sendDirectMessage(session: Session, toId: string, said: string): Promise<OfficeView> {
+  // Checked in a turn, asked outside it, written in another: an agent that
+  // takes its time to answer holds up nobody but the person waiting for it.
+  const asked = await inTurn(async () => {
     const db = officeDatabase();
     const state = loadOffice(db, session);
     const { office } = state;
@@ -1010,31 +1376,47 @@ export function sendDirectMessage(session: Session, toId: string, said: string):
     // A conversation is outside any task, so grants made for a task do not count.
     const ctx: AccessContext = { ...contextOf(office, state.now), forTask: null };
     const room = office.floorplan.rooms.find((r) => r.deskIds.includes(other.deskId ?? ""));
-    let reply: string | null = null;
-    if (other.kind === "agent") {
-      if (room && resolveAccess(sender, room.id, "enter", ctx).effect !== "allow") {
-        throw new OfficeError(403, `You cannot enter ${room.name}, so you cannot talk to ${other.displayName} at their desk.`);
-      }
-      if (other.agentType !== "ai") {
-        reply = statusReply(office, other, sender, ctx);
-      } else {
-        const shared = office.systems
-          .filter((s) => roomsShowing(s).some((r) => mayRead(ctx, other, r)) && roomsShowing(s).some((r) => mayRead(ctx, sender, r)))
-          .map((s) => s.id);
-        const live = shared.length > 0 ? await liveRecords(db, office.id, shared) : [];
-        const system = buildChatSystem(office, other, sender, ctx, live, dataMarker());
-        const turns = [...earlierTurns(db, other.id, sender.id), { role: "user" as const, content: body }];
-        try {
-          reply = overriddenChat.__officeChat
-            ? await overriddenChat.__officeChat(system, turns)
-            : await runtimeForAgent(db, office.id, other).chat(other.displayName, system, turns);
-        } catch (error) {
-          // Reported as 424 for the same reason as a failed connection test.
-          throw new OfficeError(424, error instanceof Error ? error.message : `${other.displayName} could not answer.`);
-        }
-      }
+    if (other.kind === "agent" && room && resolveAccess(sender, room.id, "enter", ctx).effect !== "allow") {
+      throw new OfficeError(403, `You cannot enter ${room.name}, so you cannot talk to ${other.displayName} at their desk.`);
     }
+    const shared =
+      other.agentType === "ai"
+        ? office.systems
+            .filter((s) => roomsShowing(s).some((r) => mayRead(ctx, other, r)) && roomsShowing(s).some((r) => mayRead(ctx, sender, r)))
+            .map((s) => s.id)
+        : [];
+    return {
+      db,
+      state,
+      sender,
+      other,
+      body,
+      ctx,
+      shared,
+      // A playbook agent answers at once with where its work stands.
+      ready: other.kind === "agent" && other.agentType !== "ai" ? statusReply(office, other, sender, ctx) : null,
+      earlier: other.agentType === "ai" ? earlierTurns(db, other.id, sender.id) : [],
+    };
+  });
+  const { db, state, sender, other, body, ctx, shared } = asked;
+  const { office } = state;
 
+  let reply: string | null = asked.ready;
+  if (other.kind === "agent" && other.agentType === "ai") {
+    const live = shared.length > 0 ? await liveRecords(db, office.id, shared) : [];
+    const system = buildChatSystem(office, other, sender, ctx, live, dataMarker());
+    const turns = [...asked.earlier, { role: "user" as const, content: body }];
+    try {
+      reply = overriddenChat.__officeChat
+        ? await overriddenChat.__officeChat(system, turns)
+        : await runtimeForAgent(db, office.id, other).chat(other.displayName, system, turns);
+    } catch (error) {
+      // Reported as 424 for the same reason as a failed connection test.
+      throw new OfficeError(424, error instanceof Error ? error.message : `${other.displayName} could not answer.`);
+    }
+  }
+
+  return inTurn(async () => {
     transaction(db, () => {
       recordDirect(db, sender.id, other.id, body, state.now);
       if (reply !== null) recordDirect(db, other.id, sender.id, reply.slice(0, 2000), state.now);

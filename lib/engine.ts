@@ -177,7 +177,7 @@ export interface AgentStepInput {
    * because someone left it a note. It may do its own part and answer with a
    * note. It does not take the task over.
    */
-  attending?: { fromId: ParticipantId; body: string };
+  attending?: { fromId: ParticipantId; body: string; noteId: string };
 }
 
 export interface DraftQuestion {
@@ -223,6 +223,12 @@ export interface AgentStepResult {
   /** Things to tell one person or agent each. They block nothing. */
   notes?: DraftNote[];
   output?: { label: string; body: string };
+  /**
+   * Set by a runtime that has not asked the agent yet and will do so later.
+   * Nothing is written to the thread, and the task's owner is marked as
+   * owing its step.
+   */
+  later?: boolean;
   /**
    * The rest of this step has a date. `until` is a calendar day, YYYY-MM-DD.
    * The task stays where it is until then, and its owner takes the step again.
@@ -314,10 +320,20 @@ export type Action =
    * person who does not want to wait for it.
    */
   | { type: "WAKE_TASK"; taskId: TaskId; byId?: ParticipantId }
-  /** An agent takes its step again. Raised by the office, never by a person. */
-  | { type: "AGENT_RESUME"; taskId: TaskId }
+  /**
+   * An agent takes its step again. Raised by the office, never by a person.
+   * `afterAction` marks the one further step taken once a system has answered.
+   */
+  | { type: "AGENT_RESUME"; taskId: TaskId; afterAction?: boolean }
   /** An agent looks at a note left for it. Raised by the office, never by a person. */
-  | { type: "AGENT_ATTEND"; taskId: TaskId; participantId: ParticipantId; noteId: string };
+  | { type: "AGENT_ATTEND"; taskId: TaskId; participantId: ParticipantId; noteId: string; afterAction?: boolean };
+
+/**
+ * Thrown by a runtime that cannot answer yet, because the answer has to be
+ * fetched outside the turn in which the office is changed. The engine lets it
+ * through untouched, so whoever runs the office can fetch it and try again.
+ */
+export class Postponed extends Error {}
 
 export interface StepResult {
   state: EngineState;
@@ -335,9 +351,9 @@ export interface StepResult {
 /** An agent with something waiting for it. */
 export type Wake =
   /** An answer to its question arrived, so it can take its step again. */
-  | { kind: "resume"; taskId: TaskId; participantId: ParticipantId }
+  | { kind: "resume"; taskId: TaskId; participantId: ParticipantId; afterAction?: boolean }
   /** Someone left it a note on a task it does not own. */
-  | { kind: "attend"; taskId: TaskId; participantId: ParticipantId; noteId: string };
+  | { kind: "attend"; taskId: TaskId; participantId: ParticipantId; noteId: string; afterAction?: boolean };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -442,6 +458,7 @@ export async function reduce(
         emitted.push(...turn.emitted);
         notes.push(...turn.notes);
       } catch (error) {
+        if (error instanceof Postponed) throw error;
         notes.push(
           `${owner.displayName} could not take the step on ${task.id} again: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -636,7 +653,7 @@ export async function reduce(
       }
 
       // Whoever moves a task on has decided not to wait any longer.
-      const { wait: _waited, ...moving } = task;
+      const { wait: _waited, owed: _owed, ...moving } = task;
       const moved: Task = {
         ...moving,
         stage: target,
@@ -774,6 +791,7 @@ export async function reduce(
               emitted.push(...turn.emitted);
               notes.push(...turn.notes);
             } catch (error) {
+              if (error instanceof Postponed) throw error;
               notes.push(
                 `${asker.displayName} could not follow up on ${task.id}: ${error instanceof Error ? error.message : String(error)}`,
               );
@@ -991,7 +1009,7 @@ export async function reduce(
       if (!task || task.closedAt !== null || !owner || owner.kind !== "agent" || task.status !== openStatus(task.stage)) {
         return done();
       }
-      const turn = await runAgent(office, task, task.stage, owner, runtime, now, nextId, true);
+      const turn = await runAgent(office, task, task.stage, owner, runtime, now, nextId, true, action.afterAction === true);
       office = turn.office;
       emitted.push(...turn.emitted);
       notes.push(...turn.notes);
@@ -1015,7 +1033,7 @@ export async function reduce(
       ) {
         return done();
       }
-      const turn = await runAgent(office, task, task.stage, reader, runtime, now, nextId, true, false, note);
+      const turn = await runAgent(office, task, task.stage, reader, runtime, now, nextId, true, action.afterAction === true, note);
       office = turn.office;
       emitted.push(...turn.emitted);
       notes.push(...turn.notes);
@@ -1248,8 +1266,14 @@ async function runAgent(
     surroundings,
     now,
     ...(afterAction ? { afterAction } : {}),
-    ...(attending && attending.fromId !== "system" ? { attending: { fromId: attending.fromId, body: attending.body } } : {}),
+    ...(attending && attending.fromId !== "system"
+      ? { attending: { fromId: attending.fromId, body: attending.body, noteId: attending.id } }
+      : {}),
   });
+  if (answered.later) {
+    const owes = !attending && task.ownerId === participant.id && !task.owed;
+    return { office: owes ? replaceTask(office, { ...task, owed: true }) : office, emitted: [], notes: [] };
+  }
   // An agent attending to a note does its own part and may answer with one
   // note. It cannot halt or redirect a task that is not its own.
   const result: AgentStepResult = attending
@@ -1263,7 +1287,9 @@ async function runAgent(
     : answered;
   const emitted: Message[] = [];
   const notes: string[] = [];
-  let updated: Task = task;
+  // The owner is taking its step, so it no longer owes one.
+  const { owed: _owed, ...taken } = task;
+  let updated: Task = attending ? task : taken;
 
   // On a step taken again, a status note or question the agent already put on
   // this task is left out. Work that a reviewer sent back starts afresh: what
@@ -1630,6 +1656,23 @@ async function runAgent(
         });
       }
       notes.push(`${task.id} waits until ${dayOf(until)}: ${reason}`);
+    } else if (reason && Number.isFinite(until) && until > now && stageSpec(stage).humanGate) {
+      // A stage a person closes cannot wait. What the agent found outstanding
+      // is said plainly, so the person can send the task back.
+      const body = `Part of this is still to do on ${dayOf(until)}: ${reason} A task cannot wait at this stage. Send it back and it will wait where the work is done.`;
+      if (!office.messages.some((m) => m.taskId === task.id && m.body === body)) {
+        emitted.push({
+          id: nextId("m"),
+          kind: "status",
+          taskId: task.id,
+          fromId: participant.id,
+          audience: { to: "room", id: task.roomId },
+          roomId: task.roomId,
+          at: now,
+          body,
+        });
+        notes.push(`${participant.displayName} found work on ${task.id} that is due on ${dayOf(until)}`);
+      }
     }
   }
 
@@ -1643,6 +1686,7 @@ async function runAgent(
       const next = await runAgent(after, updated, stage, participant, runtime, now, nextId, true, true, attending);
       return { office: next.office, emitted: [...emitted, ...next.emitted], notes: [...notes, ...next.notes] };
     } catch (error) {
+      if (error instanceof Postponed) throw error;
       notes.push(
         `${participant.displayName} could not follow up on ${task.id}: ${error instanceof Error ? error.message : String(error)}`,
       );

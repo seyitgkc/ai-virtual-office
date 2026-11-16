@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -348,6 +348,8 @@ CREATE TABLE tasks (
   -- Set while the task waits for a day: when it ends, and what it waits for.
   wait_until   INTEGER,
   wait_reason  TEXT,
+  -- 1 while the owner has been given the task and has not yet taken its step.
+  step_owed    INTEGER NOT NULL DEFAULT 0 CHECK (step_owed IN (0, 1)),
   CHECK ((wait_until IS NULL) = (wait_reason IS NULL))
 ) STRICT;
 
@@ -1105,5 +1107,9 @@ CREATE TABLE system_shown_rooms (
   12: /* sql */ `
 ALTER TABLE tasks ADD COLUMN wait_until INTEGER;
 ALTER TABLE tasks ADD COLUMN wait_reason TEXT;
+`,
+  // Version 14 records that a task's owner still owes its step.
+  13: /* sql */ `
+ALTER TABLE tasks ADD COLUMN step_owed INTEGER NOT NULL DEFAULT 0 CHECK (step_owed IN (0, 1));
 `,
 };

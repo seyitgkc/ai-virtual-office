@@ -124,6 +124,8 @@ export interface OfficeView {
   isDemoOffice: boolean;
   /** True while agents are carrying work forward in the background. */
   agentsAtWork: boolean;
+  /** For each agent with work in hand: the task it is on, and how many more wait behind it. */
+  agentLoad: Record<string, { taskId: string | null; waiting: number }>;
   accessTokens: TokenView[];
   /** Sign-in accounts. Empty unless the viewer manages people. */
   accounts: { participantId: string; email: string; hasPassword: boolean }[];

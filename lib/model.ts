@@ -641,6 +641,12 @@ export interface Task {
    * until that time, when the owner is woken to carry on.
    */
   wait?: { until: number; reason: string };
+  /**
+   * Set while the task's owner has been given the task, or the answer of a
+   * system, and has not yet taken the step that follows. The task is not
+   * handed on while a step is owed.
+   */
+  owed?: boolean;
 }
 
 // ---------------------------------------------------------------------------

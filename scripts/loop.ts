@@ -92,11 +92,24 @@ async function main(): Promise<void> {
   const ledger = `p-ledger-${suffix}`;
   const steps: string[] = [];
   let failAt: string | null = null;
+  let slowFor: (input: AgentStepInput) => number = () => 0;
+  const atOnce = new Map<string, number>();
+  let most = 0;
+  let doubled = false;
   const scripted = {
     step: async (input: AgentStepInput): Promise<AgentStepResult> => {
       const who = input.participant.displayName;
       const answered = input.priorMessages.some((m) => m.kind === "answer");
       steps.push(`${who}:${input.attending ? "note" : input.stage}`);
+      // How many agents are answering at once, and whether one agent ever is twice.
+      const slow = slowFor(input);
+      if (slow > 0) {
+        atOnce.set(who, (atOnce.get(who) ?? 0) + 1);
+        doubled ||= (atOnce.get(who) ?? 0) > 1;
+        most = Math.max(most, [...atOnce.values()].reduce((a, b) => a + b, 0));
+        await new Promise((resolve) => setTimeout(resolve, slow));
+        atOnce.set(who, (atOnce.get(who) ?? 0) - 1);
+      }
       if (failAt === input.stage) throw new Error(`${who} could not answer: the provider could not be reached.`);
       if (input.attending) {
         return { statusNote: "Checked the credit as asked.", questions: [], assumptions: [], notes: [{ toParticipantId: input.attending.fromId, body: "Credit is fine." }] };
@@ -203,13 +216,39 @@ async function main(): Promise<void> {
   view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Order, plain", detail: "Two units.", requestedById: "" });
   await service.agentsIdle();
   view = service.getView(await owner());
-  expect("leaves the task where it was", `${taskOf(view, "Order, plain").stage} ${taskOf(view, "Order, plain").status}`, "intake in_progress");
+  expect("leaves the task with the agent that could not take it", `${taskOf(view, "Order, plain").stage} ${taskOf(view, "Order, plain").status}`, "planning in_progress");
+  expect("who still owes its step, so the task is not handed on without it", taskOf(view, "Order, plain").owed, true);
   expect("says so in the activity log", view.feed.some((f) => f.text.includes("could not carry") && f.text.includes("the provider could not be reached")), true);
   expect("and is not tried over and over", steps.join(" "), "Iris:intake Atlas:planning");
   failAt = null;
-  view = await service.applyAction(await owner(), { type: "ADVANCE", taskId: taskOf(view, "Order, plain").id });
+  expect("once the provider is back, the office asks the agent again", service.carryOnIdleWork(), 1);
   await service.agentsIdle();
-  expect("a person can still move it on, and the agents carry on from there", taskOf(service.getView(await owner()), "Order, plain").stage, "review");
+  expect("and the task goes on from there with the step taken", `${taskOf(service.getView(await owner()), "Order, plain").stage} ${steps.join(" ")}`, "review Iris:intake Atlas:planning Atlas:planning Ledger:note Atlas:planning Vera:execution Ledger:review");
+
+  console.log("\n-- each agent works through a queue of its own --");
+  steps.length = 0;
+  slowFor = (input) => (input.task.title.includes("slow") ? 400 : input.task.title.includes("quick") ? 30 : 0);
+  const began = Date.now();
+  for (const title of ["Order, slow one", "Order, slow two", "Order, quick"]) {
+    view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title, detail: "One unit.", requestedById: "" });
+  }
+  expect("a click does not wait for a model", Date.now() - began < 300, true);
+  expect("the task is with its agent, who owes the first step", `${taskOf(view, "Order, quick").stage} ${taskOf(view, "Order, quick").owed}`, "intake true");
+  const iris = view.office.participants.find((p) => p.displayName === "Iris")!.id;
+  expect("the agent is on one task with the other two waiting", JSON.stringify(view.agentLoad[iris] ?? null), JSON.stringify({ taskId: taskOf(view, "Order, slow one").id, waiting: 2 }));
+  // While agents are in the middle of slow steps, a person's click still goes through at once.
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const clicked = Date.now();
+  view = await service.applyAdminOperation(await owner(), { type: "RENAME_OFFICE", name: view.office.name });
+  expect("a person's change goes through while agents are mid-step", Date.now() - clicked < 200, true);
+  await service.agentsIdle();
+  view = service.getView(await owner());
+  expect("all three reach review", ["Order, slow one", "Order, slow two", "Order, quick"].map((t) => taskOf(view, t).stage).join(" "), "review review review");
+  expect("several agents were answering at the same time", most > 1, true);
+  expect("and no agent was ever answering two things at once", doubled, false);
+  expect("an agent takes its work in the order it arrived", steps.filter((s2) => s2 === "Iris:intake").length, 3);
+  expect("nothing is left on anyone's queue", Object.keys(view.agentLoad).length, 0);
+  slowFor = () => 0;
 
   console.log("\n-- with the setting off, a person moves each task on --");
   await service.applyAdminOperation(await owner(), { type: "SET_AUTO_HANDOFF", on: false });

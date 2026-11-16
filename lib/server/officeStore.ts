@@ -442,13 +442,14 @@ function writeTask(db: Db, officeId: string, task: Task): void {
     task.closedAt,
     task.wait?.until ?? null,
     task.wait?.reason ?? null,
+    task.owed ? 1 : 0,
   ];
   if (exists) {
     run(
       db,
       `UPDATE tasks
           SET title = ?, detail = ?, requested_by = ?, owner_id = ?, room_id = ?, stage = ?,
-              status = ?, created_at = ?, closed_at = ?, wait_until = ?, wait_reason = ?
+              status = ?, created_at = ?, closed_at = ?, wait_until = ?, wait_reason = ?, step_owed = ?
         WHERE id = ?`,
       ...values,
       task.id,
@@ -458,8 +459,8 @@ function writeTask(db: Db, officeId: string, task: Task): void {
       db,
       `INSERT INTO tasks
          (title, detail, requested_by, owner_id, room_id, stage, status, created_at, closed_at,
-          wait_until, wait_reason, id, office_id, position)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          wait_until, wait_reason, step_owed, id, office_id, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ...values,
       task.id,
       officeId,
@@ -1300,6 +1301,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     closed_at: number | null;
     wait_until: number | null;
     wait_reason: string | null;
+    step_owed: number;
   }>(db, "SELECT * FROM tasks WHERE office_id = ? ORDER BY position", officeRow.id).map((t) => ({
     id: t.id,
     title: t.title,
@@ -1322,6 +1324,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     createdAt: t.created_at,
     closedAt: t.closed_at,
     ...(t.wait_until !== null ? { wait: { until: t.wait_until, reason: t.wait_reason ?? "" } } : {}),
+    ...(t.step_owed === 1 ? { owed: true } : {}),
   }));
 
   // -- messages

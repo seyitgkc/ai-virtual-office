@@ -118,7 +118,10 @@ pricing, and a finance approval before a quote goes out.
 - **Two kinds of agent.** An AI agent asks a language model at each step and
   is shown only what it may read. A playbook agent follows when-then steps
   that a person writes in Settings, with no model involved.
-- **Agents that keep working between clicks.** An agent takes its step again
+- **Agents that keep working between clicks.** Each agent has a queue of its
+  own and works through it one item at a time while the others work through
+  theirs, so a slow model holds up one agent and nobody else, and a click
+  never waits for one. An agent takes its step again
   when its question is answered, looks at a note a colleague left it, and
   hands a finished step on to the next stage by itself. A task runs until it
   reaches a real halt: a question, missing access, an approval or the review.
@@ -645,8 +648,9 @@ sequenceDiagram
   B->>P: Panels and scene redraw
 ```
 
-Actions are applied one at a time. A transition can wait on an agent, and the
-next action must start from the state the previous one left behind.
+Actions are applied one at a time, and each starts from the state the
+previous one left behind. None of them waits on a model: an AI agent's step is
+put on that agent's queue and taken in the background.
 
 ### File map
 
@@ -894,12 +898,41 @@ flowchart TD
   look -->|"a halt, the review,<br/>or nothing left"| stop["Stops and waits<br/>for a person"]
 ```
 
-Each background step takes its own turn in the same queue as people's actions,
-so the office is never changed by two things at once and a person's click fits
-in between. The page shows "Agents are working" and refreshes every second and
-a half until they stop. A run takes at most twelve steps. A step that fails,
-for example because the provider cannot be reached, is written to the activity
-log and the task is left where it was for a person to move. Whether agents
+Each agent has a queue of its own and works through it one item at a time,
+as a person at a desk does, while its colleagues work through theirs. Five
+agents on five tasks run side by side. A task handed to an agent goes onto
+that agent's queue and is marked as owing a step, so it cannot be handed on
+again before the agent has taken it.
+
+The office itself is still changed by one thing at a time. What takes long,
+asking a model or calling a connected system, happens outside that turn:
+
+```mermaid
+sequenceDiagram
+  participant Q as An agent's queue
+  participant O as The office (one turn at a time)
+  participant M as Model or connected system
+  Q->>O: take a turn on this item
+  O-->>Q: this has to be asked first (nothing stored)
+  Q->>M: ask, for as long as it takes
+  M-->>Q: the answer
+  Q->>O: take the turn again with the answer
+  O-->>Q: stored, with what it leaves for other agents
+```
+
+The first turn works out what the agent would be shown and stops there. The
+second applies the answer to the office as it stands by then. If the task
+changed in between, for example because a colleague's note arrived, the
+answer is out of date and the agent is asked again. So a slow model holds up
+the one agent waiting for it, and a person's click never waits for a model:
+it returns as soon as the action is stored and the work is on a queue.
+
+The page shows what each agent is on and how much is waiting behind it, and
+refreshes every second and a half until they stop. A task takes at most forty
+background steps between a person's actions on it. A step that fails, for
+example because the provider cannot be reached, is written to the activity
+log. The task stays with that agent, still owing its step, and the office
+asks again a minute later, up to three times, before leaving it for a person. Whether agents
 hand a finished step on by themselves is a setting of the office, on for new
 offices and the demo. With it off, a person moves each task with Advance, and
 agents still pick up answers and notes.
@@ -1326,6 +1359,7 @@ erDiagram
     int closed_at
     int wait_until
     text wait_reason
+    integer step_owed
   }
   messages {
     text id PK
@@ -1514,7 +1548,7 @@ what exists, and what a real deployment would add.
 
 | Area | In this repository | A production version would add |
 | --- | --- | --- |
-| Orchestration | The engine applies one action at a time. After each one the server works through what agents now have in front of them, in the background, in the same queue as people's actions. | A durable job queue, so work in flight survives a restart and several servers can share it. Today that queue lives in one server's memory. |
+| Orchestration | The engine applies one action at a time. After each one the work it leaves goes onto the queues of the agents concerned, who work through them side by side. Models and connected systems are asked outside the turn that changes the office. | A durable job queue, so work in flight survives a restart and several servers can share it. Today that queue lives in one server's memory. |
 | State updates | Every change goes through the server, is checked against the person's permissions, stored, and written to the audit log. Browsers re-read every five seconds, or every second and a half while agents work. | Updates pushed to the browser over a WebSocket or server-sent events, so a change shows the moment it happens. |
 | Persistence | SQLite, with migrations that bring an older database forward on start. | Postgres, for more than one server process, point-in-time backups and row-level locking. The schema carries over as it is. |
 | Real AI | Working today: several providers per office or per account, a model per agent, structured replies that are validated, a retry on an unreadable reply, and limits enforced outside the model. | Streaming, so a long step shows progress. Per-office spending limits and usage reports. Tools an agent can call during a step, in place of a fixed snapshot of each system. |
@@ -1706,20 +1740,18 @@ playbook.
   use. No existing ordering, accounting or carrier system does, so each would
   need a small adapter in front of it, and none has been tried. A playbook's
   action has fixed field values.
-- The first step after a click is taken while the page waits, which is
-  several seconds with a model. What follows runs in the background.
-- Work waiting to be carried forward is held in the server's memory. If the
-  server restarts mid-run, the office finds the tasks that nothing is
-  carrying within a minute and hands them on, up to three times per task.
-  After that a person moves them on with Advance.
-- Agents take their steps one at a time across the whole server, and a
-  person's click waits its turn behind a step in progress. One slow model
-  call holds everything up for as long as it takes.
+- The agents' queues are held in the server's memory. What survives a restart
+  is stored with each task: whether its owner still owes a step, and whether
+  it waits for a day. Within a minute of starting, the office asks again each
+  agent that owes a step and hands on each task that is finished at its stage,
+  up to three times per task. After that a person moves it on with Advance.
+- An agent that is asked again because the task changed while it was thinking
+  costs a second model call.
 - A wait is stored with the task, so it survives a restart. The office looks
   for waits that have ended once a minute. The demo office keeps a clock that
   only moves with a click, so a wait there ends only when a person ends it.
-- A background run stops after twelve steps, so a very long chain needs one
-  more click.
+- A task stops being carried after forty background steps, until a person
+  acts on it.
 - A provider from someone's account can be used in an office only while its
   owner has a seat there.
 - When a connected system refuses or cannot be reached, the thread says so and
@@ -1863,12 +1895,12 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, and a need passed to a colleague | `npm run agents` | 133 of 133 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, and a need passed to a colleague | `npm run agents` | 135 of 135 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 55 of 55 pass |
 | Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, and an office built from nothing | `npm run admin` | 93 of 93 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
 | The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 151 of 151 pass |
-| Agents working between clicks, providers that belong to an account, and the sample office | `npm run loop` | 55 of 55 pass |
+| Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, providers that belong to an account, and the sample office | `npm run loop` | 66 of 66 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 

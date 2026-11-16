@@ -330,6 +330,13 @@ async function main(): Promise<void> {
   expect("and the thread says the wait is over", woken.state.office.messages.at(-1)!.body.includes("is over: Stock arrives."), true);
   const pushed = await reduce(ahead.at, { type: "ADVANCE", taskId: ahead.id }, new Recorder(() => ({ questions: [], assumptions: [] })));
   expect("a person who moves the task on ends the wait", pushed.state.office.tasks.find((t) => t.id === ahead.id)!.wait, undefined);
+  const lateFind = new Recorder((input) =>
+    input.stage === "review" ? { questions: [], assumptions: [], wait: { until: "2027-01-15", reason: "The second order is placed then." } } : { questions: [], assumptions: [] },
+  );
+  let late = (await reduce(withAi, { type: "SUBMIT_REQUEST", title: "Order 4785", detail: "One head.", requestedById: "p-dana" }, lateFind)).state;
+  for (let i = 0; i < 3; i++) late = (await reduce(late, { type: "ADVANCE", taskId: late.office.tasks.at(-1)!.id }, lateFind)).state;
+  expect("a task cannot wait at review", `${late.office.tasks.at(-1)!.status} ${late.office.tasks.at(-1)!.wait}`, "in_review undefined");
+  expect("but what the reviewer found outstanding is said, with how to make it wait", late.office.messages.at(-1)!.body.includes("still to do on 15 January 2027: The second order is placed then. A task cannot wait at this stage. Send it back"), true);
   expect("a reply with a day is read", toStepResult({ statusNote: "", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null, wait: { until: " 2027-01-15 ", reason: "Stock arrives." } }, vera).wait?.until, "2027-01-15");
   expect("and one that is not a calendar day is dropped", toStepResult({ statusNote: "", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null, wait: { until: "mid January", reason: "Stock arrives." } }, vera).wait, undefined);
 

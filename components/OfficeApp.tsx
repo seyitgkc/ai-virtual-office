@@ -269,7 +269,17 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         </div>
       )}
       {pending && <div className="working">Working...</div>}
-      {!pending && view.agentsAtWork && <div className="working">Agents are working...</div>}
+      {!pending && view.agentsAtWork && (
+        <div className="working">
+          {Object.entries(view.agentLoad)
+            .filter(([, load]) => load.taskId !== null)
+            .map(([id, load]) => {
+              const who = office.participants.find((p) => p.id === id)?.displayName ?? "An agent";
+              return `${who} is on ${load.taskId}${load.waiting > 0 ? `, ${load.waiting} more waiting` : ""}`;
+            })
+            .join(" · ") || "Agents are working..."}
+        </div>
+      )}
       {inviting && (
         <InviteDialog office={office} ownPermissions={view.viewer.permissions} onClose={() => setInviting(false)} />
       )}
