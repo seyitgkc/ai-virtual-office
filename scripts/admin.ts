@@ -300,6 +300,20 @@ async function main(): Promise<void> {
   expect("and no two agents are given the same one", drawn[0] !== drawn[1], true);
   expect("an empty name passes the check on what the browser sends", parseAdminOp({ ...unnamed })?.type, "ADD_AGENT");
 
+  console.log("\n-- keeping one more record --");
+  const keepIn = accounts.id;
+  let kept = apply(blank, { type: "SET_ROOM_RECORDS", roomId: keepIn, records: ["Tier 2 dealers take 18 percent off list."] }, me);
+  kept = apply(kept, { type: "KEEP_ROOM_RECORD", roomId: keepIn, record: "  Calder Heating   pays late, so ask Finance before invoicing.  " }, me);
+  expect("a record is added after the ones already kept, tidied", kept.floorplan.rooms.find((r) => r.id === keepIn)!.records.join("|"), "Tier 2 dealers take 18 percent off list.|Calder Heating pays late, so ask Finance before invoicing.");
+  expect("the same record is not kept twice", refusal(kept, { type: "KEEP_ROOM_RECORD", roomId: keepIn, record: "Calder Heating pays late, so ask Finance before invoicing." }, me)?.includes("already keeps that record"), true);
+  expect("an empty one is refused", refusal(kept, { type: "KEEP_ROOM_RECORD", roomId: keepIn, record: "   " }, me), "Write what should be kept.");
+  expect("and one that is too long", refusal(kept, { type: "KEEP_ROOM_RECORD", roomId: keepIn, record: "x".repeat(301) }, me), "Keep each record under 300 characters.");
+  const fullRoom = apply(kept, { type: "SET_ROOM_RECORDS", roomId: keepIn, records: Array.from({ length: 40 }, (_, i) => `Record ${i + 1}`) }, me);
+  expect("a full room takes no more", refusal(fullRoom, { type: "KEEP_ROOM_RECORD", roomId: keepIn, record: "One more." }, me)?.includes("already holds 40 records"), true);
+  expect("a corridor keeps none", refusal(kept, { type: "KEEP_ROOM_RECORD", roomId: kept.floorplan.rooms.find((r) => r.corridor)!.id, record: "Mind the step." }, me)?.includes("only for walking through"), true);
+  expect("it takes the permission to manage rooms", permissionFor({ type: "KEEP_ROOM_RECORD", roomId: keepIn, record: "x" }), "manage_rooms");
+  expect("what the browser sends is checked", parseAdminOp({ type: "KEEP_ROOM_RECORD", roomId: keepIn, record: 7 }), null);
+
   console.log("\n-- untrusted input --");
   expect("unknown operations are rejected", parseAdminOp({ type: "DROP_EVERYTHING" }), null);
   expect("a room without numbers is rejected", parseAdminOp({ type: "ADD_ROOM", name: "X room", attachTo: "main", side: "east", width: "8", depth: 8 }), null);

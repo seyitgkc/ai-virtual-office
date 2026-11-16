@@ -239,6 +239,11 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         dispatch={dispatch}
         onTokenOperation={tokenOperation}
         setup={setup}
+        keepRecord={
+          view.viewer.permissions.includes("manage_rooms")
+            ? (roomId, record) => adminOp({ type: "KEEP_ROOM_RECORD", roomId, record })
+            : null
+        }
         onClear={() => {
           // Back to where the selection was made.
           setSheet(selectedTaskId ? "work" : "office");

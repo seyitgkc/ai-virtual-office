@@ -658,6 +658,21 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 }
 .answer-box .btn { align-self: flex-start; margin: 0; }
 
+/* Keeping a line from a thread as a record of a room. */
+.note .meta .keep {
+  margin-left: auto; padding: 0; font: inherit; cursor: pointer;
+  color: rgba(110,169,217,0.9); background: none; border: 0;
+}
+.note .meta .keep:hover { text-decoration: underline; }
+.note .meta .kept { margin-left: auto; color: rgba(95,168,122,0.95); }
+.keep-box .keep-row { display: flex; gap: 8px; align-items: center; font-size: 10.5px; color: rgba(232,230,225,0.6); }
+.keep-box .keep-row select {
+  font: inherit; color: #e8e6e1; background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.14); border-radius: 6px; padding: 3px 6px; max-width: 170px;
+}
+.keep-box .keep-row .count { margin-left: auto; }
+.keep-box .hint { font-size: 10px; line-height: 1.4; color: rgba(232,230,225,0.45); }
+
 /* ---- phones: one section at a time, chosen from a bar at the bottom ---- */
 .phone-nav { display: none; }
 @media (max-width: 720px) {

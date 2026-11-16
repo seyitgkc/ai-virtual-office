@@ -359,6 +359,17 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
   lines.push(...records);
   lines.push("");
 
+  if (surroundings.earlier && surroundings.earlier.length > 0) {
+    lines.push(
+      "Earlier work in this office that may bear on this task. These tasks are closed. Their orders, bookings, invoices and tickets belong to them and are not part of this task. What they say was true when they closed, so check the live records before relying on any of it:",
+    );
+    for (const e of surroundings.earlier) {
+      const day = new Date(e.closedAt).toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
+      lines.push(`- ${e.taskId}, ${e.outcome} on ${day}, ${asData("earlier_title", e.title)}: ${asData("earlier_result", e.summary)}`);
+    }
+    lines.push("");
+  }
+
   lines.push("Thread so far, limited to what you may read:");
   if (priorMessages.length === 0) lines.push("(nothing yet)");
   // Work that was sent back is done again. What the thread records from

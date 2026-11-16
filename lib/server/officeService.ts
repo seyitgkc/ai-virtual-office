@@ -1317,6 +1317,8 @@ function describeAdminOp(op: AdminOp, before: Office, after: Office, actor: Part
       return `${who} updated the room ${quoted(after, op.roomId)}`;
     case "SET_ROOM_RECORDS":
       return `${who} changed the records kept in ${quoted(after, op.roomId)}`;
+    case "KEEP_ROOM_RECORD":
+      return `${who} added a record to ${quoted(after, op.roomId)}`;
     case "REMOVE_ROOM":
       return `${who} removed the room ${quoted(before, op.roomId)}`;
     case "SET_STAGE_ROOM":
@@ -1330,7 +1332,7 @@ export function applyAdminOperation(session: Session, op: AdminOp): Promise<Offi
     const db = officeDatabase();
     const before = loadOffice(db, session);
     const actor = requirePermission(before, session, permissionFor(op));
-    if (op.type === "SET_ROOM_RECORDS" && !mayRead({ ...contextOf(before.office, before.now), forTask: null }, actor, op.roomId)) {
+    if ((op.type === "SET_ROOM_RECORDS" || op.type === "KEEP_ROOM_RECORD") && !mayRead({ ...contextOf(before.office, before.now), forTask: null }, actor, op.roomId)) {
       throw new OfficeError(403, "You cannot read that room, so you cannot change its records.");
     }
 

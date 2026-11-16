@@ -89,6 +89,8 @@ export type AdminOp =
     }
   | { type: "UPDATE_ROOM"; roomId: string; name?: string; purpose?: string }
   | { type: "SET_ROOM_RECORDS"; roomId: string; records: string[] }
+  /** Add one line to what a room keeps, leaving the rest as it is. */
+  | { type: "KEEP_ROOM_RECORD"; roomId: string; record: string }
   | { type: "REMOVE_ROOM"; roomId: string }
   | { type: "SET_STAGE_ROOM"; stage: ConfigurableStage; roomId: string };
 
@@ -165,6 +167,7 @@ export function permissionFor(op: AdminOp): Permission {
     case "ADD_ROOM":
     case "UPDATE_ROOM":
     case "SET_ROOM_RECORDS":
+    case "KEEP_ROOM_RECORD":
     case "REMOVE_ROOM":
     case "SET_STAGE_ROOM":
       return "manage_rooms";
@@ -711,6 +714,19 @@ export function applyAdminOp(
       };
     }
 
+    case "KEEP_ROOM_RECORD": {
+      const room = notCorridor(findRoom(op.roomId), "No records are kept");
+      const record = op.record.trim().replace(/\s+/g, " ");
+      if (record.length === 0) refuse("Write what should be kept.");
+      if (record.length > 300) refuse("Keep each record under 300 characters.");
+      if (room.records.includes(record)) refuse(`${room.name} already keeps that record.`);
+      if (room.records.length >= 40) refuse(`${room.name} already holds 40 records. Remove one in Settings first.`);
+      return {
+        ...office,
+        floorplan: { ...floorplan, rooms: floorplan.rooms.map((r) => (r.id === room.id ? { ...room, records: [...room.records, record] } : r)) },
+      };
+    }
+
     case "REMOVE_ROOM": {
       const room = findRoom(op.roomId);
       if (floorplan.rooms.length === 1) refuse("An office needs at least one room.");
@@ -1047,6 +1063,10 @@ export function parseAdminOp(input: unknown): AdminOp | null {
             roomId: o.roomId,
             records: o.records.filter((r): r is string => typeof r === "string").slice(0, 60),
           }
+        : null;
+    case "KEEP_ROOM_RECORD":
+      return text(o.roomId, 60) && typeof o.record === "string" && o.record.length <= 2000
+        ? { type: "KEEP_ROOM_RECORD", roomId: o.roomId, record: o.record }
         : null;
     case "REMOVE_ROOM":
       return text(o.roomId, 60) ? { type: "REMOVE_ROOM", roomId: o.roomId } : null;

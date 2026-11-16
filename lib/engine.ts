@@ -19,6 +19,7 @@
  *     from a language model, and the engine cannot tell them apart.
  */
 
+import { earlierWork, type EarlierWork } from "./recall";
 import {
   ANY_ROOM,
   canOwnWorkIn,
@@ -148,6 +149,8 @@ export interface AgentSurroundings {
    * agent's access to the system's room.
    */
   systems: (ConnectedSystem & { readable: boolean; mayAct: boolean })[];
+  /** Closed tasks that bear on this one, as far as the agent may read them. */
+  earlier?: EarlierWork[];
 }
 
 export interface AgentStepInput {
@@ -1356,6 +1359,7 @@ async function runAgent(
       purpose: s.purpose,
       roomId: roomForStage(office, s.stage),
     })),
+    earlier: earlierWork(office, task, participant, ctx),
     systems: office.systems.map((system) => ({
       ...system,
       readable: roomsShowing(system).some((room) => resolveAccess(participant, room, "read", ctx).effect === "allow"),

@@ -13,6 +13,8 @@ import { initialState } from "../lib/initialState";
 import { deskState, statusReply } from "../lib/agentState";
 import { canRead, resolveAccess } from "../lib/model";
 import { authorize, contextOf, parseAction } from "../lib/policy";
+import { applyAdminOp } from "../lib/admin";
+import { earlierWork } from "../lib/recall";
 import { span, workReport } from "../lib/report";
 import { buildChatSystem } from "../lib/server/chat";
 import { buildStepPrompt, dataMarker, readReply, SYSTEM_PROMPT, systemPrompt, toStepResult } from "../lib/server/modelRuntime";
@@ -368,6 +370,44 @@ async function main(): Promise<void> {
   let full = papers;
   for (let n = 0; n < 5; n++) full = (await reduce(full, { type: "ADD_DOCUMENT", taskId: papersId, name: `more-${n}.txt`, body: "text", byId: "p-sam" }, calm)).state;
   expect("a task carries five documents at most", full.office.tasks.find((t) => t.id === papersId)!.documents?.length, 5);
+
+  console.log("\n-- what the office knows from finished work --");
+  const worked = new Recorder((input) =>
+    input.stage === "execution"
+      ? { questions: [], assumptions: [], output: { label: "Order placed", body: `Order placed for ${input.task.title}. Paid late twice this year, so Finance asked for sign-off.` } }
+      : { questions: [], assumptions: [] },
+  );
+  const finish = async (from: typeof withAi, title: string, detail: string, close: boolean) => {
+    let at = (await reduce(from, { type: "SUBMIT_REQUEST", title, detail, requestedById: "p-dana" }, worked)).state;
+    const id = at.office.tasks.at(-1)!.id;
+    for (let i = 0; i < 3; i++) at = (await reduce(at, { type: "ADVANCE", taskId: id }, worked)).state;
+    if (close) at = (await reduce(at, { type: "DECIDE", taskId: id, byId: "p-dana", verdict: "approved" }, worked)).state;
+    return { at, id };
+  };
+  const calderJob = await finish(withAi, "Calder order: 3 condensers", "Calder Heating, account CAL-3310, want 3 x GREE-CU-24.", true);
+  const brightlineJob = await finish(calderJob.at, "Brightline order: thermostats", "Brightline Mechanical, account BRT-0931, want 20 thermostats.", true);
+  worked.inputs.length = 0;
+  const again2 = await finish(brightlineJob.at, "Calder order: 2 more condensers", "Calder Heating, account CAL-3310, want 2 more units.", false);
+  const seenBy = (id: string) => worked.inputs.findLast((i) => i.participant.id === id && i.task.id === again2.id)!;
+  const veraSaw = seenBy(worker ?? "").surroundings.earlier ?? [];
+  expect("an agent is shown the closed task that bears on this one", veraSaw.map((e) => e.taskId).join(), calderJob.id);
+  expect("with what was concluded on it", veraSaw[0]?.summary.includes("Paid late twice this year"), true);
+  expect("and not the one about another dealer", veraSaw.some((e) => e.taskId === brightlineJob.id), false);
+  expect("an agent that may not read the room it was concluded in is shown nothing", (seenBy("p-iris").surroundings.earlier ?? []).length, 0);
+  const concludedIn = again2.at.office.messages.findLast((m) => m.taskId === calderJob.id && m.kind === "output")!.roomId;
+  const let_in = (await reduce(again2.at, { type: "GRANT_ACCESS", participantId: "p-iris", room: concludedIn, scopes: ["read"], effect: "allow", reason: "To see past orders", grantedBy: "p-dana" }, worked)).state;
+  const irisNow = earlierWork(let_in.office, let_in.office.tasks.find((t) => t.id === again2.id)!, let_in.office.participants.find((p) => p.id === "p-iris")!, contextOf(let_in.office, let_in.now));
+  expect("and is shown it once that room is opened to it", irisNow.map((e) => e.taskId).join(), calderJob.id);
+  const recalled = buildStepPrompt(seenBy(worker ?? ""));
+  expect("it is given as data, with the warning that it is finished work", recalled.includes("These tasks are closed.") && recalled.includes(`<office_data kind="earlier_result">Order placed for Calder order: 3 condensers.`), true);
+  expect("a task that is still open is never given as earlier work", (seenBy(worker ?? "").surroundings.earlier ?? []).some((e) => e.taskId === again2.id), false);
+  const lesson = "Calder Heating pays late, so ask Finance before invoicing.";
+  const taught = { ...again2.at, office: applyAdminOp(again2.at.office, { type: "KEEP_ROOM_RECORD", roomId: concludedIn, record: lesson }, "p-dana", () => "k1") };
+  worked.inputs.length = 0;
+  const later = await finish(taught, "Calder order: filters", "Calder Heating, account CAL-3310, want 40 filters.", false);
+  const toldTo = (id: string) => worked.inputs.findLast((i) => i.participant.id === id && i.task.id === later.id)!.surroundings.rooms.some((r) => r.records.includes(lesson));
+  expect("a line kept as a record is told to an agent that reads that room", toldTo(worker ?? ""), true);
+  expect("and to no agent that does not", toldTo("p-iris"), false);
 
   console.log("\n-- the report --");
   const demo = workReport(initialState.office);

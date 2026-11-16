@@ -191,6 +191,11 @@ async function main(): Promise<void> {
   expect("nor a provider", await refusal(async () => service.saveProviderSettings(await robin.read(), { ...anthropic, apiKey: fakeKey })), 403);
   expect("nor an invite", await refusal(async () => invites.createInvite(await robin.read(), { displayName: "Friend", title: "Guest", roleId: memberRole, roomId: mainRoom })), 403);
   expect("nor the office's removal", await refusal(async () => service.removeOffice(await robin.read(), second.officeId)), 403);
+  expect("nor a record in a room they cannot read", await refusal(async () => service.applyAdminOperation(await robin.read(), { type: "KEEP_ROOM_RECORD", roomId: mainRoom, record: "Orders over 5000 dollars need sign-off." })), 403);
+  view = await service.applyAdminOperation(await owner.read(), { type: "SET_ROLE_GRANT", roleId: managerRole, room: mainRoom, scope: "read", effect: "allow" });
+  robinView = await service.applyAdminOperation(await robin.read(), { type: "KEEP_ROOM_RECORD", roomId: mainRoom, record: "Orders over 5000 dollars need sign-off." });
+  expect("once they read the room, the record is kept there", robinView.office.floorplan.rooms.find((r) => r.id === mainRoom)!.records.at(-1), "Orders over 5000 dollars need sign-off.");
+  expect("and it is still there when the office is read again", service.getView(await owner.read()).office.floorplan.rooms.find((r) => r.id === mainRoom)!.records.includes("Orders over 5000 dollars need sign-off."), true);
   expect("the provider list is not sent to them", robinView.providers.length, 0);
   expect("their view lists what they may do", robinView.viewer.permissions.join(), "manage_rooms");
   view = await service.applyAdminOperation(await owner.read(), { type: "SET_ROLE_PERMISSION", roleId: managerRole, permission: "invite_people", allowed: true });

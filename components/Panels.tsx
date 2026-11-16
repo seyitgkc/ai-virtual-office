@@ -15,6 +15,7 @@ import {
   type Office,
   type Participant,
   type QuestionMessage,
+  type Room,
   type Task,
   type TaskStatus,
 } from "../lib/model";
@@ -567,8 +568,11 @@ export function Inspector({
   dispatch,
   onTokenOperation,
   setup,
+  keepRecord,
   onClear,
 }: {
+  /** Adds a line to a room's records. Null when the viewer may not manage rooms. */
+  keepRecord: KeepRecord | null;
   /** What a new office still needs, for whoever is setting it up. */
   setup: { steps: SetupStep[]; onOpen: (tab: SetupTab) => void } | null;
   office: Office;
@@ -599,6 +603,7 @@ export function Inspector({
         viewer={viewer}
         hidden={hiddenMessages[task.id] ?? 0}
         dispatch={dispatch}
+        keepRecord={keepRecord}
         onClear={onClear}
       />
     );
@@ -681,6 +686,7 @@ function TaskInspector({
   viewer,
   hidden,
   dispatch,
+  keepRecord,
   onClear,
 }: {
   office: Office;
@@ -690,8 +696,17 @@ function TaskInspector({
   /** Messages on this task the viewer is not allowed to read. */
   hidden: number;
   dispatch: (a: Action) => void;
+  keepRecord: KeepRecord | null;
   onClear: () => void;
 }) {
+  // A record is kept in a room, so only rooms this person reads are offered.
+  const recordRooms = useMemo(
+    () =>
+      keepRecord
+        ? office.floorplan.rooms.filter((r) => !r.corridor && resolveAccess(viewer, r.id, "read", ctx).effect === "allow")
+        : [],
+    [keepRecord, office.floorplan.rooms, viewer, ctx],
+  );
   const name = (id: string): string =>
     office.participants.find((p) => p.id === id)?.displayName ?? id;
 
@@ -1120,7 +1135,7 @@ function TaskInspector({
             </div>
           )}
           {thread.map((m) => (
-            <ThreadLine key={m.id} message={m} name={name} />
+            <ThreadLine key={m.id} message={m} name={name} keepRecord={keepRecord} rooms={recordRooms} />
           ))}
         </div>
       </div>
@@ -1128,13 +1143,96 @@ function TaskInspector({
   );
 }
 
+/** Adds one line to a room's records and says whether it was taken. */
+type KeepRecord = (roomId: string, record: string) => Promise<boolean>;
+
+const RECORD_LENGTH = 300;
+
+/**
+ * Turns something said on a task into a record of a room, so that whoever
+ * works there later is told it. The person chooses the words and the room.
+ */
+function KeepBox({
+  message,
+  rooms,
+  keepRecord,
+  onDone,
+}: {
+  message: Message;
+  rooms: Room[];
+  keepRecord: KeepRecord;
+  onDone: (keptIn: string | null) => void;
+}) {
+  const [text, setText] = useState(message.body.replace(/\s+/g, " ").trim().slice(0, RECORD_LENGTH));
+  const [roomId, setRoomId] = useState(rooms.some((r) => r.id === message.roomId) ? message.roomId : (rooms[0]?.id ?? ""));
+  const [saving, setSaving] = useState(false);
+  const ready = !saving && roomId !== "" && text.trim().length > 0;
+  return (
+    <form
+      className="answer-box keep-box"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!ready) return;
+        setSaving(true);
+        void keepRecord(roomId, text.trim()).then((kept) => {
+          setSaving(false);
+          if (kept) onDone(rooms.find((r) => r.id === roomId)?.name ?? null);
+        });
+      }}
+    >
+      <textarea
+        aria-label="The record to keep"
+        rows={3}
+        maxLength={RECORD_LENGTH}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <div className="keep-row">
+        <label>
+          Keep in{" "}
+          <select aria-label="Room" value={roomId} onChange={(e) => setRoomId(e.target.value)}>
+            {rooms.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="count">
+          {text.length} of {RECORD_LENGTH}
+        </span>
+      </div>
+      <div className="keep-row">
+        <button type="submit" className="btn primary" disabled={!ready}>
+          Keep record
+        </button>
+        <button type="button" className="btn" onClick={() => onDone(null)}>
+          Cancel
+        </button>
+      </div>
+      <div className="hint">Everyone who reads that room, agents included, is shown its records while working there.</div>
+    </form>
+  );
+}
+
 function ThreadLine({
   message,
   name,
+  keepRecord,
+  rooms,
 }: {
   message: Message;
   name: (id: string) => string;
+  keepRecord: KeepRecord | null;
+  /** The rooms a record can be kept in. */
+  rooms: Room[];
 }) {
+  const [keeping, setKeeping] = useState(false);
+  const [keptIn, setKeptIn] = useState<string | null>(null);
+  const keepable = keepRecord !== null && rooms.length > 0 && (message.kind === "output" || message.kind === "answer");
+  // Kept earlier, word for word: say so in place of offering it again.
+  const asRecord = message.body.replace(/\s+/g, " ").trim();
+  const kept = keptIn ?? (keepable ? (rooms.find((r) => r.records.includes(asRecord))?.name ?? null) : null);
   const cls =
     message.kind === "question"
       ? "q"
@@ -1155,8 +1253,25 @@ function ThreadLine({
         {message.kind === "output" && message.simulated && (
           <span style={{ color: "#e0a23f" }}>from a playbook</span>
         )}
+        {keepable && !keeping && kept && <span className="kept">Kept in {kept}</span>}
+        {keepable && !keeping && !kept && (
+          <button type="button" className="keep" onClick={() => setKeeping(true)}>
+            Keep as a record
+          </button>
+        )}
       </div>
       {message.body}
+      {keepable && keeping && keepRecord && (
+        <KeepBox
+          message={message}
+          rooms={rooms}
+          keepRecord={keepRecord}
+          onDone={(room) => {
+            setKeeping(false);
+            if (room) setKeptIn(room);
+          }}
+        />
+      )}
     </div>
   );
 }
