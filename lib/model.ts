@@ -574,7 +574,13 @@ export function canRead(
 ): boolean {
   if (message.audience.to === "everyone") return true;
   if (message.audience.to === "participant") {
-    return message.audience.id === viewer.id || message.fromId === viewer.id;
+    if (message.audience.id === viewer.id || message.fromId === viewer.id) return true;
+    // A question on a task and its answer settle something about the work,
+    // so whoever may read the room they were said in can read them too. The
+    // stages that follow would otherwise ask the same thing again. A note
+    // stays between the two it passed between.
+    if (message.kind !== "question" && message.kind !== "answer") return false;
+    return resolveAccess(viewer, message.roomId, "read", { ...ctx, forTask: message.taskId }).effect === "allow";
   }
   // A grant made for one task opens that task's messages in the room, not
   // every task's.

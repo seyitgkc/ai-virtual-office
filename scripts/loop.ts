@@ -168,6 +168,18 @@ async function main(): Promise<void> {
   view = service.getView(await owner());
   expect("a person can end a wait early, and the work carries on", `${taskOf(view, "Second order, wait for stock").stage} ${view.office.messages.some((m) => m.body.includes("ended the wait early"))}`, "review true");
 
+  console.log("\n-- work that nothing is carrying is picked up --");
+  service.pauseAgents(true);
+  view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Order, turn lost", detail: "One unit.", requestedById: "" });
+  await service.agentsIdle();
+  expect("with the run lost, the task sits where its first step left it", taskOf(service.getView(await owner()), "Order, turn lost").stage, "intake");
+  expect("and nothing is picked up while agents are paused", service.carryOnIdleWork(), 0);
+  service.pauseAgents(false);
+  expect("the office finds it", service.carryOnIdleWork(), 1);
+  await service.agentsIdle();
+  expect("and carries it through to review", taskOf(service.getView(await owner()), "Order, turn lost").stage, "review");
+  expect("leaving nothing else to pick up", service.carryOnIdleWork(), 0);
+
   console.log("\n-- two colleagues answer the same agent --");
   steps.length = 0;
   service.useAgentRuntime({

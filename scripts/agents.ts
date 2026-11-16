@@ -275,6 +275,22 @@ async function main(): Promise<void> {
   expect("an agent kept out of a system's room cannot read it", await seen([]), "true false false");
   expect("shown in the agent's own room, it can be read but still not used", await seen(["fulfilment"]), "true true false");
 
+  console.log("\n-- an answer reaches the stages that follow --");
+  const asksFirst = new Recorder((input) =>
+    input.stage === "intake" && !input.priorMessages.some((m) => m.kind === "answer")
+      ? { questions: [{ body: "Which branch ships?", toParticipantId: "p-dana", blocking: true }], assumptions: [] }
+      : { questions: [], assumptions: [] },
+  );
+  let told = (await reduce(withAi, { type: "SUBMIT_REQUEST", title: "Order 4790", detail: "One head.", requestedById: "p-dana" }, asksFirst)).state;
+  const toldId = told.office.tasks.at(-1)!.id;
+  told = (await reduce(told, { type: "ANSWER_QUESTION", questionId: told.office.tasks.at(-1)!.openQuestionIds[0], answeredById: "p-dana", body: "Laval." }, asksFirst)).state;
+  told = (await reduce(told, { type: "ADVANCE", taskId: toldId }, asksFirst)).state;
+  const planner = asksFirst.inputs.findLast((i) => i.stage === "planning")!;
+  expect("the planner, who may read Reception, sees what was asked there and the answer", planner.priorMessages.filter((m) => m.kind === "question" || m.kind === "answer").map((m) => m.body).join(" "), "Which branch ships? Laval.");
+  told = (await reduce(told, { type: "ADVANCE", taskId: toldId }, asksFirst)).state;
+  const worker2 = asksFirst.inputs.findLast((i) => i.stage === "execution")!;
+  expect("an agent that may not read Reception still does not", worker2.priorMessages.some((m) => m.kind === "answer"), false);
+
   console.log("\n-- waiting for a day --");
   const waitsFor = async (until: string) => {
     const dated = new Recorder((input) =>

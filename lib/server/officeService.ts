@@ -601,6 +601,36 @@ export function wakeDueTasks(now: number = Date.now()): number {
   return due.length;
 }
 
+/**
+ * Pick up work that nothing is carrying. A task an agent has finished with at
+ * its stage should have been handed on at once. When it was not, because the
+ * server restarted mid-run or a turn was lost, it would sit until a person
+ * noticed. Each task is given a few such pushes and then left for a person.
+ */
+export function carryOnIdleWork(): number {
+  const db = officeDatabase();
+  const state = loopState();
+  if (state.paused) return 0;
+  let picked = 0;
+  for (const { id } of all<{ id: string }>(db, "SELECT id FROM offices WHERE id <> ?", DEMO_OFFICE_ID)) {
+    if (state.runs.has(id)) continue;
+    const loaded = loadEngineState(db, id);
+    if (!loaded) continue;
+    const idle = loaded.office.tasks
+      .filter((t) => (idlePushes.get(t.id) ?? 0) < IDLE_PUSHES)
+      .map((t) => t.id);
+    const ready = readyToHandOn(loaded.office, new Set(idle), new Set());
+    if (!ready) continue;
+    idlePushes.set(ready, (idlePushes.get(ready) ?? 0) + 1);
+    carryOn(id, [], [ready]);
+    picked++;
+  }
+  return picked;
+}
+
+const IDLE_PUSHES = 3;
+const idlePushes = new Map<string, number>();
+
 const WAKE_EVERY_MS = 60_000;
 const clock = globalThis as unknown as { __officeClock?: ReturnType<typeof setInterval> };
 
@@ -610,6 +640,7 @@ function startClock(): void {
   clock.__officeClock = setInterval(() => {
     try {
       wakeDueTasks();
+      carryOnIdleWork();
     } catch (error) {
       console.error("Waking waiting tasks failed.", error);
     }

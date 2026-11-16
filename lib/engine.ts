@@ -498,7 +498,7 @@ export async function reduce(
         status: owner ? "in_progress" : "requested",
         openQuestionIds: [],
         assumptionIds: [],
-        history: [{ at: now, summary: `Request received in ${room}` }],
+        history: [{ at: now, summary: `Request received in ${roomName(office, room)}` }],
         createdAt: now,
         closedAt: null,
       };
@@ -671,6 +671,12 @@ export async function reduce(
         notes.push(`No question ${action.questionId}`);
         return done();
       }
+      // One answer settles a question. A second click, or a second person,
+      // changes nothing.
+      if (office.messages.some((m) => m.kind === "answer" && m.questionId === question.id)) {
+        notes.push(`${question.taskId}: that question was already answered`);
+        return done();
+      }
 
       const answer: Message = {
         id: nextId("m"),
@@ -705,7 +711,11 @@ export async function reduce(
             : task.status,
         history: [
           ...task.history,
-          { at: now, summary: `Question answered by ${action.answeredById}`, messageId: answer.id },
+          {
+            at: now,
+            summary: `Question answered by ${office.participants.find((p) => p.id === action.answeredById)?.displayName ?? action.answeredById}`,
+            messageId: answer.id,
+          },
         ],
       };
       office = replaceTask(office, unblocked);
@@ -1545,7 +1555,11 @@ async function runAgent(
 
   // Notes come after anything done in a system, so a note that speaks of an
   // order follows the order in the thread.
-  for (const draft of (result.notes ?? []).slice(0, 2)) tell(draft.toParticipantId, draft.body);
+  // An AI agent that has just acted takes the step again with the system's
+  // answer, and tells its colleagues then. A note written before the answer
+  // could only say that something was asked for.
+  const answerComing = acted && !afterAction && participant.agentType === "ai";
+  if (!answerComing) for (const draft of (result.notes ?? []).slice(0, 2)) tell(draft.toParticipantId, draft.body);
   for (const { to, need } of passedOn.slice(0, 2)) {
     tell(
       to.id,
@@ -1589,12 +1603,12 @@ async function runAgent(
     };
   }
 
-  // The owner's step says afresh whether the task waits for a day. A step that
-  // names none ends a wait set earlier. Nothing waits at a halt, at a stage a
-  // person closes, or on the word of an agent that only came for a note.
+  // The owner can set the task to wait for a day. A wait stays until that day
+  // or until a person ends it: a later step that names no day leaves it be,
+  // since the owner is also woken for a colleague's note in the meantime.
+  // Nothing waits at a halt, at a stage a person closes, or on the word of an
+  // agent that only came for a note.
   if (!attending) {
-    const { wait: _earlier, ...unwaiting } = updated;
-    updated = unwaiting;
     const until = result.wait ? Date.parse(`${result.wait.until.trim()}T14:00:00Z`) : NaN;
     const reason = result.wait?.reason.trim().slice(0, 200) ?? "";
     const open = updated.status === openStatus(stage) && !stageSpec(stage).humanGate;
