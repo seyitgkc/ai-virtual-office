@@ -673,14 +673,17 @@ export function agentLoad(officeId: string): OfficeView["agentLoad"] {
   for (const [agent, taskId] of work.current) {
     load[agent] = { taskId, forNote: work.attending.get(agent) === taskId, waiting: 0, queued: [] };
   }
+  // The order an agent will take them in: urgent work first, then as it arrived.
+  const urgent = urgentTasks(officeId);
   for (const [agent, queue] of work.queues) {
     if (queue.length === 0 && !load[agent]) continue;
     const now = load[agent];
+    const waiting = queue.map((wake) => wake.taskId);
     load[agent] = {
       taskId: now?.taskId ?? null,
       forNote: now?.forNote ?? false,
       waiting: queue.length,
-      queued: queue.map((wake) => wake.taskId),
+      queued: [...waiting.filter((id) => urgent.has(id)), ...waiting.filter((id) => !urgent.has(id))],
     };
   }
   return load;

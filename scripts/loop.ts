@@ -320,6 +320,8 @@ async function main(): Promise<void> {
   }
   view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Queue rush", detail: "One unit, today.", requestedById: "", urgent: true });
   expect("the urgent task is stored as urgent", taskOf(view, "Queue rush").urgent, true);
+  const titleOf = (id: string): string => view.office.tasks.find((t) => t.id === id)?.title ?? id;
+  expect("what waits for the agent is listed in the order it will be taken", (view.agentLoad[iris]?.queued ?? []).map(titleOf).join(", "), "Queue rush, Queue two, Queue three");
   await service.agentsIdle();
   expect("the agent finishes what it is on, then takes the urgent task ahead of the rest", taken.join(", "), "Queue one, Queue rush, Queue two, Queue three");
   view = service.getView(await owner());
