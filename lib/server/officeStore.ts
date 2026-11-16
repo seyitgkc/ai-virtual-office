@@ -30,7 +30,7 @@ import {
 } from "../model";
 import type { EngineState } from "../engine";
 import type { ConnectedSystem } from "../systems";
-import { storedOperations } from "./systems";
+import { storedOperations, storedShownRooms } from "./systems";
 import { all, get, run, transaction, type Db } from "./db";
 
 const flag = (value: boolean): number => (value ? 1 : 0);
@@ -1013,6 +1013,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
   }));
   const roomIds = new Set(rooms.map((r) => r.id));
   const operations = storedOperations(db);
+  const shownRooms = storedShownRooms(db);
   const systems: ConnectedSystem[] = all<{
     id: string;
     name: string;
@@ -1025,6 +1026,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
       id: s.id,
       name: s.name,
       roomId: s.room_id,
+      shownIn: shownRooms.get(s.id) ?? [],
       description: s.description,
       operations: operations.get(s.id) ?? [],
       needsApproval: s.needs_approval === 1,

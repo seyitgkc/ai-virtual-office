@@ -13,6 +13,7 @@ const EMPTY_FORM = {
   name: "",
   description: "",
   roomId: "",
+  shownIn: [] as string[],
   baseUrl: "",
   apiKey: "",
   needsApproval: true,
@@ -48,7 +49,11 @@ export function RecordsTab({
   const [shown, setShown] = useState<{ id: string; records: string[] } | null>(null);
   const locked = !view.systemsEditable;
   const editing = systems.find((s) => s.id === form.id) ?? null;
-  const formRoom = readable.some((r) => r.id === form.roomId) ? form.roomId : (readable[0]?.id ?? "");
+  // Nothing is kept in a corridor, so a system is neither operated from one
+  // nor shown in one.
+  const homes = readable.filter((r) => !r.corridor);
+  const formRoom = homes.some((r) => r.id === form.roomId) ? form.roomId : (homes[0]?.id ?? "");
+  const alsoShown = form.shownIn.filter((id) => id !== formRoom && homes.some((r) => r.id === id));
   const keyState = (s: SystemView): string =>
     s.keyUnreadable ? "Stored but unreadable. Enter it again." : s.hasKey ? `Ends in ${s.keyHint}` : "None";
 
@@ -73,7 +78,7 @@ export function RecordsTab({
             ? "Sample services run beside this office. Their connections are fixed here, and an order in the storefront waits for approval. An office of your own connects its own."
             : locked
               ? "Sign in with a password account to connect a system."
-              : "A system is connected to one room. Reading the room shows the system's live records. Acting in the room allows its operations, and a system can also hold each action until a person approves it. Agents are told when and how to use a system in the words of its description, which you can change."
+              : "A system is operated from one room. Reading that room shows the system's live records, and they can be shown in further rooms too. Acting in that room allows its operations, and a system can also hold each action until a person approves it. Agents are told when and how to use a system in the words of its description, which you can change."
         }
       >
         <div className="table-scroll">
@@ -81,7 +86,7 @@ export function RecordsTab({
             <thead>
               <tr>
                 <th scope="col">Name</th>
-                <th scope="col">Room</th>
+                <th scope="col">Operated from</th>
                 <th scope="col">Agents are told</th>
                 <th scope="col">With act access, agents can</th>
                 <th scope="col">Each action</th>
@@ -103,7 +108,12 @@ export function RecordsTab({
                     {s.name}
                     <span className="cell-note">{s.baseUrl}</span>
                   </td>
-                  <td>{roomName(s.roomId)}</td>
+                  <td>
+                    {roomName(s.roomId)}
+                    {s.shownIn.length > 0 && (
+                      <span className="cell-note">Records also shown in {s.shownIn.map(roomName).join(", ")}</span>
+                    )}
+                  </td>
                   <td className="muted cell-long">{s.description}</td>
                   <td className="muted">{s.operations.join(", ") || "Nothing"}</td>
                   <td className="muted">{s.needsApproval ? "Waits for approval" : "Goes straight through"}</td>
@@ -131,6 +141,7 @@ export function RecordsTab({
                               name: s.name,
                               description: s.description,
                               roomId: s.roomId,
+                              shownIn: s.shownIn,
                               baseUrl: s.baseUrl,
                               apiKey: "",
                               needsApproval: s.needsApproval,
@@ -160,7 +171,10 @@ export function RecordsTab({
           <div className="live-records" aria-live="polite">
             <p className="hint">
               {systems.find((s) => s.id === shown.id)?.name ?? "The system"} holds this right now. Agents who can read{" "}
-              {roomName(systems.find((s) => s.id === shown.id)?.roomId ?? "")} are shown the same lines.
+              {[...new Set([systems.find((s) => s.id === shown.id)?.roomId ?? "", ...(systems.find((s) => s.id === shown.id)?.shownIn ?? [])])]
+                .map(roomName)
+                .join(" or ")}{" "}
+              are shown the same lines.
             </p>
             {shown.records.length === 0 ? (
               <p className="hint">It holds no records.</p>
@@ -187,6 +201,7 @@ export function RecordsTab({
                 name: form.name,
                 description: form.description,
                 roomId: formRoom,
+                shownIn: alsoShown,
                 baseUrl: form.baseUrl,
                 needsApproval: form.needsApproval,
                 ...(form.apiKey ? { apiKey: form.apiKey } : {}),
@@ -206,15 +221,44 @@ export function RecordsTab({
               />
             </label>
             <label>
-              Room
+              Operated from
               <select value={formRoom} onChange={(e) => setForm({ ...form, roomId: e.target.value })}>
-                {readable.map((room) => (
+                {homes.map((room) => (
                   <option key={room.id} value={room.id}>
                     {room.name}
                   </option>
                 ))}
               </select>
             </label>
+            <p className="wide hint">
+              Whoever may read this room is shown the system&apos;s records. Whoever may act in this room can use the
+              system. Who that is follows the roles and access rules, as for everything else in the room.
+            </p>
+            {homes.length > 1 && (
+              <fieldset className="wide scopes">
+                <legend>Records also shown in</legend>
+                {homes
+                  .filter((room) => room.id !== formRoom)
+                  .map((room) => (
+                    <label key={room.id} className="check">
+                      <input
+                        type="checkbox"
+                        checked={alsoShown.includes(room.id)}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            shownIn: e.target.checked ? [...alsoShown, room.id] : alsoShown.filter((id) => id !== room.id),
+                          })
+                        }
+                      />
+                      {room.name}
+                    </label>
+                  ))}
+                <p className="hint">
+                  Readers of these rooms see the records too. Nobody can use the system from them.
+                </p>
+              </fieldset>
+            )}
             <label>
               API key
               <input

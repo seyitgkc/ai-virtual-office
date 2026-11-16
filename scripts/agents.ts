@@ -222,6 +222,7 @@ async function main(): Promise<void> {
     id: "sys-test-ledger",
     name: "Accounts ledger",
     roomId: "finance",
+    shownIn: [],
     description: "Dealer accounts.",
     operations: [{ id: "record_payment", label: "Record a payment", method: "POST" as const, path: "/v1/payments", fields: [{ name: "amount", label: "Amount", hint: "100", place: "body" as const }] }],
     needsApproval: true,
@@ -261,6 +262,19 @@ async function main(): Promise<void> {
     expect("but it is asked for again once the work is sent back", stalledTask().status, "blocked_question");
   }
 
+  console.log("\n-- a system's records shown in a further room --");
+  const seen = async (shownIn: string[]) => {
+    const watching = new Recorder(() => ({ questions: [], assumptions: [] }));
+    const office = { ...withAi.office, systems: [{ ...ledgerSystem, shownIn }] };
+    let at = (await reduce({ ...withAi, office }, { type: "SUBMIT_REQUEST", title: "Order 4770", detail: "One head.", requestedById: "p-dana" }, watching)).state;
+    for (let i = 0; i < 2; i++) at = (await reduce(at, { type: "ADVANCE", taskId: at.office.tasks.at(-1)!.id }, watching)).state;
+    const input = watching.inputs.findLast((i) => i.stage === "execution")!;
+    const system = input.surroundings.systems[0];
+    return `${input.participant.id === worker} ${system.readable} ${system.mayAct}`;
+  };
+  expect("an agent kept out of a system's room cannot read it", await seen([]), "true false false");
+  expect("shown in the agent's own room, it can be read but still not used", await seen(["fulfilment"]), "true true false");
+
   console.log("\n-- repeated assumptions and halted drafts --");
   const guess = { assumed: "Standard delivery terms apply", because: "None were named", confidence: "medium" as const };
   const repeating = new Recorder((input) => ({
@@ -294,8 +308,8 @@ async function main(): Promise<void> {
     const office = {
       ...initialState.office,
       systems: [
-        { id: "sys-shop", name: "Shop", description: STOREFRONT.description, operations: STOREFRONT.operations, roomId: "reception", needsApproval: false },
-        { id: "sys-freight", name: "Freight", description: CARRIER.description, operations: CARRIER.operations, roomId: "reception", needsApproval: false },
+        { id: "sys-shop", name: "Shop", description: STOREFRONT.description, operations: STOREFRONT.operations, roomId: "reception", shownIn: [], needsApproval: false },
+        { id: "sys-freight", name: "Freight", description: CARRIER.description, operations: CARRIER.operations, roomId: "reception", shownIn: [], needsApproval: false },
       ],
       participants: initialState.office.participants.map((p) => (p.id === "p-iris" ? { ...p, agentType } : p)),
     };
@@ -416,7 +430,7 @@ async function main(): Promise<void> {
   expect("a reply that is not JSON says so", "problem" in unreadable && unreadable.problem, "its answer was not valid JSON");
   expect("an empty reply says so", (readReply("  ") as { problem: string }).problem, "its answer was empty");
   expect("a list in place of an object is refused", "problem" in readReply("[1, 2]"), true);
-  expect("the prompt marks a system that holds actions for approval", buildStepPrompt({ ...vera, surroundings: { ...vera.surroundings, systems: [{ id: "sys-shop", name: "Shop", description: STOREFRONT.description, operations: STOREFRONT.operations, roomId: "fulfilment", needsApproval: true, readable: true, mayAct: true }] } }).includes("It holds every action until a person approves it."), true);
+  expect("the prompt marks a system that holds actions for approval", buildStepPrompt({ ...vera, surroundings: { ...vera.surroundings, systems: [{ id: "sys-shop", name: "Shop", description: STOREFRONT.description, operations: STOREFRONT.operations, roomId: "fulfilment", shownIn: [], needsApproval: true, readable: true, mayAct: true }] } }).includes("It holds every action until a person approves it."), true);
   expect("and the instructions say an action is not done until the system answers", SYSTEM_PROMPT.includes("An action is not done until the thread shows the system's answer"), true);
 
   console.log("\n-- an agent is told where its own part ends --");

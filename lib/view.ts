@@ -57,7 +57,10 @@ export interface SystemView {
   description: string;
   /** What can be done in it, as the system lists it. */
   operations: string[];
+  /** The room it is operated from. */
   roomId: string;
+  /** Further rooms whose readers are shown its records. */
+  shownIn: string[];
   baseUrl: string;
   /** Each action an agent takes here waits for a person's approval. */
   needsApproval: boolean;

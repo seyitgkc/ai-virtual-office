@@ -32,6 +32,7 @@ export type SystemOp =
       name: string;
       description: string;
       roomId: string;
+      shownIn?: string[];
       baseUrl: string;
       apiKey?: string;
       needsApproval?: boolean;

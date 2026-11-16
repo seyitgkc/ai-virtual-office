@@ -318,6 +318,21 @@ async function main(): Promise<void> {
   expect("its key is stored encrypted", (all(db, "SELECT api_key_cipher AS c FROM connected_systems WHERE id = ?", shopId)[0] as { c: string }).c.includes(key), false);
   expect("and never sent to the browser", JSON.stringify(view).includes(key), false);
 
+  const shopAs = { id: shopId, name: "Shop", description: view.systems[0].description, roomId: warehouse, baseUrl: shopUrl };
+  const corridorId = view.office.floorplan.rooms.find((r) => r.corridor)!.id;
+  view = await service.saveSystemSettings(await owner(), { ...shopAs, shownIn: [main, warehouse, main] });
+  expect("its records can be shown in a further room, listed once and never the room it is operated from", view.systems[0].shownIn.join(), main);
+  expect("and the office knows it", view.office.systems[0].shownIn.join(), main);
+  view = await service.saveSystemSettings(await owner(), shopAs);
+  expect("a change that does not mention those rooms leaves them alone", view.systems[0].shownIn.join(), main);
+  expect("a room that does not exist cannot show them", await refusal(async () => service.saveSystemSettings(await owner(), { ...shopAs, shownIn: ["nowhere"] })), 400);
+  expect("nor can a corridor", await refusal(async () => service.saveSystemSettings(await owner(), { ...shopAs, shownIn: [corridorId] })), 400);
+  expect("and no system is operated from a corridor", await refusal(async () => service.saveSystemSettings(await owner(), { ...shopAs, roomId: corridorId })), 400);
+  view = await service.saveSystemSettings(await owner(), { ...shopAs, roomId: main, shownIn: [main] });
+  expect("moved to a room that showed its records, it is no longer shown there as an extra", `${view.systems[0].roomId === main} ${view.systems[0].shownIn.length}`, "true 0");
+  view = await service.saveSystemSettings(await owner(), { ...shopAs, shownIn: [] });
+  expect("and the further rooms can be cleared", `${view.systems[0].roomId === warehouse} ${view.systems[0].shownIn.length}`, "true 0");
+
   const memberRole = Object.values(view.office.roles).find((r) => r.permissions.length === 0)!.id;
   view = await service.applyAdminOperation(await owner(), { type: "ADD_AGENT", displayName: "Nova", title: "Order desk", roleId: memberRole, roomId: main, capabilities: [], agentType: "playbook" });
   const nova = view.office.participants.find((p) => p.displayName === "Nova")!.id;

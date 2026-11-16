@@ -45,6 +45,7 @@ import {
   checkedFields,
   DECLINE,
   operationOf,
+  roomsShowing,
   type ConnectedSystem,
   type SystemAction,
 } from "./systems";
@@ -1171,7 +1172,7 @@ async function runAgent(
     })),
     systems: office.systems.map((system) => ({
       ...system,
-      readable: resolveAccess(participant, system.roomId, "read", ctx).effect === "allow",
+      readable: roomsShowing(system).some((room) => resolveAccess(participant, room, "read", ctx).effect === "allow"),
       mayAct: resolveAccess(participant, system.roomId, "act", ctx).effect === "allow",
     })),
   };

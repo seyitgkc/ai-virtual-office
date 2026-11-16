@@ -23,6 +23,7 @@ export async function POST(request: Request) {
           name: text(body.name),
           description: text(body.description),
           roomId: text(body.roomId),
+          ...(Array.isArray(body.shownIn) ? { shownIn: body.shownIn.filter((r: unknown): r is string => typeof r === "string").slice(0, 40) } : {}),
           baseUrl: text(body.baseUrl),
           ...(typeof body.apiKey === "string" ? { apiKey: body.apiKey } : {}),
           ...(typeof body.needsApproval === "boolean" ? { needsApproval: body.needsApproval } : {}),

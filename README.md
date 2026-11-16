@@ -400,7 +400,12 @@ starts with no work. Unlike the public demo it is yours alone, so model calls
 are spent only by people you invite.
 
 **Records and systems.** A room's records are sentences, one per line, such
-as a policy or an account's terms. A connected system belongs to one room. To
+as a policy or an account's terms. A connected system is operated from one room:
+whoever may read that room is shown its records, and whoever may act there can
+use it. Its records can also be shown in further rooms, for people and agents
+who need the figures and should not get the rest of the room. Nobody can use
+the system from those rooms, so a denial on the room it is operated from still
+holds. To
 connect one, give its address and API key. The office asks the system to
 describe itself and stores the answer: a name, a description of when and how
 to use it, and the operations it offers with the fields each one takes. The
@@ -587,7 +592,7 @@ flowchart TB
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>60 tables in 3NF")]
+  db[("SQLite<br/>61 tables in 3NF")]
   llm["Anthropic or an OpenAI<br/>compatible service"]
 
   hook -->|"action"| http
@@ -1017,7 +1022,7 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 60 tables. One database holds many offices. The schema is in
+SQLite, one file, 61 tables. One database holds many offices. The schema is in
 third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
@@ -1051,6 +1056,8 @@ erDiagram
   rooms ||--o{ room_records : keeps
   rooms ||--o{ connected_systems : "is connected to"
   connected_systems ||--o{ system_operations : offers
+  connected_systems ||--o{ system_shown_rooms : "is also shown in"
+  rooms ||--o{ system_shown_rooms : shows
   system_operations ||--o{ system_operation_fields : takes
   rooms ||--o{ desks : holds
   rooms ||--o{ stage_rooms : hosts
@@ -1114,6 +1121,11 @@ erDiagram
     text label
     text method
     text path
+  }
+  system_shown_rooms {
+    text system_id PK
+    text room_id PK
+    integer position
   }
   system_operation_fields {
     text system_id PK
@@ -1477,7 +1489,7 @@ Each choice is here because it removed something to run or to explain.
 | Framework | Next.js 16, App Router, as a Node server | One project holds the page, the API and the server logic, so the demo deploys as a single container. Route handlers are plain functions, which keeps the API easy to read. |
 | Language | TypeScript 7, strict | The access model and the engine are mostly types and pure functions. Strict types catch a wrong room id or a missing field before anything runs. |
 | 3D | three.js through @react-three/fiber and drei | The scene is declared as React components next to the panels that describe it, and it re-renders from the same state. No separate game loop to keep in step with the UI. |
-| Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (60 tables in third normal form), so moving to Postgres is a change of driver. |
+| Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (61 tables in third normal form), so moving to Postgres is a change of driver. |
 | Sign-in | jose for signed tokens, Node's scrypt for passwords | Small, standard and dependency-light. No outside identity service is needed for the demo to be public. |
 | AI providers | The Anthropic SDK, and plain `fetch` for anything that speaks the OpenAI chat interface | Two connection styles cover nearly every hosted and self-hosted model, so an office is not tied to one vendor. zod checks every reply before the engine sees it. |
 | Checks | tsx running plain scripts | No test framework to learn. Each script prints what it checks in a sentence, and the Docker image refuses to build unless all of them pass. |
@@ -1809,11 +1821,11 @@ sample services the same way.
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 43 of 43 pass |
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, and a need passed to a colleague | `npm run agents` | 118 of 118 pass |
+| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, and a need passed to a colleague | `npm run agents` | 120 of 120 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 55 of 55 pass |
 | Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, and an office built from nothing | `npm run admin` | 88 of 88 pass |
 | Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 84 of 84 pass |
-| The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 143 of 143 pass |
+| The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, and resetting the demo | `npm run systems` | 151 of 151 pass |
 | Agents working between clicks, providers that belong to an account, and the sample office | `npm run loop` | 40 of 40 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |

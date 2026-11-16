@@ -43,6 +43,15 @@ const rows = (db: Db, officeId: string): SystemRow[] =>
 const row = (db: Db, officeId: string, id: string): SystemRow | undefined =>
   get<SystemRow>(db, `SELECT s.* ${IN_OFFICE} AND s.id = ?`, officeId, id);
 
+/** The further rooms that show each stored system's records, by system id. */
+export function storedShownRooms(db: Db): Map<string, string[]> {
+  const found = new Map<string, string[]>();
+  for (const r of all<{ system_id: string; room_id: string }>(db, "SELECT system_id, room_id FROM system_shown_rooms ORDER BY system_id, position")) {
+    found.set(r.system_id, [...(found.get(r.system_id) ?? []), r.room_id]);
+  }
+  return found;
+}
+
 /** What can be done in every stored system, by system id. */
 export function storedOperations(db: Db): Map<string, SystemOperation[]> {
   const fields = all<{ system_id: string; operation: string; name: string; label: string; hint: string; place: "path" | "body" }>(
@@ -102,6 +111,7 @@ function writeOperations(db: Db, systemId: string, operations: SystemOperation[]
 /** The connected systems of an office, without their keys. */
 export function systemViews(db: Db, officeId: string): SystemView[] {
   const operations = storedOperations(db);
+  const shown = storedShownRooms(db);
   return rows(db, officeId).map((r) => {
     const key = unseal(r.api_key_cipher);
     return {
@@ -110,6 +120,7 @@ export function systemViews(db: Db, officeId: string): SystemView[] {
       description: r.description,
       operations: (operations.get(r.id) ?? []).map((o) => o.label),
       roomId: r.room_id,
+      shownIn: shown.get(r.id) ?? [],
       baseUrl: r.base_url,
       needsApproval: r.needs_approval === 1,
       hasKey: key !== null,
@@ -125,7 +136,10 @@ export interface SystemInput {
   name: string;
   /** When to use the system and how. Left empty, the system's own description is used. */
   description: string;
+  /** The room it is operated from. */
   roomId: string;
+  /** Further rooms whose readers are shown its records. Left out, they stay as they are. */
+  shownIn?: string[];
   baseUrl: string;
   apiKey?: string;
   /** Hold each action an agent takes here until a person approves it. */
@@ -140,6 +154,8 @@ export interface SystemChange {
   name: string;
   description: string;
   roomId: string;
+  /** Null when the further rooms are left as they are. */
+  shownIn: string[] | null;
   baseUrl: string;
   cipher: string;
   hint: string | null;
@@ -157,7 +173,15 @@ export async function checkSystem(db: Db, office: Office, input: SystemInput): P
   const existing = input.id ? row(db, office.id, input.id) : undefined;
   if (input.id && !existing) throw new SystemError("That connected system does not exist in this office.");
   if (!existing && rows(db, office.id).length >= 12) throw new SystemError("An office can connect up to 12 systems.");
-  if (!office.floorplan.rooms.some((r) => r.id === input.roomId)) throw new SystemError("That room does not exist.");
+  const home = office.floorplan.rooms.find((r) => r.id === input.roomId);
+  if (!home) throw new SystemError("That room does not exist.");
+  if (home.corridor) throw new SystemError(`${home.name} is only for walking through, so no system is operated from it.`);
+  const shownIn = input.shownIn ? [...new Set(input.shownIn)].filter((id) => id !== home.id) : null;
+  for (const id of shownIn ?? []) {
+    const room = office.floorplan.rooms.find((r) => r.id === id);
+    if (!room) throw new SystemError("One of the rooms to show the records in does not exist.");
+    if (room.corridor) throw new SystemError(`${room.name} is only for walking through, so nothing is shown there.`);
+  }
 
   let baseUrl: string;
   try {
@@ -198,6 +222,7 @@ export async function checkSystem(db: Db, office: Office, input: SystemInput): P
     name,
     description,
     roomId: input.roomId,
+    shownIn,
     baseUrl,
     cipher,
     hint,
@@ -248,6 +273,14 @@ export function storeSystem(db: Db, change: SystemChange): string {
     );
   }
   if (change.manifest) writeOperations(db, id, change.manifest.operations);
+  // The room it is operated from shows its records already.
+  run(db, "DELETE FROM system_shown_rooms WHERE system_id = ? AND room_id = ?", id, change.roomId);
+  if (change.shownIn) {
+    run(db, "DELETE FROM system_shown_rooms WHERE system_id = ?", id);
+    change.shownIn.forEach((room, position) =>
+      run(db, "INSERT INTO system_shown_rooms (system_id, room_id, position) VALUES (?, ?, ?)", id, room, position),
+    );
+  }
   return change.name;
 }
 

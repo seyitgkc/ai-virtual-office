@@ -40,11 +40,20 @@ export interface ServiceManifest {
   operations: SystemOperation[];
 }
 
+/** Every room whose readers are shown a system's records. */
+export const roomsShowing = (system: { roomId: RoomId; shownIn: RoomId[] }): RoomId[] => [system.roomId, ...system.shownIn];
+
 /** A connected system as the office knows it. Its address and key stay on the server. */
 export interface ConnectedSystem {
   id: string;
   name: string;
+  /** The room it is operated from: acting in it takes `act` on this room. */
   roomId: RoomId;
+  /**
+   * Further rooms whose readers are shown its records. Nobody may act in it
+   * from these, so a denial on the room it is operated from still holds.
+   */
+  shownIn: RoomId[];
   /** When to use it and how. Agents are given this, and a person can reword it. */
   description: string;
   operations: SystemOperation[];

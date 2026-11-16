@@ -413,6 +413,7 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 .settings .form-inline .btn { white-space: nowrap; }
 .settings .scopes { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .settings .scopes legend { width: 100%; padding: 0; margin-bottom: 4px; }
+.settings .scopes p.hint { width: 100%; margin: 0; }
 .settings .check {
   display: flex; flex-direction: row; align-items: center; gap: 6px; white-space: nowrap;
   font-size: 12px; text-transform: none; letter-spacing: 0; color: rgba(232,230,225,0.8);

@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -127,6 +127,15 @@ CREATE TABLE connected_systems (
   updated_at     INTEGER NOT NULL,
   -- 1 when each action an agent takes here waits for a person's approval.
   needs_approval INTEGER NOT NULL DEFAULT 0 CHECK (needs_approval IN (0, 1))
+) STRICT;
+
+-- Further rooms whose readers are shown a system's records. Acting in the
+-- system still takes the room it is operated from.
+CREATE TABLE system_shown_rooms (
+  system_id TEXT NOT NULL REFERENCES connected_systems(id) ON DELETE CASCADE,
+  room_id   TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  position  INTEGER NOT NULL,
+  PRIMARY KEY (system_id, room_id)
 ) STRICT;
 
 -- What can be done in a system, as the system itself lists it.
@@ -1075,5 +1084,17 @@ CREATE INDEX systems_by_room ON connected_systems(room_id);
   10: /* sql */ `
 ALTER TABLE rooms ADD COLUMN corridor INTEGER NOT NULL DEFAULT 0 CHECK (corridor IN (0, 1));
 UPDATE rooms SET corridor = 1 WHERE id = 'hall' OR id LIKE 'hall-%';
+`,
+  // Version 12 lets a system's records be shown in rooms other than the one
+  // it is operated from.
+  11: /* sql */ `
+-- Further rooms whose readers are shown a system's records. Acting in the
+-- system still takes the room it is operated from.
+CREATE TABLE system_shown_rooms (
+  system_id TEXT NOT NULL REFERENCES connected_systems(id) ON DELETE CASCADE,
+  room_id   TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  position  INTEGER NOT NULL,
+  PRIMARY KEY (system_id, room_id)
+) STRICT;
 `,
 };

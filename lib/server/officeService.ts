@@ -84,6 +84,7 @@ import {
   systemViews,
   type SystemInput,
 } from "./systems";
+import { roomsShowing } from "../systems";
 
 /** The seeded distributor. It exists only for password-free demo sign-in. */
 export const DEMO_OFFICE_ID = initialState.office.id;
@@ -945,7 +946,7 @@ export function sendDirectMessage(session: Session, toId: string, said: string):
         reply = statusReply(office, other, sender, ctx);
       } else {
         const shared = office.systems
-          .filter((s) => mayRead(ctx, other, s.roomId) && mayRead(ctx, sender, s.roomId))
+          .filter((s) => roomsShowing(s).some((r) => mayRead(ctx, other, r)) && roomsShowing(s).some((r) => mayRead(ctx, sender, r)))
           .map((s) => s.id);
         const live = shared.length > 0 ? await liveRecords(db, office.id, shared) : [];
         const system = buildChatSystem(office, other, sender, ctx, live, dataMarker());
