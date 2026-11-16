@@ -302,7 +302,7 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
     if (input.windingUp) {
       lines.push(
         `This task was rejected and is being wound up. Nothing more is to be done on its work. You are here only because ${from} left you this note about one thing you did on it: ${asData("note", input.attending.body)}`,
-        `Deal with that one thing and nothing else. Where it is to be taken back, add one entry to "actions" using the operation the note names, with the record number the note gives. Take back only what the note names: an operation that names any other record is refused. Then answer ${from} with one note that says plainly what happened: that you have asked the system for it, or that nothing was to be done, or why it cannot be done. Once the thread shows the system's answer, say what the system answered. Questions, assumptions, needs and an output are ignored here.`,
+        `Deal with that one thing and nothing else. Where it is to be taken back, add one entry to "actions" using the operation the note names, with the record number the note gives. Take back only what the note names: an operation that names any other record is refused. Report to ${from} once, with one note, when there is something final to say. In the step where you add the action, leave "notes" empty: you are asked again as soon as the system has answered, and that is when you tell them what it answered. Where nothing is to be done, or it cannot be done, say so in a note straight away. Questions, assumptions, needs and an output are ignored here.`,
       );
     } else {
       lines.push(

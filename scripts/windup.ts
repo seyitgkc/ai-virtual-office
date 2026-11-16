@@ -203,6 +203,14 @@ async function main(): Promise<void> {
     expect("only the office takes the winding up further", authorize(at.office, contextOf(at.office, at.now), dana, { type: "WIND_UP", taskId: id }).allowed, false);
   }
 
+  {
+    // A system may add how things stood right after. That is left out of the list.
+    const at = start.before;
+    const invoice = at.office.messages.find((m) => m.taskId === id && m.body.includes("raised invoice"))!;
+    const wordy = { ...at.office, messages: at.office.messages.map((m) => (m.id === invoice.id ? { ...m, body: `${m.body.replace(/\.$/, "")}, 1,927.30 CAD due on 2026-12-16. The account now has 8,027.30 CAD owed.` } : m)) };
+    expect("only what was done is listed, not the balance quoted at the time", deedsOf(wordy, id).standing.at(-1)!.summary, "raised invoice INV-1003, 1,927.30 CAD due on 2026-12-16");
+  }
+
   console.log("\n-- undo all of them --");
   {
     const said = await answer(start.at, id, UNDO_ALL, brain);
@@ -217,6 +225,7 @@ async function main(): Promise<void> {
     const end = await settle(said.state, id, said.wake, brain);
     const shown = brain.inputs[told];
     expect("the agent is told the task was rejected and what to do", buildStepPrompt(shown).includes("This task was rejected and is being wound up."), true);
+    expect("and to report once, when the system has answered", buildStepPrompt(shown).includes('In the step where you add the action, leave "notes" empty'), true);
     expect("each thing is taken back, newest first", world.calls.slice(3).join(" | "), "void_invoice:INV-1003,The task was rejected | cancel_shipment:SH-1002 | cancel_order:SO-1001");
     expect("nothing is left standing in the systems", world.standing(), "");
     expect("and only then does the task close", `${taskOf(end, id).status} ${taskOf(end, id).closedAt !== null} ${taskOf(end, id).windUp}`, "rejected true undefined");
@@ -251,6 +260,7 @@ async function main(): Promise<void> {
     expect("the person is told what is still in place, and why", q.body.includes("Still in place: (1)") && q.body.includes("booked shipment SH-1002") && q.body.includes("it has left the dock"), true);
     expect("and what was taken back", q.body.includes("Taken back: (1)") && q.body.includes("placed order SO-1001"), true);
     expect("and is asked what next", q.kind === "question" && q.options?.join(" | "), `${TRY_AGAIN} | ${CLOSE_AS_IS}`);
+    expect("in words that say it could not be taken back", q.body.startsWith("Not everything this rejected task did could be taken back."), true);
 
     w.refuse.clear();
     const again = await answer(stuck, r.id, TRY_AGAIN, b);
@@ -302,6 +312,7 @@ async function main(): Promise<void> {
     expect("the freight is cancelled and the order kept", w.standing(), "SO");
     expect("the person is shown what still stands before it closes", `${taskOf(end, r.id).closedAt} ${openQuestion(end, r.id).body.includes("placed order SO-1001")}`, "null true");
     expect("with what the agent said about it", openQuestion(end, r.id).body.includes("said: I left that as it is, as you asked"), true);
+    expect("in words that fit an answer that was followed", openQuestion(end, r.id).body.startsWith("The agents have acted on your answer, and part of what this rejected task did is still in place."), true);
   }
 
   console.log("\n-- a playbook agent --");

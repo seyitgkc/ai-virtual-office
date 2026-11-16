@@ -1618,7 +1618,11 @@ async function windUp(
     office,
     task,
     personId,
-    `Not everything this rejected task did could be settled. ${undone.length > 0 ? `Taken back: ${listDeeds(office, undone)} ` : ""}Still in place: ${still} What next? Choose one, or say it in your own words.`,
+    `${
+      undoAll
+        ? "Not everything this rejected task did could be taken back."
+        : "The agents have acted on your answer, and part of what this rejected task did is still in place."
+    } ${undone.length > 0 ? `Taken back: ${listDeeds(office, undone)} ` : ""}Still in place: ${still} What next? Choose one, or say it in your own words.`,
     [TRY_AGAIN, CLOSE_AS_IS],
     now,
     nextId,

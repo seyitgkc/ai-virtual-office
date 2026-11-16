@@ -43,6 +43,13 @@ function summaryOf(message: StatusMessage, system: ConnectedSystem | undefined):
 }
 
 /**
+ * What was done, without what the system added about how things stood right
+ * after: a balance quoted when an invoice was raised is out of date by the
+ * time anyone reads the list.
+ */
+const firstSentence = (said: string): string => (/^(.*?[.!?])\s+[A-Z]/.exec(said)?.[1] ?? said).replace(/\.+$/, "");
+
+/**
  * What a task did in connected systems, split into what still stands and
  * what has since been taken back, each oldest first. An operation that takes
  * another back removes the thing it names. Where a system gives no record
@@ -69,7 +76,7 @@ export function deedsOf(office: Office, taskId: string): { standing: Deed[]; und
       message,
       system,
       byId: message.fromId,
-      summary: summaryOf(message, system),
+      summary: firstSentence(summaryOf(message, system)),
       undo: system?.operations.find((o) => o.undoes === message.did.operation),
     });
   }
