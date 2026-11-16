@@ -23,7 +23,6 @@ import {
   type AgentStepResult,
 } from "../engine";
 import type { AccessScope, Message } from "../model";
-import { SYSTEM_INFO } from "../systems";
 
 export { DEFAULT_AGENT_MODEL } from "../aiModels";
 
@@ -282,15 +281,16 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
   if (surroundings.systems.length > 0) {
     lines.push("Connected systems:");
     for (const system of surroundings.systems) {
-      const operations = SYSTEM_INFO[system.kind].operations
+      const operations = system.operations
         .map((o) => `${o.id} (${o.fields.map((f) => `${f.name}, e.g. "${f.hint}"`).join("; ")})`)
         .join(" | ");
       lines.push(
-        `- ${system.id} (${system.name}, a ${SYSTEM_INFO[system.kind].label.toLowerCase()}) in the room "${system.roomId}". ` +
+        `- ${system.id} (${system.name}) in the room "${system.roomId}". ` +
           `${system.readable ? "You can read it." : "You cannot read it."} ` +
           `${system.mayAct ? "You may act in it." : "You may not act in it."} ` +
-          `${system.needsApproval ? "It holds every action until a person approves it. " : ""}Operations: ${operations}.`,
+          `${system.needsApproval ? "It holds every action until a person approves it. " : ""}Operations: ${operations || "none"}.`,
       );
+      lines.push(`  When and how to use it: ${asData("system description", system.description)}`);
     }
     lines.push("");
   }

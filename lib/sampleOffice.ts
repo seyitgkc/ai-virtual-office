@@ -72,9 +72,3 @@ export function sampleOffice(input: {
     autoHandoff: true,
   };
 }
-
-/** The rooms the sample services are connected to, in a sample office. */
-export const sampleSystemRooms = (suffix: string): { storefront: string; carrier: string } => ({
-  storefront: `fulfilment-${suffix}`,
-  carrier: `planning-${suffix}`,
-});

@@ -5,7 +5,6 @@ import {
   removeSystemSettings,
   saveSystemSettings,
 } from "@/lib/server/officeService";
-import { SYSTEM_KINDS, type SystemKind } from "@/lib/systems";
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
 
@@ -19,15 +18,15 @@ export async function POST(request: Request) {
     const body = await readJson(request);
     switch (body?.operation) {
       case "save": {
-        if (!SYSTEM_KINDS.includes(body.kind as SystemKind)) throw new OfficeError(400, "Choose what kind of system this is.");
         return saveSystemSettings(session, {
           ...(typeof body.id === "string" ? { id: body.id } : {}),
           name: text(body.name),
-          kind: body.kind as SystemKind,
+          description: text(body.description),
           roomId: text(body.roomId),
           baseUrl: text(body.baseUrl),
           ...(typeof body.apiKey === "string" ? { apiKey: body.apiKey } : {}),
           ...(typeof body.needsApproval === "boolean" ? { needsApproval: body.needsApproval } : {}),
+          ...(body.refresh === true ? { refresh: true } : {}),
         });
       }
       case "remove":

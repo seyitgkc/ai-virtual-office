@@ -30,6 +30,7 @@ import {
 } from "../model";
 import type { EngineState } from "../engine";
 import type { ConnectedSystem } from "../systems";
+import { storedOperations } from "./systems";
 import { all, get, run, transaction, type Db } from "./db";
 
 const flag = (value: boolean): number => (value ? 1 : 0);
@@ -1006,15 +1007,23 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     records: (recordsByRoom.get(r.id) ?? []).map((record) => record.body),
   }));
   const roomIds = new Set(rooms.map((r) => r.id));
+  const operations = storedOperations(db);
   const systems: ConnectedSystem[] = all<{
     id: string;
     name: string;
-    kind: ConnectedSystem["kind"];
+    description: string;
     room_id: string;
     needs_approval: number;
-  }>(db, "SELECT id, name, kind, room_id, needs_approval FROM connected_systems ORDER BY position")
+  }>(db, "SELECT id, name, description, room_id, needs_approval FROM connected_systems ORDER BY position")
     .filter((s) => roomIds.has(s.room_id))
-    .map((s) => ({ id: s.id, name: s.name, kind: s.kind, roomId: s.room_id, needsApproval: s.needs_approval === 1 }));
+    .map((s) => ({
+      id: s.id,
+      name: s.name,
+      roomId: s.room_id,
+      description: s.description,
+      operations: operations.get(s.id) ?? [],
+      needsApproval: s.needs_approval === 1,
+    }));
 
   const stageRooms = Object.fromEntries(
     all<{ stage: string; room_id: string }>(

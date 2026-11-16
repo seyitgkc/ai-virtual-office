@@ -13,7 +13,7 @@ import {
   type Participant,
   type PlaybookStep,
 } from "../lib/model";
-import { operationOf, SYSTEM_INFO, type SystemAction } from "../lib/systems";
+import { operationOf, type ConnectedSystem, type SystemAction } from "../lib/systems";
 import type { ProviderOp } from "../lib/useOffice";
 import type { OfficeView, ProviderKind, ProviderView } from "../lib/view";
 import { KindBadge } from "./Panels";
@@ -445,10 +445,10 @@ const blankStep = (id: string): PlaybookStep => ({
   then: { statusNote: "", output: null, question: null, assumption: null, need: null, action: null, note: null },
 });
 
-/** One optional part of a step's outcome, switched on with a tick box. */
-const blankAction = (systemId: string, kind: keyof typeof SYSTEM_INFO): SystemAction => ({
-  systemId,
-  operation: SYSTEM_INFO[kind].operations[0].id,
+/** The first thing a system offers, with nothing filled in. */
+const blankAction = (system: ConnectedSystem): SystemAction => ({
+  systemId: system.id,
+  operation: system.operations[0]?.id ?? "",
   fields: {},
 });
 
@@ -466,7 +466,8 @@ function ActionFields({
   if (!system) {
     return <p className="hint">The system this step used is no longer connected, so the step skips it.</p>;
   }
-  const operation = operationOf(system.kind, action.operation) ?? SYSTEM_INFO[system.kind].operations[0];
+  const operation = operationOf(system, action.operation) ?? system.operations[0];
+  if (!operation) return <p className="hint">{system.name} lists nothing that can be done in it.</p>;
   return (
     <>
       <div className="step-fields">
@@ -476,7 +477,7 @@ function ActionFields({
             value={system.id}
             onChange={(e) => {
               const next = systems.find((s) => s.id === e.target.value);
-              if (next) onChange(blankAction(next.id, next.kind));
+              if (next) onChange(blankAction(next));
             }}
           >
             {systems.map((s) => (
@@ -492,7 +493,7 @@ function ActionFields({
             value={operation.id}
             onChange={(e) => onChange({ systemId: system.id, operation: e.target.value, fields: {} })}
           >
-            {SYSTEM_INFO[system.kind].operations.map((o) => (
+            {system.operations.map((o) => (
               <option key={o.id} value={o.id}>
                 {o.label}
               </option>
@@ -865,7 +866,7 @@ function PlaybookEditor({
               <Part
                 label="Do something in a connected system"
                 on={then.action !== null}
-                onToggle={(on) => setThen({ action: on && systems[0] ? blankAction(systems[0].id, systems[0].kind) : null })}
+                onToggle={(on) => setThen({ action: on && systems[0] ? blankAction(systems[0]) : null })}
               >
                 {then.action && (
                   <ActionFields

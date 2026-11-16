@@ -2,6 +2,7 @@
  * Checks what an agent is shown and how a model's reply is cleaned up. No
  * network: the model is never called. Run: npx tsx scripts/agents.ts
  */
+import { CARRIER, STOREFRONT } from "../services/manifests.ts";
 import {
   reduce,
   type AgentRuntime,
@@ -223,8 +224,8 @@ async function main(): Promise<void> {
     const office = {
       ...initialState.office,
       systems: [
-        { id: "sys-shop", name: "Shop", kind: "storefront" as const, roomId: "reception", needsApproval: false },
-        { id: "sys-freight", name: "Freight", kind: "carrier" as const, roomId: "reception", needsApproval: false },
+        { id: "sys-shop", name: "Shop", description: STOREFRONT.description, operations: STOREFRONT.operations, roomId: "reception", needsApproval: false },
+        { id: "sys-freight", name: "Freight", description: CARRIER.description, operations: CARRIER.operations, roomId: "reception", needsApproval: false },
       ],
       participants: initialState.office.participants.map((p) => (p.id === "p-iris" ? { ...p, agentType } : p)),
     };
@@ -345,7 +346,7 @@ async function main(): Promise<void> {
   expect("a reply that is not JSON says so", "problem" in unreadable && unreadable.problem, "its answer was not valid JSON");
   expect("an empty reply says so", (readReply("  ") as { problem: string }).problem, "its answer was empty");
   expect("a list in place of an object is refused", "problem" in readReply("[1, 2]"), true);
-  expect("the prompt marks a system that holds actions for approval", buildStepPrompt({ ...vera, surroundings: { ...vera.surroundings, systems: [{ id: "sys-shop", name: "Shop", kind: "storefront", roomId: "fulfilment", needsApproval: true, readable: true, mayAct: true }] } }).includes("It holds every action until a person approves it."), true);
+  expect("the prompt marks a system that holds actions for approval", buildStepPrompt({ ...vera, surroundings: { ...vera.surroundings, systems: [{ id: "sys-shop", name: "Shop", description: STOREFRONT.description, operations: STOREFRONT.operations, roomId: "fulfilment", needsApproval: true, readable: true, mayAct: true }] } }).includes("It holds every action until a person approves it."), true);
   expect("and the instructions say an action is not done until the system answers", SYSTEM_PROMPT.includes("An action is not done until the thread shows the system's answer"), true);
 
   console.log("\n-- an agent is told where its own part ends --");

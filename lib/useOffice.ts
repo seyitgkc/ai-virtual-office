@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AdminOp } from "./admin";
 import type { Action } from "./engine";
-import type { SystemKind } from "./systems";
 import type { OfficeView, ProviderKind } from "./view";
 
 export type { FeedEntry } from "./view";
@@ -31,11 +30,12 @@ export type SystemOp =
       operation: "save";
       id?: string;
       name: string;
-      kind: SystemKind;
+      description: string;
       roomId: string;
       baseUrl: string;
       apiKey?: string;
       needsApproval?: boolean;
+      refresh?: boolean;
     }
   | { operation: "remove"; id: string };
 

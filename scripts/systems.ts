@@ -1,5 +1,5 @@
 /**
- * Checks the two stand-in services and how an office uses them: connecting a
+ * Checks the stand-in services and how an office uses them: connecting a
  * system to a room, reading its live records, and an agent placing an order
  * only once it holds `act` on that room. The services are started on this
  * machine, so nothing leaves it. Run: npx tsx scripts/systems.ts
@@ -10,8 +10,11 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { carrier } from "../services/carrier/server";
-import { storefront } from "../services/storefront/server";
+import { carrier } from "../services/carrier/server.ts";
+import { ledger } from "../services/ledger/server.ts";
+import { serviceDesk } from "../services/service-desk/server.ts";
+import { storefront } from "../services/storefront/server.ts";
+import { supplier } from "../services/supplier/server.ts";
 
 let failures = 0;
 function expect(label: string, actual: unknown, wanted: unknown): void {
@@ -79,6 +82,89 @@ async function main(): Promise<void> {
   await api(`${freightUrl}/v1/shipments/${booked.data.shipment.id}/cancel`, "POST");
   expect("and can be cancelled", (await api(`${freightUrl}/v1/shipments`)).data.shipments[0].status, "cancelled");
 
+  console.log("\n-- every service describes itself --");
+  const shopManifest = await api(`${shopUrl}/v1/manifest`);
+  expect("a service says what it is for", shopManifest.data.description.includes("stock each branch holds"), true);
+  expect("and what can be done in it", shopManifest.data.operations.map((o: { id: string }) => o.id).join(), "place_order,cancel_order");
+  expect("its records are plain lines", (await api(`${shopUrl}/v1/summary`)).data.lines[0].startsWith("Product GREE-MZ-12"), true);
+  expect("the manifest needs the key too", (await fetch(`${shopUrl}/v1/manifest`)).status, 401);
+
+  console.log("\n-- the accounts ledger --");
+  const books = ledger(key);
+  const booksUrl = await listen(books);
+  const invoice = (account: string, reference: string, listAmount: number, freight = 0) =>
+    api(`${booksUrl}/v1/invoices`, "POST", { account, reference, listAmount, freight });
+  const raised = await invoice("BRT-0931", "SO-1001", 5000, 100);
+  expect("an invoice takes the tier discount off list and adds freight", raised.data.invoice.total, 4200);
+  expect("and says so in a sentence", raised.data.summary.includes("less 900 CAD for tier 2"), true);
+  expect("an order is invoiced once", (await invoice("BRT-0931", "SO-1001", 5000)).data.error.code, "already_invoiced");
+  expect("an account on hold is refused", (await invoice("HAL-2210", "SO-1002", 100)).data.error.code, "on_hold");
+  expect("an invoice past the credit limit is refused", (await invoice("CAL-3310", "SO-1003", 8000)).data.error.code, "over_limit");
+  expect("a dealer that pays late needs sign-off for a large one", (await invoice("CAL-3310", "SO-1004", 5800)).data.error.code, "needs_sign_off");
+  expect("but not for a small one", (await invoice("CAL-3310", "SO-1005", 1000)).status, 201);
+  expect("a payment larger than the balance is refused", (await api(`${booksUrl}/v1/payments`, "POST", { account: "HAL-2210", amount: 90000 })).data.error.code, "overpayment");
+  const paid = await api(`${booksUrl}/v1/payments`, "POST", { account: "HAL-2210", amount: "8,000 CAD" });
+  expect("a payment that makes room lifts the hold", paid.data.account.onHold, null);
+  const heldAccount = await api(`${booksUrl}/v1/accounts/NOR-0188/hold`, "PUT", { hold: "yes", reason: "Dispute" });
+  expect("an account can be put on hold", heldAccount.data.account.onHold, "Dispute");
+  expect("the records show the hold", (await api(`${booksUrl}/v1/summary`)).data.lines.some((l: string) => l.includes("NOR-0188") && l.includes("ON CREDIT HOLD: Dispute")), true);
+  books.close();
+  books.closeAllConnections();
+
+  console.log("\n-- the supplier portal --");
+  const factory = supplier(key);
+  const factoryUrl = await listen(factory);
+  const purchase = (sku: string, quantity: number, branch = "Laval") => api(`${factoryUrl}/v1/purchase-orders`, "POST", { sku, quantity, branch });
+  expect("an order below the minimum is refused", (await purchase("GREE-CU-24", 2)).data.error.code, "below_minimum");
+  expect("an order that is not whole cases is refused", (await purchase("GREE-MZ-12", 7)).data.error.code, "not_whole_cases");
+  const split = await purchase("GREE-CU-24", 8);
+  expect("what the factory has ships now and the rest is backordered", `${split.data.order.shipsNow} ${split.data.order.backordered}`, "6 2");
+  expect("and the answer gives both dates", /6 arrive on \d{4}-\d\d-\d\d and 2 are backordered until \d{4}/.test(split.data.summary), true);
+  const late = await purchase("GREE-CU-24", 4);
+  expect("an order with nothing ready is all backordered", late.data.order.shipsNow, 0);
+  expect("which air freight cannot bring forward", (await api(`${factoryUrl}/v1/purchase-orders/${late.data.order.id}/expedite`, "POST")).data.error.code, "nothing_to_expedite");
+  const flown = await api(`${factoryUrl}/v1/purchase-orders/${split.data.order.id}/expedite`, "POST");
+  expect("expediting adds 18 percent on what ships now", flown.data.order.cost, 8 * 1380 + 6 * 1380 * 0.18);
+  expect("and cannot be cancelled afterwards", (await api(`${factoryUrl}/v1/purchase-orders/${split.data.order.id}/cancel`, "POST")).data.error.code, "in_the_air");
+  expect("an order still at the factory can", (await api(`${factoryUrl}/v1/purchase-orders/${late.data.order.id}/cancel`, "POST")).data.order.status, "cancelled");
+  factory.close();
+  factory.closeAllConnections();
+
+  console.log("\n-- the service desk --");
+  const desk = serviceDesk(key);
+  const deskUrl = await listen(desk);
+  const ticket = (account: string, serial: string, problem: string) => api(`${deskUrl}/v1/tickets`, "POST", { account, serial, problem });
+  expect("an unknown serial is refused", (await ticket("CAL-3310", "NOPE-1", "Dead")).data.error.code, "unknown_serial");
+  expect("a unit sold to someone else is refused", (await ticket("NOR-0188", "GCU24-118204", "Dead")).data.error.code, "wrong_account");
+  const fault = await ticket("CAL-3310", "GCU24-118204", "Compressor trips after ten minutes");
+  expect("a fault that stops the unit is urgent", fault.data.ticket.priority, "urgent");
+  expect("and the answer says whether it is under warranty", fault.data.summary.includes("under warranty"), true);
+  expect("a unit has one open ticket at a time", (await ticket("CAL-3310", "GCU24-118204", "Again")).data.error.code, "ticket_open");
+  const rma = await api(`${deskUrl}/v1/tickets/${fault.data.ticket.id}/return`, "POST", { reason: "Failed compressor" });
+  expect("a unit under warranty gets a return number", /^RMA-\d+$/.test(rma.data.ticket.returnNumber), true);
+  const old = await ticket("BRT-0931", "GCU24-090377", "Noisy fan");
+  expect("a quiet fault is normal priority", old.data.ticket.priority, "normal");
+  expect("a unit out of warranty gets no return", (await api(`${deskUrl}/v1/tickets/${old.data.ticket.id}/return`, "POST", { reason: "Noisy" })).data.error.code, "out_of_warranty");
+  const weekday = (offset: number): string => {
+    const day = new Date(Date.now() + offset * 86_400_000);
+    return day.toISOString().slice(0, 10);
+  };
+  let first = 2;
+  while ([0, 6].includes(new Date(`${weekday(first)}T12:00:00Z`).getUTCDay())) first++;
+  let weekend = 1;
+  while (![0, 6].includes(new Date(`${weekday(weekend)}T12:00:00Z`).getUTCDay())) weekend++;
+  const visit = (id: string, date: string) => api(`${deskUrl}/v1/tickets/${id}/visit`, "POST", { date });
+  expect("a visit on a weekend is refused", (await visit(old.data.ticket.id, weekday(weekend))).data.error.code, "weekend");
+  expect("a visit today is too soon", (await visit(old.data.ticket.id, weekday(0))).data.error.code, "too_soon");
+  expect("a weekday visit is booked, chargeable out of warranty", (await visit(old.data.ticket.id, weekday(first))).data.summary.includes("chargeable"), true);
+  await visit(fault.data.ticket.id, weekday(first));
+  const third = await ticket("HAL-0077", "PTAC12-33018", "No heat in room 214");
+  expect("a third visit on a full day is refused", (await visit(third.data.ticket.id, weekday(first))).data.error.code, "day_full");
+  await api(`${deskUrl}/v1/tickets/${third.data.ticket.id}/close`, "POST", { resolution: "Breaker reset on site" });
+  expect("a closed ticket takes nothing more", (await visit(third.data.ticket.id, weekday(first))).data.error.code, "closed");
+  desk.close();
+  desk.closeAllConnections();
+
   // -- the office, with the demo pointed at the two services --------------------
   const folder = mkdtempSync(join(tmpdir(), "office-systems-"));
   const adminPassword = randomBytes(18).toString("base64url");
@@ -120,7 +206,7 @@ async function main(): Promise<void> {
   let demo = service.getView(await dana());
   expect("the demo has its two systems", demo.office.systems.map((s) => `${s.name} in ${s.roomId}`).join("; "), "Storefront in fulfilment; Freight carrier in planning");
   expect("nobody may change them there", demo.systemsEditable, false);
-  expect("so connecting one is refused", await refusal(async () => service.saveSystemSettings(await dana(), { name: "Mine", kind: "carrier", roomId: "planning", baseUrl: freightUrl, apiKey: key })), 403);
+  expect("so connecting one is refused", await refusal(async () => service.saveSystemSettings(await dana(), { name: "Mine", description: "", roomId: "planning", baseUrl: freightUrl, apiKey: key })), 403);
   expect("the key is not in the view", JSON.stringify(demo).includes(key), false);
   const live = await service.readSystemRecords(await dana(), demo.systems[0].id);
   expect("the manager can read the storefront live", live.records.some((r) => r.includes("GREE-MZ-12") && r.includes("Laval 120")), true);
@@ -213,11 +299,21 @@ async function main(): Promise<void> {
   const warehouse = view.office.floorplan.rooms.find((r) => r.name === "Warehouse")!.id;
   view = await service.applyAdminOperation(await owner(), { type: "SET_ROOM_RECORDS", roomId: warehouse, records: ["  Orders ship from Laval.  ", "", "Pallets hold 12 heads."] });
   expect("records are stored trimmed, without empty lines", view.office.floorplan.rooms.find((r) => r.id === warehouse)!.records.join("|"), "Orders ship from Laval.|Pallets hold 12 heads.");
-  expect("a system needs a key", await refusal(async () => service.saveSystemSettings(await owner(), { name: "Shop", kind: "storefront", roomId: warehouse, baseUrl: shopUrl })), 400);
-  expect("and a web address", await refusal(async () => service.saveSystemSettings(await owner(), { name: "Shop", kind: "storefront", roomId: warehouse, baseUrl: "file:///etc/passwd", apiKey: key })), 400);
-  expect("in a room that exists", await refusal(async () => service.saveSystemSettings(await owner(), { name: "Shop", kind: "storefront", roomId: "nowhere", baseUrl: shopUrl, apiKey: key })), 400);
-  view = await service.saveSystemSettings(await owner(), { name: "Shop", kind: "storefront", roomId: warehouse, baseUrl: `${shopUrl}/`, apiKey: key });
+  expect("a system needs a key", await refusal(async () => service.saveSystemSettings(await owner(), { name: "Shop", description: "", roomId: warehouse, baseUrl: shopUrl })), 400);
+  expect("and a web address", await refusal(async () => service.saveSystemSettings(await owner(), { name: "Shop", description: "", roomId: warehouse, baseUrl: "file:///etc/passwd", apiKey: key })), 400);
+  expect("in a room that exists", await refusal(async () => service.saveSystemSettings(await owner(), { name: "Shop", description: "", roomId: "nowhere", baseUrl: shopUrl, apiKey: key })), 400);
+  view = await service.saveSystemSettings(await owner(), { name: "Shop", description: "", roomId: warehouse, baseUrl: `${shopUrl}/`, apiKey: key });
   const shopId = view.systems[0].id;
+  expect("it arrives with the system's own description", view.systems[0].description.includes("stock each branch holds"), true);
+  expect("and what the system says can be done in it", view.systems[0].operations.join(), "Place an order,Cancel an order");
+  expect("an address that is not such a system is refused", await refusal(async () => service.saveSystemSettings(await owner(), { name: "Nothing", description: "", roomId: warehouse, baseUrl: "http://127.0.0.1:9", apiKey: key })), 400);
+  expect("and so is a key the system rejects", await refusal(async () => service.saveSystemSettings(await owner(), { name: "Shop two", description: "", roomId: warehouse, baseUrl: shopUrl, apiKey: "not-the-right-key" })), 400);
+  view = await service.saveSystemSettings(await owner(), { id: shopId, name: "Shop", description: "Use this only for restocking jobs. Check the branch stock before ordering.", roomId: warehouse, baseUrl: shopUrl });
+  expect("the description can be reworded", view.office.systems[0].description, "Use this only for restocking jobs. Check the branch stock before ordering.");
+  expect("and its operations stay", view.office.systems[0].operations.length, 2);
+  view = await service.saveSystemSettings(await owner(), { id: shopId, name: "", description: "", roomId: warehouse, baseUrl: shopUrl });
+  expect("left empty, the name and description go back to the system's own", `${view.systems[0].name}: ${view.systems[0].description.slice(0, 13)}`, "Storefront: The catalogue");
+  view = await service.saveSystemSettings(await owner(), { id: shopId, name: "Shop", description: view.systems[0].description, roomId: warehouse, baseUrl: shopUrl });
   expect("the system is listed with its room", `${view.office.systems[0].name} ${view.office.systems[0].roomId === warehouse}`, "Shop true");
   expect("its key is stored encrypted", (all(db, "SELECT api_key_cipher AS c FROM connected_systems WHERE id = ?", shopId)[0] as { c: string }).c.includes(key), false);
   expect("and never sent to the browser", JSON.stringify(view).includes(key), false);
@@ -250,14 +346,14 @@ async function main(): Promise<void> {
   view = await service.applyAdminOperation(await owner(), playbook({ account: "ACME-1", branch: "Laval", items: "PTAC-12 x 40" }));
   await service.applyAction(await owner(), { type: "GRANT_ACCESS", participantId: nova, room: warehouse, scopes: ["act"], effect: "allow", reason: "Standing order desk", grantedBy: "" });
   view = await service.applyAction(await owner(), { type: "SUBMIT_REQUEST", title: "Bulk", detail: "Forty PTAC units.", requestedById: "" });
-  expect("a refusal by the storefront is reported in the thread", view.office.messages.some((m) => m.body.startsWith("Shop: refused the order: Laval holds 3 of PTAC-12")), true);
+  expect("a refusal by the storefront is reported in the thread", view.office.messages.some((m) => m.body.startsWith("Shop: refused to place an order: Laval holds 3 of PTAC-12")), true);
   const refusalNote = view.office.messages.find((m) => m.kind === "note");
   expect("and whoever asked for the work gets a note about it", refusalNote?.audience.to === "participant" && refusalNote.audience.id === view.viewer.participantId && refusalNote.body.includes("did not do what"), true);
   expect("which is unread in their inbox", view.unread.notes.join(), refusalNote?.id);
   expect("until they open it", service.markOpened(await owner(), { noteId: refusalNote!.id }).unread.notes.length, 0);
 
   console.log("\n-- a system whose actions need approval --");
-  view = await service.saveSystemSettings(await owner(), { id: shopId, name: "Shop", kind: "storefront", roomId: warehouse, baseUrl: shopUrl, needsApproval: true });
+  view = await service.saveSystemSettings(await owner(), { id: shopId, name: "Shop", description: "", roomId: warehouse, baseUrl: shopUrl, needsApproval: true });
   expect("the setting is stored, and the key is kept without being sent again", `${view.systems[0].needsApproval} ${view.systems[0].hasKey}`, "true true");
   view = await service.applyAdminOperation(await owner(), playbook({ account: "ACME-1", branch: "Laval", items: "ECOBEE-T x 5" }));
   const thermostats = await stock("ECOBEE-T", "Laval");
@@ -272,7 +368,7 @@ async function main(): Promise<void> {
   const heldAgain = view.office.messages.filter((m) => m.kind === "question" && m.heldAction).at(-1)!;
   view = await service.applyAction(await owner(), { type: "ANSWER_QUESTION", questionId: heldAgain.id, answeredById: "", body: "Go ahead, as long as it is five.", });
   expect("an answer typed in place of the Approve choice does not count as approval", await stock("ECOBEE-T", "Laval"), thermostats);
-  view = await service.saveSystemSettings(await owner(), { id: shopId, name: "Shop", kind: "storefront", roomId: warehouse, baseUrl: shopUrl, needsApproval: false });
+  view = await service.saveSystemSettings(await owner(), { id: shopId, name: "Shop", description: "", roomId: warehouse, baseUrl: shopUrl, needsApproval: false });
 
   shop.close();
   shop.closeAllConnections();

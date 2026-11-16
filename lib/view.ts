@@ -1,5 +1,4 @@
 import type { AccessScope, Office, Permission, TaskId } from "./model";
-import type { SystemKind } from "./systems";
 
 export interface FeedEntry {
   id: number;
@@ -54,7 +53,10 @@ export interface ProviderView {
 export interface SystemView {
   id: string;
   name: string;
-  kind: SystemKind;
+  /** When to use the system and how, as agents are told. */
+  description: string;
+  /** What can be done in it, as the system lists it. */
+  operations: string[];
   roomId: string;
   baseUrl: string;
   /** Each action an agent takes here waits for a person's approval. */

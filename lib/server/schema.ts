@@ -15,7 +15,28 @@
  *    and grants are evaluated in sequence and threads are read in sequence.
  */
 
-export const SCHEMA_VERSION = 9;
+import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
+import type { ServiceManifest } from "../systems";
+
+export const SCHEMA_VERSION = 10;
+
+const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
+
+/** Rows giving every stored system of one former kind the operations that kind had. */
+function operationsForKind(kind: string, manifest: ServiceManifest): string {
+  return manifest.operations
+    .flatMap((operation, position) => [
+      `INSERT INTO system_operations (system_id, operation, position, label, method, path)
+SELECT id, ${quoted(operation.id)}, ${position}, ${quoted(operation.label)}, ${quoted(operation.method)}, ${quoted(operation.path)}
+  FROM connected_systems WHERE kind = ${quoted(kind)};`,
+      ...operation.fields.map(
+        (field, at) => `INSERT INTO system_operation_fields (system_id, operation, name, position, label, hint, place)
+SELECT id, ${quoted(operation.id)}, ${quoted(field.name)}, ${at}, ${quoted(field.label)}, ${quoted(field.hint)}, ${quoted(field.place)}
+  FROM connected_systems WHERE kind = ${quoted(kind)};`,
+      ),
+    ])
+    .join("\n");
+}
 
 export const SCHEMA = /* sql */ `
 CREATE TABLE schema_meta (
@@ -88,19 +109,46 @@ CREATE TABLE room_records (
 
 -- An outside system connected to a room. The room's access rules cover it:
 -- read on the room shows its records, act on the room allows its operations.
--- The API key is stored encrypted, as for AI providers.
+-- The API key is stored encrypted, as for AI providers. The description says
+-- when to use the system and how. It starts as the system's own and a person
+-- can reword it.
 CREATE TABLE connected_systems (
   id             TEXT PRIMARY KEY,
   room_id        TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
   position       INTEGER NOT NULL,
   name           TEXT NOT NULL,
-  kind           TEXT NOT NULL CHECK (kind IN ('storefront', 'carrier')),
+  description    TEXT NOT NULL,
+  records_path   TEXT NOT NULL,
   base_url       TEXT NOT NULL,
   api_key_cipher TEXT,
   key_hint       TEXT,
   updated_at     INTEGER NOT NULL,
   -- 1 when each action an agent takes here waits for a person's approval.
   needs_approval INTEGER NOT NULL DEFAULT 0 CHECK (needs_approval IN (0, 1))
+) STRICT;
+
+-- What can be done in a system, as the system itself lists it.
+CREATE TABLE system_operations (
+  system_id TEXT NOT NULL REFERENCES connected_systems(id) ON DELETE CASCADE,
+  operation TEXT NOT NULL,
+  position  INTEGER NOT NULL,
+  label     TEXT NOT NULL,
+  method    TEXT NOT NULL CHECK (method IN ('POST', 'PUT', 'DELETE')),
+  path      TEXT NOT NULL,
+  PRIMARY KEY (system_id, operation)
+) STRICT;
+
+-- The values an operation takes. Each travels in the path or in the body.
+CREATE TABLE system_operation_fields (
+  system_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  name      TEXT NOT NULL,
+  position  INTEGER NOT NULL,
+  label     TEXT NOT NULL,
+  hint      TEXT NOT NULL,
+  place     TEXT NOT NULL CHECK (place IN ('path', 'body')),
+  PRIMARY KEY (system_id, operation, name),
+  FOREIGN KEY (system_id, operation) REFERENCES system_operations(system_id, operation) ON DELETE CASCADE
 ) STRICT;
 
 CREATE INDEX systems_by_room ON connected_systems(room_id);
@@ -967,5 +1015,57 @@ SELECT id, office_id, NULL, position, name, kind, base_url, default_model, api_k
   FROM ai_providers;
 DROP TABLE ai_providers;
 ALTER TABLE ai_providers_new RENAME TO ai_providers;
+`,
+  // Version 10 lets a connected system describe itself, in place of a fixed list of kinds.
+  9: /* sql */ `
+CREATE TABLE system_operations (
+  system_id TEXT NOT NULL REFERENCES connected_systems(id) ON DELETE CASCADE,
+  operation TEXT NOT NULL,
+  position  INTEGER NOT NULL,
+  label     TEXT NOT NULL,
+  method    TEXT NOT NULL CHECK (method IN ('POST', 'PUT', 'DELETE')),
+  path      TEXT NOT NULL,
+  PRIMARY KEY (system_id, operation)
+) STRICT;
+
+CREATE TABLE system_operation_fields (
+  system_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  name      TEXT NOT NULL,
+  position  INTEGER NOT NULL,
+  label     TEXT NOT NULL,
+  hint      TEXT NOT NULL,
+  place     TEXT NOT NULL CHECK (place IN ('path', 'body')),
+  PRIMARY KEY (system_id, operation, name),
+  FOREIGN KEY (system_id, operation) REFERENCES system_operations(system_id, operation) ON DELETE CASCADE
+) STRICT;
+
+-- Systems already connected were one of two kinds. Each gets what that kind could do.
+${operationsForKind("storefront", STOREFRONT)}
+${operationsForKind("carrier", CARRIER)}
+
+CREATE TABLE connected_systems_new (
+  id             TEXT PRIMARY KEY,
+  room_id        TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  position       INTEGER NOT NULL,
+  name           TEXT NOT NULL,
+  description    TEXT NOT NULL,
+  records_path   TEXT NOT NULL,
+  base_url       TEXT NOT NULL,
+  api_key_cipher TEXT,
+  key_hint       TEXT,
+  updated_at     INTEGER NOT NULL,
+  needs_approval INTEGER NOT NULL DEFAULT 0 CHECK (needs_approval IN (0, 1))
+) STRICT;
+INSERT INTO connected_systems_new
+  (id, room_id, position, name, description, records_path, base_url, api_key_cipher, key_hint, updated_at, needs_approval)
+SELECT id, room_id, position, name,
+       CASE kind WHEN 'storefront' THEN ${quoted(STOREFRONT.description)} ELSE ${quoted(CARRIER.description)} END,
+       CASE kind WHEN 'storefront' THEN ${quoted(STOREFRONT.recordsPath)} ELSE ${quoted(CARRIER.recordsPath)} END,
+       base_url, api_key_cipher, key_hint, updated_at, needs_approval
+  FROM connected_systems;
+DROP TABLE connected_systems;
+ALTER TABLE connected_systems_new RENAME TO connected_systems;
+CREATE INDEX systems_by_room ON connected_systems(room_id);
 `,
 };

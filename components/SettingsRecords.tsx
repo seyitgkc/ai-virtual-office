@@ -4,7 +4,6 @@ import { useState } from "react";
 import type { AdminOp } from "../lib/admin";
 import { resolveAccess, type Participant, type Room } from "../lib/model";
 import { contextOf } from "../lib/policy";
-import { SYSTEM_INFO, SYSTEM_KINDS, type SystemKind } from "../lib/systems";
 import type { SystemOp } from "../lib/useOffice";
 import type { OfficeView, SystemView } from "../lib/view";
 import { ConfirmButton, Section } from "./settingsParts";
@@ -12,11 +11,12 @@ import { ConfirmButton, Section } from "./settingsParts";
 const EMPTY_FORM = {
   id: "",
   name: "",
-  kind: "storefront" as SystemKind,
+  description: "",
   roomId: "",
   baseUrl: "",
   apiKey: "",
   needsApproval: true,
+  refresh: false,
 };
 
 /**
@@ -70,10 +70,10 @@ export function RecordsTab({
         title="Connected systems"
         hint={
           view.isDemoOffice
-            ? "Two sample services run beside this office: a storefront and a freight carrier. Their connections are fixed here, and an order in the storefront waits for approval. An office of your own connects its own."
+            ? "Sample services run beside this office. Their connections are fixed here, and an order in the storefront waits for approval. An office of your own connects its own."
             : locked
               ? "Sign in with a password account to connect a system."
-              : "A system is connected to one room. Reading the room shows the system's live records. Acting in the room allows its operations, and a system can also hold each action until a person approves it."
+              : "A system is connected to one room. Reading the room shows the system's live records. Acting in the room allows its operations, and a system can also hold each action until a person approves it. Agents are told when and how to use a system in the words of its description, which you can change."
         }
       >
         <div className="table-scroll">
@@ -81,8 +81,8 @@ export function RecordsTab({
             <thead>
               <tr>
                 <th scope="col">Name</th>
-                <th scope="col">Kind</th>
                 <th scope="col">Room</th>
+                <th scope="col">Agents are told</th>
                 <th scope="col">With act access, agents can</th>
                 <th scope="col">Each action</th>
                 <th scope="col">API key</th>
@@ -103,9 +103,9 @@ export function RecordsTab({
                     {s.name}
                     <span className="cell-note">{s.baseUrl}</span>
                   </td>
-                  <td>{SYSTEM_INFO[s.kind].label}</td>
                   <td>{roomName(s.roomId)}</td>
-                  <td className="muted">{SYSTEM_INFO[s.kind].operations.map((o) => o.label).join(", ")}</td>
+                  <td className="muted cell-long">{s.description}</td>
+                  <td className="muted">{s.operations.join(", ") || "Nothing"}</td>
                   <td className="muted">{s.needsApproval ? "Waits for approval" : "Goes straight through"}</td>
                   <td className="muted" data-warn={s.keyUnreadable}>
                     {keyState(s)}
@@ -129,11 +129,12 @@ export function RecordsTab({
                             setForm({
                               id: s.id,
                               name: s.name,
-                              kind: s.kind,
+                              description: s.description,
                               roomId: s.roomId,
                               baseUrl: s.baseUrl,
                               apiKey: "",
                               needsApproval: s.needsApproval,
+                              refresh: false,
                             })
                           }
                         >
@@ -184,11 +185,12 @@ export function RecordsTab({
                 operation: "save",
                 ...(editing ? { id: editing.id } : {}),
                 name: form.name,
-                kind: form.kind,
+                description: form.description,
                 roomId: formRoom,
                 baseUrl: form.baseUrl,
                 needsApproval: form.needsApproval,
                 ...(form.apiKey ? { apiKey: form.apiKey } : {}),
+                ...(form.refresh ? { refresh: true } : {}),
               }).then((saved) => {
                 if (saved) setForm(EMPTY_FORM);
               });
@@ -199,20 +201,9 @@ export function RecordsTab({
               <input
                 value={form.name}
                 maxLength={40}
-                placeholder="How this system is listed here"
+                placeholder="Leave empty to use the system's own name"
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
               />
-            </label>
-            <label>
-              Kind
-              <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as SystemKind })}>
-                {SYSTEM_KINDS.map((kind) => (
-                  <option key={kind} value={kind}>
-                    {SYSTEM_INFO[kind].label}: {SYSTEM_INFO[kind].description}
-                  </option>
-                ))}
-              </select>
             </label>
             <label>
               Room
@@ -246,6 +237,16 @@ export function RecordsTab({
                 required
               />
             </label>
+            <label className="wide">
+              When and how agents use it
+              <textarea
+                rows={5}
+                maxLength={1200}
+                value={form.description}
+                placeholder="Leave empty to use the system's own description. Say what the system is for, when an agent should turn to it, and anything to check before acting in it."
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+              />
+            </label>
             <label className="wide check">
               <input
                 type="checkbox"
@@ -254,6 +255,16 @@ export function RecordsTab({
               />
               Hold each action until a person approves it
             </label>
+            {editing && (
+              <label className="wide check">
+                <input
+                  type="checkbox"
+                  checked={form.refresh}
+                  onChange={(e) => setForm({ ...form, refresh: e.target.checked })}
+                />
+                Ask the system again what can be done in it
+              </label>
+            )}
             <div className="wide row-actions">
               <button type="submit" className="btn primary">
                 {editing ? "Save changes" : "Connect"}

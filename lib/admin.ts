@@ -181,7 +181,7 @@ function cleanPlaybook(office: Office, steps: PlaybookStep[], newId: () => strin
       refuse(`${label}: the note is addressed to someone who is not in the office.`);
     }
     const system = action ? office.systems.find((s) => s.id === action.systemId) : undefined;
-    const fields = action && system ? checkedFields(system.kind, action.operation, action.fields) : null;
+    const fields = action && system ? checkedFields(system, action.operation, action.fields) : null;
     if (action && !system) refuse(`${label}: the connected system it uses does not exist.`);
     if (action && !fields) refuse(`${label}: fill in every field of the action.`);
     if (question && question.to !== "requester" && !people.has(question.to)) {

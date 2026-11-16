@@ -7,10 +7,11 @@
  * API keys are stored encrypted and never leave the server.
  */
 import { createHash, randomUUID } from "node:crypto";
+import { MANIFESTS } from "../../services/manifests.ts";
 import type { SystemCall, SystemOutcome } from "../engine";
 import type { Office } from "../model";
 import { DEMO_CARRIER_ID, DEMO_STOREFRONT_ID, office as seededOffice } from "../seed";
-import { SYSTEM_INFO, SYSTEM_KINDS, type SystemKind } from "../systems";
+import { parseManifest, type ServiceManifest, type SystemOperation } from "../systems";
 import type { SystemView } from "../view";
 import { all, get, run, type Db } from "./db";
 import { checkedBaseUrl, ProviderError } from "./providers";
@@ -20,7 +21,8 @@ interface SystemRow {
   id: string;
   room_id: string;
   name: string;
-  kind: SystemKind;
+  description: string;
+  records_path: string;
   base_url: string;
   api_key_cipher: string | null;
   key_hint: string | null;
@@ -41,16 +43,72 @@ const rows = (db: Db, officeId: string): SystemRow[] =>
 const row = (db: Db, officeId: string, id: string): SystemRow | undefined =>
   get<SystemRow>(db, `SELECT s.* ${IN_OFFICE} AND s.id = ?`, officeId, id);
 
-const DEMO_IDS = new Set([DEMO_STOREFRONT_ID, DEMO_CARRIER_ID]);
+/** What can be done in every stored system, by system id. */
+export function storedOperations(db: Db): Map<string, SystemOperation[]> {
+  const fields = all<{ system_id: string; operation: string; name: string; label: string; hint: string; place: "path" | "body" }>(
+    db,
+    "SELECT * FROM system_operation_fields ORDER BY position",
+  );
+  const found = new Map<string, SystemOperation[]>();
+  for (const o of all<{ system_id: string; operation: string; label: string; method: SystemOperation["method"]; path: string }>(
+    db,
+    "SELECT * FROM system_operations ORDER BY position",
+  )) {
+    const list = found.get(o.system_id) ?? [];
+    list.push({
+      id: o.operation,
+      label: o.label,
+      method: o.method,
+      path: o.path,
+      fields: fields
+        .filter((f) => f.system_id === o.system_id && f.operation === o.operation)
+        .map((f) => ({ name: f.name, label: f.label, hint: f.hint, place: f.place })),
+    });
+    found.set(o.system_id, list);
+  }
+  return found;
+}
+
+function writeOperations(db: Db, systemId: string, operations: SystemOperation[]): void {
+  run(db, "DELETE FROM system_operation_fields WHERE system_id = ?", systemId);
+  run(db, "DELETE FROM system_operations WHERE system_id = ?", systemId);
+  operations.forEach((operation, position) => {
+    run(
+      db,
+      "INSERT INTO system_operations (system_id, operation, position, label, method, path) VALUES (?, ?, ?, ?, ?, ?)",
+      systemId,
+      operation.id,
+      position,
+      operation.label,
+      operation.method,
+      operation.path,
+    );
+    operation.fields.forEach((field, at) => {
+      run(
+        db,
+        "INSERT INTO system_operation_fields (system_id, operation, name, position, label, hint, place) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        systemId,
+        operation.id,
+        field.name,
+        at,
+        field.label,
+        field.hint,
+        field.place,
+      );
+    });
+  });
+}
 
 /** The connected systems of an office, without their keys. */
 export function systemViews(db: Db, officeId: string): SystemView[] {
+  const operations = storedOperations(db);
   return rows(db, officeId).map((r) => {
     const key = unseal(r.api_key_cipher);
     return {
       id: r.id,
       name: r.name,
-      kind: r.kind,
+      description: r.description,
+      operations: (operations.get(r.id) ?? []).map((o) => o.label),
       roomId: r.room_id,
       baseUrl: r.base_url,
       needsApproval: r.needs_approval === 1,
@@ -63,32 +121,50 @@ export function systemViews(db: Db, officeId: string): SystemView[] {
 
 export interface SystemInput {
   id?: string;
+  /** Left empty, the system's own name is used. */
   name: string;
-  kind: SystemKind;
+  /** When to use the system and how. Left empty, the system's own description is used. */
+  description: string;
   roomId: string;
   baseUrl: string;
   apiKey?: string;
   /** Hold each action an agent takes here until a person approves it. */
   needsApproval?: boolean;
+  /** Ask the system again what can be done in it. */
+  refresh?: boolean;
 }
 
-/** Connect a system to a room, or change one when `id` is given. */
-export function saveSystem(db: Db, office: Office, input: SystemInput): void {
+/** A checked change to a system, ready to be stored. */
+export interface SystemChange {
+  existingId: string | null;
+  name: string;
+  description: string;
+  roomId: string;
+  baseUrl: string;
+  cipher: string;
+  hint: string | null;
+  needsApproval: boolean;
+  /** Set when the system was asked about itself for this change. */
+  manifest: ServiceManifest | null;
+}
+
+/**
+ * Check a change to a system. A system being connected, moved to another
+ * address or given a new key is asked to describe itself, which also proves
+ * the address and the key work.
+ */
+export async function checkSystem(db: Db, office: Office, input: SystemInput): Promise<SystemChange> {
   const existing = input.id ? row(db, office.id, input.id) : undefined;
   if (input.id && !existing) throw new SystemError("That connected system does not exist in this office.");
   if (!existing && rows(db, office.id).length >= 12) throw new SystemError("An office can connect up to 12 systems.");
-
-  const name = input.name.trim();
-  if (name.length < 2 || name.length > 40) throw new SystemError("Give the system a name (2 to 40 characters).");
-  if (!SYSTEM_KINDS.includes(input.kind)) throw new SystemError("Choose what kind of system this is.");
   if (!office.floorplan.rooms.some((r) => r.id === input.roomId)) throw new SystemError("That room does not exist.");
+
   let baseUrl: string;
   try {
     baseUrl = checkedBaseUrl(input.baseUrl, "the system's");
   } catch (error) {
     throw error instanceof ProviderError ? new SystemError(error.message) : error;
   }
-
   const typed = input.apiKey?.trim();
   if (typed && (typed.length < 8 || typed.length > 400 || /\s/.test(typed))) {
     throw new SystemError("That does not look like an API key.");
@@ -97,42 +173,82 @@ export function saveSystem(db: Db, office: Office, input: SystemInput): void {
   const hint = typed ? typed.slice(-4) : (existing?.key_hint ?? null);
   if (cipher === null) throw new SystemError("Enter the system's API key.");
 
-  if (existing) {
-    run(
-      db,
-      `UPDATE connected_systems
-          SET name = ?, kind = ?, room_id = ?, base_url = ?, api_key_cipher = ?, key_hint = ?, updated_at = ?,
-              needs_approval = ?
-        WHERE id = ?`,
-      name,
-      input.kind,
-      input.roomId,
-      baseUrl,
-      cipher,
-      hint,
-      Date.now(),
-      (input.needsApproval ?? existing.needs_approval === 1) ? 1 : 0,
-      existing.id,
-    );
-    return;
+  let name = input.name.trim();
+  let description = input.description.trim();
+  if (description.length > 1200) throw new SystemError("Keep the description under 1,200 characters.");
+
+  const ask = !existing || existing.base_url !== baseUrl || Boolean(typed) || input.refresh === true || !name || !description;
+  let manifest: ServiceManifest | null = null;
+  if (ask) {
+    const key = typed ?? unseal(cipher);
+    if (!key) throw new SystemError("The stored API key cannot be read. Enter it again.");
+    try {
+      manifest = await fetchManifest(baseUrl, key);
+    } catch (error) {
+      throw new SystemError(`The system did not describe itself: ${error instanceof Error ? error.message : "it failed"}.`);
+    }
+    name ||= manifest.name;
+    description ||= manifest.description;
   }
-  const next = get<{ next: number }>(db, "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM connected_systems");
-  run(
-    db,
-    `INSERT INTO connected_systems
-       (id, room_id, position, name, kind, base_url, api_key_cipher, key_hint, updated_at, needs_approval)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    `sys-${randomUUID().slice(0, 8)}`,
-    input.roomId,
-    next?.next ?? 0,
+  if (name.length < 2 || name.length > 40) throw new SystemError("Give the system a name (2 to 40 characters).");
+  if (description.length < 10) throw new SystemError("Describe when the system is used and how (at least 10 characters).");
+
+  return {
+    existingId: existing?.id ?? null,
     name,
-    input.kind,
+    description,
+    roomId: input.roomId,
     baseUrl,
     cipher,
     hint,
-    Date.now(),
-    input.needsApproval ? 1 : 0,
-  );
+    needsApproval: input.needsApproval ?? existing?.needs_approval === 1,
+    manifest,
+  };
+}
+
+/** Store a checked change. Returns the system's name for the activity log. */
+export function storeSystem(db: Db, change: SystemChange): string {
+  const id = change.existingId ?? `sys-${randomUUID().slice(0, 8)}`;
+  if (change.existingId) {
+    run(
+      db,
+      `UPDATE connected_systems
+          SET name = ?, description = ?, room_id = ?, base_url = ?, api_key_cipher = ?, key_hint = ?, updated_at = ?,
+              needs_approval = ?, records_path = COALESCE(?, records_path)
+        WHERE id = ?`,
+      change.name,
+      change.description,
+      change.roomId,
+      change.baseUrl,
+      change.cipher,
+      change.hint,
+      Date.now(),
+      change.needsApproval ? 1 : 0,
+      change.manifest?.recordsPath ?? null,
+      id,
+    );
+  } else {
+    const next = get<{ next: number }>(db, "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM connected_systems");
+    run(
+      db,
+      `INSERT INTO connected_systems
+         (id, room_id, position, name, description, records_path, base_url, api_key_cipher, key_hint, updated_at, needs_approval)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      change.roomId,
+      next?.next ?? 0,
+      change.name,
+      change.description,
+      change.manifest?.recordsPath ?? "/v1/summary",
+      change.baseUrl,
+      change.cipher,
+      change.hint,
+      Date.now(),
+      change.needsApproval ? 1 : 0,
+    );
+  }
+  if (change.manifest) writeOperations(db, id, change.manifest.operations);
+  return change.name;
 }
 
 /** Disconnect a system. Returns its name and room for the activity log. */
@@ -153,24 +269,20 @@ export const systemRoom = (db: Db, officeId: string, id: string): string | null 
 type Json = Record<string, unknown>;
 
 const asObject = (value: unknown): Json => (value && typeof value === "object" ? (value as Json) : {});
-const asList = (value: unknown): Json[] => (Array.isArray(value) ? value.map(asObject) : []);
 const str = (value: unknown): string => (typeof value === "string" || typeof value === "number" ? String(value) : "");
-const money = (value: unknown, currency: unknown): string =>
-  `${Number(value).toLocaleString("en-CA", { maximumFractionDigits: 2 })} ${str(currency) || "CAD"}`;
 
 /** One HTTP call. Throws a plain sentence when the system does not answer. */
-async function call(
-  system: SystemRow,
-  method: "GET" | "POST",
+async function send(
+  baseUrl: string,
+  key: string,
+  method: "GET" | SystemOperation["method"],
   path: string,
   body?: Json,
   idempotencyKey?: string,
 ): Promise<{ status: number; data: Json }> {
-  const key = unseal(system.api_key_cipher);
-  if (!key) throw new Error("its API key cannot be read, so it has to be entered again");
   let response: Response;
   try {
-    response = await fetch(`${system.base_url}${path}`, {
+    response = await fetch(`${baseUrl}${path}`, {
       method,
       headers: {
         authorization: `Bearer ${key}`,
@@ -189,47 +301,34 @@ async function call(
   return { status: response.status, data };
 }
 
+function call(system: SystemRow, method: "GET" | SystemOperation["method"], path: string, body?: Json, idempotencyKey?: string) {
+  const key = unseal(system.api_key_cipher);
+  if (!key) throw new Error("its API key cannot be read, so it has to be entered again");
+  return send(system.base_url, key, method, path, body, idempotencyKey);
+}
+
 /** The system's own reason for refusing, as the end of a sentence. */
 const reason = (data: Json, status: number): string =>
-  (str(asObject(data.error).message) || `it answered with status ${status}`).replace(/[.\s]+$/, "");
+  (str(asObject(data.error).message).slice(0, 400) || `it answered with status ${status}`).replace(/[.\s]+$/, "");
 
-async function readStorefront(system: SystemRow): Promise<string[]> {
-  const [products, orders] = await Promise.all([call(system, "GET", "/v1/products"), call(system, "GET", "/v1/orders")]);
-  if (products.status !== 200) throw new Error(reason(products.data, products.status));
-  return [
-    ...asList(products.data.products).slice(0, 40).map((p) => {
-      const stock = Object.entries(asObject(p.stock))
-        .map(([branch, quantity]) => `${branch} ${str(quantity)}`)
-        .join(", ");
-      return `Product ${str(p.sku)}, ${str(p.name)}: list price ${money(p.listPrice, p.currency)}, ${str(p.weightKg)} kg each. In stock: ${stock}.`;
-    }),
-    ...asList(orders.data.orders).slice(0, 8).map((o) => {
-      const items = asList(o.items).map((i) => `${str(i.quantity)} x ${str(i.sku)}`).join(", ");
-      return `Order ${str(o.id)} (${str(o.status)}): account ${str(o.account)}, from ${str(o.branch)}, ${items}, ${money(o.total, o.currency)}.`;
-    }),
-  ];
+/** Ask a system what it is for and what can be done in it. */
+async function fetchManifest(baseUrl: string, key: string): Promise<ServiceManifest> {
+  const { status, data } = await send(baseUrl, key, "GET", "/v1/manifest");
+  if (status !== 200) throw new Error(reason(data, status));
+  const manifest = parseManifest(data);
+  if (!manifest) throw new Error("what it sent back at /v1/manifest is not a description of a system");
+  return manifest;
 }
 
-async function readCarrier(system: SystemRow): Promise<string[]> {
-  const [services, shipments] = await Promise.all([
-    call(system, "GET", "/v1/services"),
-    call(system, "GET", "/v1/shipments"),
-  ]);
-  if (services.status !== 200) throw new Error(reason(services.data, services.status));
-  return [
-    ...asList(services.data.services).slice(0, 12).map(
-      (s) =>
-        `Service "${str(s.code)}" (${str(s.name)}): ${money(s.baseCharge, s.currency)} plus ${money(s.perKg, s.currency)} per kg, ${str(s.transitDays)} days in transit.`,
-    ),
-    ...asList(shipments.data.shipments).slice(0, 8).map(
-      (s) =>
-        `Shipment ${str(s.id)} (${str(s.status)}): reference ${str(s.reference)}, ${str(s.from)} to ${str(s.to)}, ${str(s.weightKg)} kg by ${str(s.service)}, ${money(s.cost, s.currency)}.`,
-    ),
-  ];
+/** A system's records as it tells them: plain lines, capped in number and length. */
+async function read(system: SystemRow): Promise<string[]> {
+  const { status, data } = await call(system, "GET", system.records_path);
+  if (status !== 200) throw new Error(reason(data, status));
+  return (Array.isArray(data.lines) ? data.lines : [])
+    .filter((line): line is string => typeof line === "string" && line.trim() !== "")
+    .slice(0, 60)
+    .map((line) => line.trim().slice(0, 400));
 }
-
-const read = (system: SystemRow): Promise<string[]> =>
-  system.kind === "storefront" ? readStorefront(system) : readCarrier(system);
 
 /**
  * What these systems hold right now, one line per record, each marked with
@@ -262,22 +361,6 @@ export async function readSystem(db: Db, officeId: string, id: string): Promise<
   }
 }
 
-/** Read "GREE-MZ-12 x 6; ECOBEE-T x 2" into order lines. */
-export function parseItems(text: string): { sku: string; quantity: number }[] | null {
-  const items = text
-    .split(/[;,\n]+/)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-    .map((part) => {
-      const skuFirst = part.match(/^([A-Za-z][\w-]*)\s*(?:x|\*|:|×)?\s*(\d+)$/i);
-      const countFirst = part.match(/^(\d+)\s*(?:x|\*|×)?\s*([A-Za-z][\w-]*)$/i);
-      if (skuFirst) return { sku: skuFirst[1].toUpperCase(), quantity: Number(skuFirst[2]) };
-      if (countFirst) return { sku: countFirst[2].toUpperCase(), quantity: Number(countFirst[1]) };
-      return null;
-    });
-  return items.length > 0 && items.every((i) => i !== null) ? (items as { sku: string; quantity: number }[]) : null;
-}
-
 /** The same task asking for the same thing twice gets the same result back. */
 const idempotencyKey = (action: SystemCall): string =>
   createHash("sha256")
@@ -285,67 +368,25 @@ const idempotencyKey = (action: SystemCall): string =>
     .digest("hex")
     .slice(0, 32);
 
+/**
+ * Carry out one operation the way the system says it is called: fields the
+ * operation places in the path are filled in there, and the rest go in the
+ * body. The system answers with a sentence saying what it did.
+ */
 async function performIn(system: SystemRow, action: SystemCall): Promise<SystemOutcome> {
-  const f = action.fields;
-  const refused = (data: Json, status: number, what: string): SystemOutcome => ({
-    ok: false,
-    summary: `refused ${what}: ${reason(data, status)}.`,
-  });
+  const operation = action.system.operations.find((o) => o.id === action.operation);
+  if (!operation) return { ok: false, summary: `has no operation called ${action.operation}, so nothing was done.` };
 
-  switch (`${system.kind}:${action.operation}`) {
-    case "storefront:place_order": {
-      const items = parseItems(f.items);
-      if (!items) return { ok: false, summary: `could not read the items "${f.items}", so no order was placed.` };
-      const { status, data } = await call(
-        system,
-        "POST",
-        "/v1/orders",
-        { account: f.account, branch: f.branch, items },
-        idempotencyKey(action),
-      );
-      if (status !== 200 && status !== 201) return refused(data, status, "the order");
-      const order = asObject(data.order);
-      const lines = asList(order.items).map((i) => `${str(i.quantity)} x ${str(i.sku)}`).join(", ");
-      const detail = `for account ${str(order.account)} from ${str(order.branch)}: ${lines}, ${money(order.total, order.currency)} at list price`;
-      return {
-        ok: true,
-        summary: data.repeated
-          ? `order ${str(order.id)} was already placed for this task, ${detail}.`
-          : `placed order ${str(order.id)} ${detail}.`,
-      };
-    }
-    case "storefront:cancel_order": {
-      const { status, data } = await call(system, "POST", `/v1/orders/${encodeURIComponent(f.order)}/cancel`);
-      if (status !== 200) return refused(data, status, "the cancellation");
-      const order = asObject(data.order);
-      return { ok: true, summary: `cancelled order ${str(order.id)} and returned its stock to ${str(order.branch)}.` };
-    }
-    case "carrier:book_shipment": {
-      const { status, data } = await call(
-        system,
-        "POST",
-        "/v1/shipments",
-        { reference: f.reference, from: f.from, to: f.to, weightKg: Number(f.weightKg.replace(/[^\d.]/g, "")), service: f.service },
-        idempotencyKey(action),
-      );
-      if (status !== 200 && status !== 201) return refused(data, status, "the booking");
-      const s = asObject(data.shipment);
-      const detail = `${str(s.from)} to ${str(s.to)}, ${str(s.weightKg)} kg by ${str(s.service)}, ${money(s.cost, s.currency)}, ${str(s.transitDays)} days in transit, tracking ${str(s.tracking)}`;
-      return {
-        ok: true,
-        summary: data.repeated
-          ? `shipment ${str(s.id)} was already booked for this task, ${detail}.`
-          : `booked shipment ${str(s.id)} for ${str(s.reference)}: ${detail}.`,
-      };
-    }
-    case "carrier:cancel_shipment": {
-      const { status, data } = await call(system, "POST", `/v1/shipments/${encodeURIComponent(f.shipment)}/cancel`);
-      if (status !== 200) return refused(data, status, "the cancellation");
-      return { ok: true, summary: `cancelled shipment ${str(asObject(data.shipment).id)}.` };
-    }
-    default:
-      return { ok: false, summary: `has no operation called ${action.operation}, so nothing was done.` };
+  const path = operation.path.replace(/\{(\w+)\}/g, (_, name: string) => encodeURIComponent(action.fields[name] ?? ""));
+  const body = Object.fromEntries(
+    operation.fields.filter((f) => f.place === "body").map((f) => [f.name, action.fields[f.name] ?? ""]),
+  );
+  const { status, data } = await call(system, operation.method, path, body, idempotencyKey(action));
+  if (status !== 200 && status !== 201) {
+    return { ok: false, summary: `refused to ${operation.label.toLowerCase()}: ${reason(data, status)}.` };
   }
+  const said = str(data.summary).trim().slice(0, 600);
+  return { ok: true, summary: said || `answered that "${operation.label}" was done, with no detail.` };
 }
 
 /** Carry out one operation. Always resolves, with what happened in a sentence. */
@@ -365,51 +406,75 @@ export async function performInSystem(db: Db, officeId: string, action: SystemCa
 // ---------------------------------------------------------------------------
 
 /**
+ * The sample services, the room each belongs in, and the environment variable
+ * that says where it runs. An order in the storefront waits for a person's
+ * approval, so the demo shows that gate as well as the one on access.
+ */
+const SAMPLE_SERVICES = [
+  { service: "storefront", demoId: DEMO_STOREFRONT_ID, room: "fulfilment", env: "DEMO_STOREFRONT_URL", approval: 1 },
+  { service: "carrier", demoId: DEMO_CARRIER_ID, room: "planning", env: "DEMO_CARRIER_URL", approval: 0 },
+  { service: "ledger", demoId: "sys-demo-ledger", room: "finance", env: "DEMO_LEDGER_URL", approval: 0 },
+  { service: "supplier", demoId: "sys-demo-supplier", room: "operations", env: "DEMO_SUPPLIER_URL", approval: 0 },
+  { service: "service-desk", demoId: "sys-demo-service-desk", room: "reception", env: "DEMO_SERVICE_DESK_URL", approval: 0 },
+] as const;
+
+type SampleService = (typeof SAMPLE_SERVICES)[number];
+
+const sampleKey = (): string => process.env.DEMO_SYSTEMS_KEY?.trim() ?? "";
+const sampleUrl = (sample: SampleService): string => (process.env[sample.env]?.trim() ?? "").replace(/\/+$/, "");
+
+/**
+ * Connect one sample service, or bring an existing connection up to date. Its
+ * description and operations are read from the service's own source, so the
+ * office does not have to reach it first.
+ */
+function connectSample(db: Db, sample: SampleService, id: string, roomId: string): void {
+  const manifest = MANIFESTS[sample.service];
+  const key = sampleKey();
+  const position = get<{ next: number }>(db, "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM connected_systems");
+  run(
+    db,
+    `INSERT INTO connected_systems
+       (id, room_id, position, name, description, records_path, base_url, api_key_cipher, key_hint, updated_at, needs_approval)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       room_id = excluded.room_id, base_url = excluded.base_url, description = excluded.description,
+       records_path = excluded.records_path, api_key_cipher = excluded.api_key_cipher, key_hint = excluded.key_hint,
+       updated_at = excluded.updated_at, needs_approval = excluded.needs_approval`,
+    id,
+    roomId,
+    position?.next ?? 0,
+    manifest.name,
+    manifest.description,
+    manifest.recordsPath,
+    sampleUrl(sample),
+    seal(key),
+    key.slice(-4),
+    Date.now(),
+    sample.approval,
+  );
+  writeOperations(db, id, manifest.operations);
+}
+
+/**
  * Connect the demo office to the systems named in the server's environment,
  * and disconnect it from any that are no longer named. The demo's playbook
  * steps that use those systems get their actions back if they have none.
  */
 export function ensureDemoSystems(db: Db, demo: Office): void {
-  const key = process.env.DEMO_SYSTEMS_KEY?.trim() ?? "";
-  // An order in the demo's storefront waits for a person's approval, so the
-  // demo shows that gate as well as the one on access.
-  const wanted: { id: string; name: string; kind: SystemKind; roomId: string; url: string; approval: number }[] = [
-    { id: DEMO_STOREFRONT_ID, name: "Storefront", kind: "storefront", roomId: "fulfilment", url: process.env.DEMO_STOREFRONT_URL?.trim() ?? "", approval: 1 },
-    { id: DEMO_CARRIER_ID, name: "Freight carrier", kind: "carrier", roomId: "planning", url: process.env.DEMO_CARRIER_URL?.trim() ?? "", approval: 0 },
-  ];
-  for (const system of wanted) {
-    const usable = system.url !== "" && key.length >= 8 && demo.floorplan.rooms.some((r) => r.id === system.roomId);
-    if (!usable) {
-      run(db, "DELETE FROM connected_systems WHERE id = ?", system.id);
+  for (const sample of SAMPLE_SERVICES) {
+    const id = sample.demoId;
+    if (!sampleUrl(sample) || sampleKey().length < 8 || !demo.floorplan.rooms.some((r) => r.id === sample.room)) {
+      run(db, "DELETE FROM connected_systems WHERE id = ?", id);
       continue;
     }
-    const position = get<{ next: number }>(db, "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM connected_systems");
-    run(
-      db,
-      `INSERT INTO connected_systems
-         (id, room_id, position, name, kind, base_url, api_key_cipher, key_hint, updated_at, needs_approval)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         room_id = excluded.room_id, base_url = excluded.base_url,
-         api_key_cipher = excluded.api_key_cipher, key_hint = excluded.key_hint, updated_at = excluded.updated_at,
-         needs_approval = excluded.needs_approval`,
-      system.id,
-      system.roomId,
-      position?.next ?? 0,
-      system.name,
-      system.kind,
-      system.url.replace(/\/+$/, ""),
-      seal(key),
-      key.slice(-4),
-      Date.now(),
-      system.approval,
-    );
+    connectSample(db, sample, id, sample.room);
   }
 
   for (const seeded of seededOffice.participants) {
     for (const step of seeded.playbook) {
       const action = step.then.action;
-      if (!action || !DEMO_IDS.has(action.systemId)) continue;
+      if (!action || !SAMPLE_SERVICES.some((sample) => sample.demoId === action.systemId)) continue;
       const stored = get(db, "SELECT 1 AS found FROM playbook_steps WHERE id = ? AND participant_id = ?", step.id, seeded.id);
       const has = get(db, "SELECT 1 AS found FROM playbook_actions WHERE step_id = ?", step.id);
       if (!stored || has) continue;
@@ -454,37 +519,12 @@ export function ensureDemoSystems(db: Db, demo: Office): void {
 }
 
 /**
- * Connect an office to the two sample services named in the server's
- * environment. Does nothing where they are not named. Orders in the
- * storefront wait for approval, as in the demo.
+ * Connect an office to the sample services named in the server's environment,
+ * each in the room that suits it. Does nothing for a service that is not named.
  */
-export function connectSampleServices(db: Db, suffix: string, rooms: { storefront: string; carrier: string }): void {
-  const key = process.env.DEMO_SYSTEMS_KEY?.trim() ?? "";
-  if (key.length < 8) return;
-  const wanted: [string, string, SystemKind, string, string, number][] = [
-    [`sys-${suffix}-storefront`, "Storefront", "storefront", rooms.storefront, process.env.DEMO_STOREFRONT_URL?.trim() ?? "", 1],
-    [`sys-${suffix}-carrier`, "Freight carrier", "carrier", rooms.carrier, process.env.DEMO_CARRIER_URL?.trim() ?? "", 0],
-  ];
-  for (const [id, name, kind, roomId, url, approval] of wanted) {
-    if (!url) continue;
-    const position = get<{ next: number }>(db, "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM connected_systems");
-    run(
-      db,
-      `INSERT INTO connected_systems
-         (id, room_id, position, name, kind, base_url, api_key_cipher, key_hint, updated_at, needs_approval)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      id,
-      roomId,
-      position?.next ?? 0,
-      name,
-      kind,
-      url.replace(/\/+$/, ""),
-      seal(key),
-      key.slice(-4),
-      Date.now(),
-      approval,
-    );
+export function connectSampleServices(db: Db, suffix: string): void {
+  if (sampleKey().length < 8) return;
+  for (const sample of SAMPLE_SERVICES) {
+    if (sampleUrl(sample)) connectSample(db, sample, `sys-${suffix}-${sample.service}`, `${sample.room}-${suffix}`);
   }
 }
-
-export const systemKindLabel = (kind: SystemKind): string => SYSTEM_INFO[kind].label;

@@ -69,7 +69,7 @@ import {
   recordDirect,
   unreadDirects,
 } from "./chat";
-import { sampleOffice, sampleSystemRooms } from "../sampleOffice";
+import { sampleOffice } from "../sampleOffice";
 import {
   connectSampleServices,
   ensureDemoSystems,
@@ -77,7 +77,8 @@ import {
   performInSystem,
   readSystem,
   removeSystem,
-  saveSystem,
+  checkSystem,
+  storeSystem,
   SystemError,
   systemRoom,
   systemViews,
@@ -1024,8 +1025,10 @@ export function saveSystemSettings(session: Session, input: SystemInput): Promis
     const { state, actor } = systemEditor(db, session, input.roomId);
     if (input.id) systemEditor(db, session, systemRoom(db, state.office.id, input.id));
     try {
+      // The system is asked about itself before anything is stored.
+      const change = await checkSystem(db, state.office, input);
       transaction(db, () => {
-        saveSystem(db, state.office, input);
+        const name = storeSystem(db, change);
         const room = state.office.floorplan.rooms.find((r) => r.id === input.roomId)?.name ?? input.roomId;
         recordAudit(db, {
           officeId: state.office.id,
@@ -1033,7 +1036,7 @@ export function saveSystemSettings(session: Session, input: SystemInput): Promis
           actorId: actor.id,
           actionType: input.id ? "UPDATE_SYSTEM" : "ADD_SYSTEM",
           subject: { ...NO_SUBJECT, roomId: input.roomId },
-          notes: [`${actor.displayName} ${input.id ? "changed" : "connected"} the system ${input.name.trim()} in ${room}`],
+          notes: [`${actor.displayName} ${input.id ? "changed" : "connected"} the system ${name} in ${room}`],
         });
       });
     } catch (error) {
@@ -1150,7 +1153,7 @@ export function createSampleOffice(session: Session, providerId: string): Promis
     transaction(db, () => {
       writeWholeOffice(db, { office, now: Date.now(), seq: 0, clockStepMinutes: 0, idScope: freshIdScope(db) });
       addMembership(db, session.userId, managerId);
-      connectSampleServices(db, suffix, sampleSystemRooms(suffix));
+      connectSampleServices(db, suffix);
       recordAudit(db, {
         officeId: office.id,
         officeClock: Date.now(),

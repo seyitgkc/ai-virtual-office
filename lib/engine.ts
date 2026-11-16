@@ -1224,7 +1224,7 @@ async function runAgent(
   // is dropped, as is an action with a field left empty.
   const calls: SystemCall[] = (result.actions ?? []).flatMap((action) => {
     const system = office.systems.find((s) => s.id === action.systemId);
-    const fields = system ? checkedFields(system.kind, action.operation, action.fields) : null;
+    const fields = system ? checkedFields(system, action.operation, action.fields) : null;
     return system && fields ? [{ ...action, fields, system, taskId: task.id }] : [];
   });
   // Acting in a system the agent may not act in is a need like any other, and
@@ -1240,7 +1240,7 @@ async function runAgent(
     .map((call) => ({
       room: call.system.roomId,
       scope: "act",
-      purpose: `${operationOf(call.system.kind, call.operation)?.label ?? call.operation} in ${call.system.name}`,
+      purpose: `${operationOf(call.system, call.operation)?.label ?? call.operation} in ${call.system.name}`,
     }));
 
   // An AI agent that wants to read a room where another AI agent works does
@@ -1350,7 +1350,7 @@ async function runAgent(
     for (const call of refusedCalls) {
       tell(
         attending.fromId,
-        `I may not act in ${call.system.name}, so I did not ${(operationOf(call.system.kind, call.operation)?.label ?? call.operation).toLowerCase()}.`,
+        `I may not act in ${call.system.name}, so I did not ${(operationOf(call.system, call.operation)?.label ?? call.operation).toLowerCase()}.`,
       );
     }
   }
@@ -1361,7 +1361,7 @@ async function runAgent(
       // Where a system needs approval, being allowed to act is not enough: the
       // action is put to a person as a question and waits for their answer.
       if (call.system.needsApproval) {
-        const operation = operationOf(call.system.kind, call.operation);
+        const operation = operationOf(call.system, call.operation);
         const details = (operation?.fields ?? []).map((f) => `${f.label}: ${call.fields[f.name]}`).join(". ");
         const body = `May I ${(operation?.label ?? call.operation).toLowerCase()} in ${call.system.name}? ${details}.`;
         if (said.has(`question:${body}`) || emitted.some((m) => m.kind === "question" && m.body === body)) continue;
