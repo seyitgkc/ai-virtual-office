@@ -42,10 +42,26 @@ export function RolesTab({
   const role = office.roles[selected] ?? roles[0];
   const holdersOf = (id: string) => office.participants.filter((p) => p.roleId === id);
   const heldByAgents = (id: string) => holdersOf(id).some((p) => p.kind === "agent");
+  const [part, setPart] = useState<"roles" | "rooms" | "permissions">("roles");
+  // Permissions are for people. A role an agent holds cannot carry any, so it
+  // has no column of boxes that could never be ticked.
+  const peopleRoles = roles.filter((r) => !heldByAgents(r.id));
+  const agentRoles = roles.filter((r) => heldByAgents(r.id));
 
   return (
     <>
-      <Section title="Roles" hint="Names and descriptions save when you leave the field.">
+      <TabBar
+        label="Roles and access"
+        tabs={[
+          { id: "roles", label: `Roles (${roles.length})` },
+          { id: "rooms", label: "Room access" },
+          { id: "permissions", label: "Permissions" },
+        ]}
+        active={part}
+        onChange={setPart}
+      />
+      {part === "roles" && (
+      <Section title="Roles" hint="A role is what a person or agent is here to do. A name or description is saved when you leave its field.">
         <div className="table-scroll">
           <table className="grid-table">
             <thead>
@@ -120,17 +136,24 @@ export function RolesTab({
           </button>
         </form>
       </Section>
+      )}
 
+      {part === "permissions" && (
       <Section
         title="Permissions"
-        hint="Tick what each role may do. You can only give a permission you hold yourself. Roles held by agents cannot carry permissions."
+        hint={
+          "What a role may do to the office itself. You can only give a permission you hold yourself." +
+          (agentRoles.length > 0
+            ? ` Permissions are for people, so the roles agents hold are not listed: ${agentRoles.map((r) => r.name).join(", ")}.`
+            : "")
+        }
       >
         <div className="table-scroll">
           <table className="grid-table permission-grid">
             <thead>
               <tr>
                 <th scope="col">Permission</th>
-                {roles.map((r) => (
+                {peopleRoles.map((r) => (
                   <th key={r.id} scope="col" className="narrow">
                     {r.name}
                   </th>
@@ -144,7 +167,7 @@ export function RolesTab({
                     {PERMISSION_INFO[permission].label}
                     <span className="cell-note">{PERMISSION_INFO[permission].description}</span>
                   </th>
-                  {roles.map((r) => {
+                  {peopleRoles.map((r) => {
                     const on = r.permissions.includes(permission);
                     const blocked = !on && (!ownPermissions.includes(permission) || heldByAgents(r.id));
                     return (
@@ -179,8 +202,9 @@ export function RolesTab({
           </table>
         </div>
       </Section>
+      )}
 
-      {role && (
+      {part === "rooms" && role && (
         <Section
           title="Room access by role"
           hint="Deny beats allow. A box left empty is not set, so the role falls back to Every room and then to no access. A rule on one person or agent outranks anything set here."

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AdminOp } from "../lib/admin";
 import { resolveAccess, type Participant, type Room } from "../lib/model";
 import { contextOf } from "../lib/policy";
@@ -25,12 +25,15 @@ const EMPTY_FORM = {
  * records are read live. Both follow the room's access rules.
  */
 export function RecordsTab({
+  part,
   view,
   viewer,
   adminOp,
   systemOp,
   readSystem,
 }: {
+  /** Which of the two pages this is: the rooms' own records, or the connected systems. */
+  part: "records" | "systems";
   view: OfficeView;
   viewer: Participant;
   adminOp: (op: AdminOp) => Promise<boolean>;
@@ -54,15 +57,20 @@ export function RecordsTab({
   const homes = readable.filter((r) => !r.corridor);
   const formRoom = homes.some((r) => r.id === form.roomId) ? form.roomId : (homes[0]?.id ?? "");
   const alsoShown = form.shownIn.filter((id) => id !== formRoom && homes.some((r) => r.id === id));
+  // Editing a system brings its form into view, wherever the table was scrolled to.
+  const formRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (form.id) formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [form.id]);
   const keyState = (s: SystemView): string =>
     s.keyUnreadable ? "Stored but unreadable. Enter it again." : s.hasKey ? `Ends in ${s.keyHint}` : "None";
 
-  return (
-    <>
+  if (part === "records") {
+    return (
       <Section
         title="Records kept in each room"
         hint={
-          "One record per line. A record is shown to the people and agents who can read its room, and to nobody else." +
+          "One record per line. Each is a fact an agent working in that room can rely on, such as a policy or an account's terms." +
           (closed > 0 ? ` ${closed} room${closed === 1 ? " is" : "s are"} not listed because you cannot read ${closed === 1 ? "it" : "them"}.` : "")
         }
       >
@@ -70,7 +78,11 @@ export function RecordsTab({
           <RoomRecords key={room.id} room={room} adminOp={adminOp} />
         ))}
       </Section>
+    );
+  }
 
+  return (
+    <>
       <Section
         title="Connected systems"
         hint={
@@ -78,17 +90,16 @@ export function RecordsTab({
             ? "Sample services run beside this office. Their connections are fixed here, and an order in the storefront waits for approval. An office of your own connects its own."
             : locked
               ? "Sign in with a password account to connect a system."
-              : "A system is operated from one room. Reading that room shows the system's live records, and they can be shown in further rooms too. Acting in that room allows its operations, and a system can also hold each action until a person approves it. Agents are told when and how to use a system in the words of its description, which you can change."
+              : "Whoever may read the room a system is operated from sees its live records. Whoever may act there can use it."
         }
       >
         <div className="table-scroll">
           <table className="grid-table">
             <thead>
               <tr>
-                <th scope="col">Name</th>
+                <th scope="col">System</th>
                 <th scope="col">Operated from</th>
-                <th scope="col">Agents are told</th>
-                <th scope="col">With act access, agents can</th>
+                <th scope="col">Agents can</th>
                 <th scope="col">Each action</th>
                 <th scope="col">API key</th>
                 <th scope="col" aria-label="Actions" />
@@ -97,16 +108,19 @@ export function RecordsTab({
             <tbody>
               {systems.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={6} className="muted">
                     No connected systems yet.
                   </td>
                 </tr>
               )}
               {systems.map((s) => (
                 <tr key={s.id} data-selected={s.id === editing?.id || s.id === shown?.id}>
-                  <td>
+                  <td className="cell-system">
                     {s.name}
                     <span className="cell-note">{s.baseUrl}</span>
+                    <span className="cell-note cell-clamp" title={s.description}>
+                      {s.description}
+                    </span>
                   </td>
                   <td>
                     {roomName(s.roomId)}
@@ -114,8 +128,7 @@ export function RecordsTab({
                       <span className="cell-note">Records also shown in {s.shownIn.map(roomName).join(", ")}</span>
                     )}
                   </td>
-                  <td className="muted cell-long">{s.description}</td>
-                  <td className="muted">{s.operations.join(", ") || "Nothing"}</td>
+                  <td className="muted cell-operations">{s.operations.join(", ") || "Nothing"}</td>
                   <td className="muted">{s.needsApproval ? "Waits for approval" : "Goes straight through"}</td>
                   <td className="muted" data-warn={s.keyUnreadable}>
                     {keyState(s)}
@@ -128,7 +141,7 @@ export function RecordsTab({
                         void readSystem(s.id).then((records) => setShown(records ? { id: s.id, records } : null))
                       }
                     >
-                      Show live records
+                      Live records
                     </button>
                     {!locked && (
                       <>
@@ -190,6 +203,7 @@ export function RecordsTab({
       </Section>
 
       {!locked && (
+        <div ref={formRef}>
         <Section title={editing ? `Edit ${editing.name}` : "Connect a system"}>
           <form
             className="form-grid"
@@ -321,6 +335,7 @@ export function RecordsTab({
             </div>
           </form>
         </Section>
+        </div>
       )}
     </>
   );

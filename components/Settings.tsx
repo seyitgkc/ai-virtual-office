@@ -9,21 +9,32 @@ import type { OfficeView } from "../lib/view";
 import { RolesTab, RulesTab } from "./SettingsAccess";
 import { PeopleTab, ProvidersTab } from "./SettingsAgents";
 import { RecordsTab } from "./SettingsRecords";
-import { ConfirmButton, SavedField, Section, TabBar } from "./settingsParts";
+import { ConfirmButton, SavedField, Section } from "./settingsParts";
 
-type Tab = "offices" | "own-providers" | "office" | "rooms" | "records" | "people" | "roles" | "rules" | "providers";
+type Tab = "offices" | "own-providers" | "office" | "rooms" | "records" | "systems" | "people" | "roles" | "rules" | "providers";
 
-/** Each tab and the permission that opens it. Offices is open to everyone. */
-const TABS: { id: Tab; label: string; needs: Permission | null }[] = [
-  { id: "offices", label: "Offices", needs: null },
-  { id: "office", label: "This office", needs: "manage_office" },
-  { id: "rooms", label: "Rooms", needs: "manage_rooms" },
-  { id: "records", label: "Records and systems", needs: "manage_rooms" },
-  { id: "people", label: "People and agents", needs: "manage_people" },
-  { id: "roles", label: "Roles and permissions", needs: "manage_roles" },
-  { id: "rules", label: "Access rules", needs: "manage_access" },
-  { id: "providers", label: "Office AI providers", needs: "manage_providers" },
-  { id: "own-providers", label: "My AI providers", needs: null },
+/**
+ * Each page of Settings: where it sits in the list, the permission that opens
+ * it, and one sentence on what it is for. The pages of this office come
+ * first. What belongs to the person's account, in whichever office they are,
+ * comes after.
+ */
+const PAGES: { id: Tab; label: string; group: "office" | "account"; needs: Permission | null; about: string }[] = [
+  { id: "office", label: "General", group: "office", needs: "manage_office", about: "The office's name, and whether agents hand work on by themselves." },
+  { id: "rooms", label: "Rooms", group: "office", needs: "manage_rooms", about: "The rooms along the corridor, and which room hosts each stage of the work." },
+  { id: "records", label: "Records", group: "office", needs: "manage_rooms", about: "Facts kept in each room, shown to whoever may read that room." },
+  { id: "systems", label: "Connected systems", group: "office", needs: "manage_rooms", about: "Outside systems agents read from and act in, each operated from one room." },
+  { id: "people", label: "People and agents", group: "office", needs: "manage_people", about: "Who works here, in which room, and in which role." },
+  { id: "roles", label: "Roles and access", group: "office", needs: "manage_roles", about: "What each role may do, and which rooms it may enter, read and act in." },
+  { id: "rules", label: "Access rules", group: "office", needs: "manage_access", about: "Exceptions for one person or agent, which outrank their role." },
+  { id: "providers", label: "AI providers", group: "office", needs: "manage_providers", about: "The AI services this office's agents can use." },
+  { id: "offices", label: "Your offices", group: "account", needs: null, about: "The offices you have a seat in. Add one, or leave one." },
+  { id: "own-providers", label: "Your AI providers", group: "account", needs: null, about: "AI services that belong to your account, usable in every office you sit in." },
+];
+
+const GROUPS: { id: "office" | "account"; label: string }[] = [
+  { id: "office", label: "This office" },
+  { id: "account", label: "Your account" },
 ];
 
 /** Where each wall is, as the overview shows the plan. */
@@ -65,13 +76,14 @@ export function Settings({
 }) {
   const own = view.viewer.permissions;
   // Providers of one's own need a password account, which demo access is not.
-  const tabs = TABS.filter(
+  const tabs = PAGES.filter(
     (t) => (t.needs === null || own.includes(t.needs)) && (t.id !== "own-providers" || view.ownProvidersEditable),
   );
   const [tab, setTab] = useState<Tab>(
     tabs.find((t) => t.id === initialTab)?.id ?? tabs.find((t) => t.needs !== null)?.id ?? "offices",
   );
   const open = tabs.some((t) => t.id === tab) ? tab : "offices";
+  const page = PAGES.find((p) => p.id === open)!;
   const office = view.office;
 
   return (
@@ -83,19 +95,45 @@ export function Settings({
         aria-labelledby="settings-heading"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="settings-head">
-          <h2 id="settings-heading">Settings</h2>
-          <button className="btn" onClick={onClose}>
-            Close
-          </button>
-        </div>
-        <TabBar label="Settings" tabs={tabs} active={open} onChange={setTab} />
-        <div className="settings-body" role="tabpanel">
+        <nav className="settings-nav" aria-label="Settings">
+          <div className="settings-nav-title">Settings</div>
+          {GROUPS.map((group) => {
+            const pages = tabs.filter((t) => t.group === group.id);
+            if (pages.length === 0) return null;
+            return (
+              <div key={group.id} className="settings-nav-group">
+                <div className="settings-nav-label">{group.id === "office" ? office.name : group.label}</div>
+                {pages.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className="settings-nav-item"
+                    aria-current={open === t.id ? "page" : undefined}
+                    onClick={() => setTab(t.id)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+        </nav>
+        <div className="settings-main">
+          <div className="settings-head">
+            <div>
+              <h2 id="settings-heading">{page.label}</h2>
+              <p>{page.about}</p>
+            </div>
+            <button className="btn" onClick={onClose}>
+              Close
+            </button>
+          </div>
+          <div className="settings-body">
           {open === "offices" && <OfficesTab view={view} officeOp={officeOp} />}
           {open === "office" && <OfficeTab view={view} adminOp={adminOp} officeOp={officeOp} />}
           {open === "rooms" && <RoomsTab office={office} adminOp={adminOp} />}
-          {open === "records" && (
-            <RecordsTab view={view} viewer={viewer} adminOp={adminOp} systemOp={systemOp} readSystem={readSystem} />
+          {(open === "records" || open === "systems") && (
+            <RecordsTab part={open} view={view} viewer={viewer} adminOp={adminOp} systemOp={systemOp} readSystem={readSystem} />
           )}
           {open === "people" && (
             <PeopleTab office={office} viewer={viewer} providers={view.providers} adminOp={adminOp} />
@@ -104,6 +142,7 @@ export function Settings({
           {open === "rules" && <RulesTab office={office} dispatch={dispatch} />}
           {open === "providers" && <ProvidersTab view={view} providerOp={providerOp} scope="office" />}
           {open === "own-providers" && <ProvidersTab view={view} providerOp={providerOp} scope="account" />}
+          </div>
         </div>
       </div>
     </div>
@@ -118,32 +157,43 @@ function OfficesTab({ view, officeOp }: { view: OfficeView; officeOp: (op: Offic
     <>
       <Section
         title="Your offices"
-        hint={`Signed in as ${view.account.displayName} (${view.account.email}). Each office is separate, with its own rooms, people, work, rules and AI providers.`}
+        hint={`Signed in as ${view.account.displayName} (${view.account.email}). Each office is separate, with its own rooms, people, work and rules.`}
       >
-        {view.offices.map((o) => (
-          <div key={o.officeId} className="entity">
-            <div className="entity-fields">
-              <span>
-                <strong>{o.name}</strong>
-                {o.active ? " · you are here" : ""}
-              </span>
-              <span className="entity-meta">
-                {o.isDemo ? "Shared demo office" : o.canRemove ? "You manage this office" : "You are a member"}
-              </span>
-            </div>
-            {!o.active && (
-              <button className="btn" onClick={() => officeOp({ operation: "switch", officeId: o.officeId })}>
-                Open
-              </button>
-            )}
-            {o.canRemove && (
-              <ConfirmButton
-                label="Remove"
-                onConfirm={() => officeOp({ operation: "remove", officeId: o.officeId })}
-              />
-            )}
-          </div>
-        ))}
+        <div className="table-scroll">
+          <table className="grid-table">
+            <thead>
+              <tr>
+                <th scope="col">Office</th>
+                <th scope="col">Your part in it</th>
+                <th scope="col" aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {view.offices.map((o) => (
+                <tr key={o.officeId} data-selected={o.active}>
+                  <th scope="row">
+                    {o.name}
+                    {o.active && <span className="cell-note">You are here</span>}
+                  </th>
+                  <td className="muted">
+                    {o.isDemo ? "Shared demo office" : o.canRemove ? "You manage it" : "You are a member"}
+                  </td>
+                  <td className="actions">
+                    {!o.active && (
+                      <button className="btn" onClick={() => officeOp({ operation: "switch", officeId: o.officeId })}>
+                        Open
+                      </button>
+                    )}
+                    {o.canRemove && (
+                      <ConfirmButton label="Remove" onConfirm={() => officeOp({ operation: "remove", officeId: o.officeId })} />
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="hint after">Removing an office deletes everything in it for everyone, and cannot be undone.</p>
       </Section>
 
       <Section
@@ -151,7 +201,7 @@ function OfficesTab({ view, officeOp }: { view: OfficeView; officeOp: (op: Offic
         hint={
           view.account.isDemo
             ? "Demo access cannot add offices. Sign in with a password account to have offices of your own."
-            : "A new office starts empty: one room with you in it, no agents, no work and no rules."
+            : "A new office starts with a corridor and one room on it, with you inside. It has no agents, no work and no rules, and lists what it still needs."
         }
       >
         <form
@@ -174,7 +224,6 @@ function OfficesTab({ view, officeOp }: { view: OfficeView; officeOp: (op: Offic
             Add a new office
           </button>
         </form>
-        <p className="hint">Removing an office deletes everything in it for everyone, and cannot be undone.</p>
       </Section>
 
       {view.ownProvidersEditable && <SampleOffice view={view} officeOp={officeOp} />}
@@ -192,7 +241,7 @@ function SampleOffice({ view, officeOp }: { view: OfficeView; officeOp: (op: Off
       title="Add a sample office with AI agents"
       hint={
         usable.length === 0
-          ? "This adds the distributor from the demo as an office of your own, with five AI agents in place of the playbook agents. It needs an AI provider from your account: add one under My AI providers first."
+          ? "This adds the distributor from the demo as an office of your own, with five AI agents in place of the playbook agents. It needs an AI provider from your account: add one under Your AI providers first."
           : "This adds the distributor from the demo as an office of your own: the same rooms, roles and records, five AI agents on the provider you choose, and you as its manager. It starts with no work. Every step an agent takes is a call to that provider."
       }
     >
@@ -312,59 +361,80 @@ function RoomsTab({ office, adminOp }: { office: Office; adminOp: (op: AdminOp) 
 
   return (
     <>
-      <Section title="Rooms" hint="Each room is a permission boundary. Names and purposes save when you leave the field.">
-        {rooms.map((room) => {
-          const stages = CONFIGURABLE_STAGES.filter((s) => office.stageRooms[s] === room.id);
-          const seated = office.floorplan.desks.filter((d) => d.roomId === room.id).length;
-          return (
-            <div key={room.id} className="entity">
-              <div className="entity-fields">
-                <SavedField
-                  label={`Name of ${room.name}`}
-                  value={room.name}
-                  onSave={(next) => adminOp({ type: "UPDATE_ROOM", roomId: room.id, name: next })}
-                />
-                <SavedField
-                  label={`Purpose of ${room.name}`}
-                  value={room.purpose || "No purpose given"}
-                  onSave={(next) => adminOp({ type: "UPDATE_ROOM", roomId: room.id, purpose: next })}
-                />
-              </div>
-              <div className="entity-meta">
-                {room.bounds.w} by {room.bounds.d} m ·{" "}
-                {room.corridor ? "corridor" : `${seated} desk${seated === 1 ? "" : "s"}`}
-                {stages.length > 0 ? ` · hosts ${stages.map((s) => stageSpec(s).label).join(", ")}` : ""}
-              </div>
-              <ConfirmButton
-                label="Remove"
-                onConfirm={() => adminOp({ type: "REMOVE_ROOM", roomId: room.id })}
-              />
-            </div>
-          );
-        })}
+      <Section title="Rooms" hint="Each room is a permission boundary. A name or purpose is saved when you leave its field.">
+        <div className="table-scroll">
+          <table className="grid-table">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Purpose</th>
+                <th scope="col">Size</th>
+                <th scope="col">Desks</th>
+                <th scope="col">Hosts</th>
+                <th scope="col" aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {rooms.map((room) => {
+                const stages = CONFIGURABLE_STAGES.filter((s) => office.stageRooms[s] === room.id);
+                const seated = office.floorplan.desks.filter((d) => d.roomId === room.id).length;
+                return (
+                  <tr key={room.id}>
+                    <td>
+                      <SavedField
+                        label={`Name of ${room.name}`}
+                        value={room.name}
+                        onSave={(next) => adminOp({ type: "UPDATE_ROOM", roomId: room.id, name: next })}
+                      />
+                    </td>
+                    <td className="cell-wide">
+                      <SavedField
+                        label={`Purpose of ${room.name}`}
+                        value={room.purpose}
+                        placeholder="What happens here"
+                        allowEmpty
+                        onSave={(next) => adminOp({ type: "UPDATE_ROOM", roomId: room.id, purpose: next })}
+                      />
+                    </td>
+                    <td className="muted nowrap">
+                      {room.bounds.w} by {room.bounds.d} m
+                    </td>
+                    <td className="muted">{room.corridor ? "None, a corridor" : seated}</td>
+                    <td className="muted">{stages.map((s) => stageSpec(s).label).join(", ") || "No stage"}</td>
+                    <td className="actions">
+                      <ConfirmButton label="Remove" onConfirm={() => adminOp({ type: "REMOVE_ROOM", roomId: room.id })} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </Section>
 
       <Section
         title="Where each stage happens"
-        hint="A task moves through these stages in order. Each stage is hosted by one room."
+        hint="A task moves through these stages in order. Each stage is hosted by one room, and goes to an agent who may act there."
       >
-        {CONFIGURABLE_STAGES.map((stage) => (
-          <label key={stage} className="row">
-            <span>{stageSpec(stage).label}</span>
-            <select
-              value={office.stageRooms[stage]}
-              onChange={(e) => adminOp({ type: "SET_STAGE_ROOM", stage, roomId: e.target.value })}
-            >
-              {rooms
-                .filter((room) => !room.corridor)
-                .map((room) => (
-                  <option key={room.id} value={room.id}>
-                    {room.name}
-                  </option>
-                ))}
-            </select>
-          </label>
-        ))}
+        <div className="stage-grid">
+          {CONFIGURABLE_STAGES.map((stage) => (
+            <label key={stage}>
+              {stageSpec(stage).label}
+              <select
+                value={office.stageRooms[stage]}
+                onChange={(e) => adminOp({ type: "SET_STAGE_ROOM", stage, roomId: e.target.value })}
+              >
+                {rooms
+                  .filter((room) => !room.corridor)
+                  .map((room) => (
+                    <option key={room.id} value={room.id}>
+                      {room.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          ))}
+        </div>
       </Section>
 
       <Section

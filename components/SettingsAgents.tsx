@@ -335,7 +335,7 @@ function AddAgent({
             </label>
             {providers.length === 0 && (
               <p className="hint wide">
-                This office has no AI provider yet. Add one under Office AI providers, or the agent will stop work when a
+                This office has no AI provider yet. Add one under AI providers, or the agent will stop work when a
                 task reaches it.
               </p>
             )}
@@ -949,7 +949,7 @@ export function ProvidersTab({
   return (
     <>
       <Section
-        title={own ? "My AI providers" : "This office's AI providers"}
+        title={own ? "Your AI providers" : "This office's AI providers"}
         hint={
           own
             ? "These belong to your account. They can be given to agents in every office you have a seat in, so a key is entered once. Other people in an office see that the provider is yours, and can give it to an agent only if their role has the Use shared AI providers permission."
@@ -1048,7 +1048,7 @@ export function ProvidersTab({
       {shared.length > 0 && (
         <Section
           title="Brought in from people's accounts"
-          hint="Providers that belong to someone seated in this office. Their owner changes them under My AI providers, in their own settings."
+          hint="Providers that belong to someone seated in this office. Their owner changes them under Your AI providers, in their own settings."
         >
           <div className="table-scroll">
             <table className="grid-table">

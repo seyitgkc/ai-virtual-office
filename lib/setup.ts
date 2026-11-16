@@ -7,7 +7,7 @@ import { eligibleOwners } from "./engine";
 import { canOwnWorkIn, type Office } from "./model";
 import { contextOf } from "./policy";
 
-export type SetupTab = "rooms" | "roles" | "people" | "providers" | "records";
+export type SetupTab = "rooms" | "roles" | "people" | "providers" | "systems";
 
 export interface SetupStep {
   id: string;
@@ -104,7 +104,7 @@ export function setupSteps(office: Office, now: number, providers: { id: string;
           : "Without one, agents can read records and write, and cannot place an order or book anything.",
       done: office.systems.length > 0,
       optional: true,
-      tab: "records",
+      tab: "systems",
     },
     {
       id: "request",
