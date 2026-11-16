@@ -57,6 +57,18 @@ export const notesFor = (office: Office, viewer: Participant): Message[] =>
     .filter((m) => m.kind === "note" && m.audience.to === "participant" && m.audience.id === viewer.id)
     .reverse();
 
+/**
+ * Notes one agent left another, newest first. The office sends a person only
+ * the notes they may see, so this is empty for someone who cannot see
+ * everything.
+ */
+export const notesBetweenAgents = (office: Office): Message[] => {
+  const agents = new Set(office.participants.filter((p) => p.kind === "agent").map((p) => p.id));
+  return office.messages
+    .filter((m) => m.kind === "note" && agents.has(m.fromId) && m.audience.to === "participant" && agents.has(m.audience.id))
+    .reverse();
+};
+
 /** How many things in the inbox the viewer has not dealt with or opened. */
 export function inboxCount(view: OfficeView, viewer: Participant): number {
   const waiting = waitingFor(view.office, viewer, view.viewer.permissions.includes("decide_reviews")).length;
@@ -66,7 +78,8 @@ export function inboxCount(view: OfficeView, viewer: Participant): number {
 
 /**
  * Everything addressed to the signed-in person in one place: what is waiting
- * on them, notes agents left them, and their conversations.
+ * on them, notes agents left them, what agents wrote to each other, and
+ * their conversations.
  */
 export function Inbox({
   view,
@@ -86,6 +99,7 @@ export function Inbox({
   const waiting = waitingFor(office, viewer, view.viewer.permissions.includes("decide_reviews"));
   const notes = notesFor(office, viewer).slice(0, 20);
   const unreadNotes = new Set(view.unread.notes);
+  const between = notesBetweenAgents(office);
   const person = (id: string): Participant | undefined => office.participants.find((p) => p.id === id);
 
   // One row per conversation, the most recent first.
@@ -148,6 +162,28 @@ export function Inbox({
             </button>
           ))}
         </section>
+
+        {(between.length > 0 || view.viewer.permissions.includes("see_everything")) && (
+          <section>
+            <h3>Between agents ({between.length})</h3>
+            {between.length === 0 && (
+              <div className="empty">
+                No agent has written to another yet. An agent leaves a colleague a note when it needs something from
+                them, or has something to add to a hand-over.
+              </div>
+            )}
+            {between.slice(0, 40).map((note) => (
+              <button key={note.id} type="button" className="inbox-row full" onClick={() => onOpenTask(note.taskId)}>
+                <span className="meta">
+                  {person(note.fromId)?.displayName ?? "An agent"} to{" "}
+                  {note.audience.to === "participant" ? (person(note.audience.id)?.displayName ?? "an agent") : "an agent"} ·{" "}
+                  {note.taskId}
+                </span>
+                <span className="body">{note.body}</span>
+              </button>
+            ))}
+          </section>
+        )}
 
         <section>
           <h3>Conversations ({conversations.length})</h3>

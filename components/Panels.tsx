@@ -996,6 +996,20 @@ function ParticipantInspector({
   const desk = deskState(office, participant);
   const cannotEnter =
     seatRoom && resolveAccess(viewer, seatRoom.id, "enter", ctx).effect !== "allow" ? seatRoom.name : null;
+  // Notes this agent exchanged with other agents, newest first. Only the
+  // notes the viewer may see reach the browser.
+  const nameOf = (id: string): string => office.participants.find((p) => p.id === id)?.displayName ?? "someone";
+  const isAgent = (id: string): boolean => office.participants.some((p) => p.id === id && p.kind === "agent");
+  const agentNotes = office.messages
+    .filter(
+      (m) =>
+        m.kind === "note" &&
+        m.audience.to === "participant" &&
+        isAgent(m.fromId) &&
+        isAgent(m.audience.id) &&
+        (m.fromId === participant.id || m.audience.id === participant.id),
+    )
+    .reverse();
 
   return (
     <div className="panel" id="inspector">
@@ -1068,6 +1082,23 @@ function ParticipantInspector({
             focus={talkFocus}
             onSend={onTalk}
           />
+        )}
+
+        {participant.kind === "agent" && agentNotes.length > 0 && (
+          <div className="sec">
+            <h3>Notes with other agents ({agentNotes.length})</h3>
+            {agentNotes.slice(0, 12).map((note) => (
+              <div key={note.id} className="note">
+                <div className="meta">
+                  {note.fromId === participant.id
+                    ? `to ${nameOf(note.audience.to === "participant" ? note.audience.id : "")}`
+                    : `from ${nameOf(note.fromId)}`}{" "}
+                  · {note.taskId}
+                </div>
+                {note.body}
+              </div>
+            ))}
+          </div>
         )}
 
         <div className="sec">
