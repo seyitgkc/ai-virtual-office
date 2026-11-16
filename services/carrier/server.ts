@@ -9,7 +9,7 @@
  */
 import type { Server } from "node:http";
 import { CARRIER } from "../manifests.ts";
-import { cad, need, needNumber, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
+import { cad, count, need, needNumber, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
 
 interface ServiceLevel {
   code: string;
@@ -83,7 +83,7 @@ export function carrier(apiKey: string): Server {
     };
     shipments.unshift(shipment);
     return {
-      summary: `booked shipment ${shipment.id} for ${reference}: ${from} to ${to}, ${weightKg} kg by ${level.code}, ${cad(shipment.cost)}, ${level.transitDays} days in transit, tracking ${shipment.tracking}.`,
+      summary: `booked shipment ${shipment.id} for ${reference}: ${from} to ${to}, ${weightKg} kg by ${level.code}, ${cad(shipment.cost)}, ${count(level.transitDays, "day")} in transit, tracking ${shipment.tracking}.`,
       shipment,
     };
   }
@@ -101,7 +101,7 @@ export function carrier(apiKey: string): Server {
     manifest: CARRIER,
     records: () => [
       ...SERVICES.map(
-        (s) => `Service "${s.code}" (${s.name}): ${cad(s.baseCharge)} plus ${cad(s.perKg)} per kg, ${s.transitDays} days in transit.`,
+        (s) => `Service "${s.code}" (${s.name}): ${cad(s.baseCharge)} plus ${cad(s.perKg)} per kg, ${count(s.transitDays, "day")} in transit.`,
       ),
       ...shipments.slice(0, 8).map(
         (s) => `Shipment ${s.id} (${s.status}): reference ${s.reference}, ${s.from} to ${s.to}, ${s.weightKg} kg by ${s.service}, ${cad(s.cost)}.`,

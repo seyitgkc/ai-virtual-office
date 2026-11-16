@@ -10,7 +10,7 @@
  */
 import type { Server } from "node:http";
 import { SERVICE_DESK } from "../manifests.ts";
-import { dayFromNow, need, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
+import { count, dayFromNow, need, Refusal, serve, startWhenRun, type Done, type Json } from "../shared.ts";
 
 interface Unit {
   serial: string;
@@ -46,6 +46,11 @@ const fleet = (): Unit[] => [
 ];
 
 const monthsSince = (days: number): number => Math.floor(days / 30.4);
+/** When a unit was delivered, as people say it. */
+const delivered = (unit: Unit): string => {
+  const months = monthsSince(unit.deliveredDaysAgo);
+  return months === 0 ? "this month" : `${count(months, "month")} ago`;
+};
 const underWarranty = (unit: Unit): boolean => monthsSince(unit.deliveredDaysAgo) < WARRANTY_MONTHS;
 /** Words that mean someone is without heating or cooling, or something is unsafe. */
 const URGENT = /no heat|no cool|leak|smoke|burn|spark|trip|shut ?down|won'?t start|not start|dead/i;
@@ -65,8 +70,8 @@ export function serviceDesk(apiKey: string): Server {
   };
   const warranty = (unit: Unit): string =>
     underWarranty(unit)
-      ? `under warranty, ${WARRANTY_MONTHS - monthsSince(unit.deliveredDaysAgo)} months left`
-      : `out of warranty by ${monthsSince(unit.deliveredDaysAgo) - WARRANTY_MONTHS} months`;
+      ? `under warranty, ${count(WARRANTY_MONTHS - monthsSince(unit.deliveredDaysAgo), "month")} left`
+      : `out of warranty by ${count(monthsSince(unit.deliveredDaysAgo) - WARRANTY_MONTHS, "month")}`;
 
   function open(input: Json): Done {
     const account = need(input, "account", "an account").toUpperCase();
@@ -93,7 +98,7 @@ export function serviceDesk(apiKey: string): Server {
     };
     tickets.unshift(ticket);
     return {
-      summary: `opened ${ticket.id} (${ticket.priority}) for ${account} on unit ${serial}, a ${unit.sku} delivered ${monthsSince(unit.deliveredDaysAgo)} months ago and ${warranty(unit)}.`,
+      summary: `opened ${ticket.id} (${ticket.priority}) for ${account} on unit ${serial}, a ${unit.sku} delivered ${delivered(unit)} and ${warranty(unit)}.`,
       ticket,
     };
   }
@@ -146,7 +151,7 @@ export function serviceDesk(apiKey: string): Server {
     manifest: SERVICE_DESK,
     records: () => [
       `Warranty is ${WARRANTY_MONTHS} months from delivery. Technicians work Monday to Friday, ${VISITS_PER_DAY} visits a day, with a day's notice.`,
-      ...units.map((u) => `Unit ${u.serial}: ${u.sku}, sold to ${u.account}, delivered ${monthsSince(u.deliveredDaysAgo)} months ago, ${warranty(u)}.`),
+      ...units.map((u) => `Unit ${u.serial}: ${u.sku}, sold to ${u.account}, delivered ${delivered(u)}, ${warranty(u)}.`),
       ...tickets.slice(0, 8).map(
         (t) =>
           `Ticket ${t.id} (${t.status}, ${t.priority}): ${t.account}, unit ${t.serial}, "${t.problem}"${t.returnNumber ? `, return ${t.returnNumber}` : ""}${t.visitOn ? `, visit on ${t.visitOn}` : ""}${t.resolution ? `, resolved: ${t.resolution}` : ""}.`,

@@ -83,6 +83,9 @@ const readBody = (request: IncomingMessage): Promise<Json> =>
 export const cad = (amount: number): string =>
   `${amount.toLocaleString("en-CA", { minimumFractionDigits: Number.isInteger(amount) ? 0 : 2, maximumFractionDigits: 2 })} CAD`;
 
+/** A number with its unit: 1 day, 3 days. */
+export const count = (n: number, unit: string): string => `${n} ${unit}${n === 1 ? "" : "s"}`;
+
 /** A calendar date some days from now, as YYYY-MM-DD. */
 export const dayFromNow = (days: number): string => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
