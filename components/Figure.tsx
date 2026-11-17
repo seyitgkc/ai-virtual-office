@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import type { Mesh } from "three";
+import type { Group, Mesh, MeshStandardMaterial } from "three";
 import type { Participant } from "../lib/model";
 import { CLICK_SLOP } from "./RoomMesh";
 
@@ -17,8 +17,11 @@ export function Figure({
   facing,
   selected,
   alert,
+  working = false,
   onSelect,
 }: {
+  /** True while an agent is taking a step: it leans to its desk and its ring runs fast and bright. */
+  working?: boolean;
   participant: Participant;
   position: [number, number];
   facing: number;
@@ -28,10 +31,22 @@ export function Figure({
 }) {
   const ring = useRef<Mesh>(null);
   const pulse = useRef<Mesh>(null);
+  const torso = useRef<Group>(null);
   const isAgent = participant.kind === "agent";
 
   useFrame((state, delta) => {
-    if (ring.current) ring.current.rotation.z += delta * 0.6;
+    if (ring.current) {
+      ring.current.rotation.z += delta * (working ? 4.2 : 0.6);
+      (ring.current.material as MeshStandardMaterial).emissiveIntensity = working
+        ? 1.6 + Math.sin(state.clock.elapsedTime * 7) * 0.5
+        : 0.55;
+    }
+    if (torso.current) {
+      // At work the figure leans in over the desk and moves a little, as someone typing does.
+      const lean = working ? 0.16 : 0;
+      torso.current.rotation.x += (lean - torso.current.rotation.x) * Math.min(1, delta * 6);
+      torso.current.position.y = working ? Math.abs(Math.sin(state.clock.elapsedTime * 9)) * 0.022 : 0;
+    }
     if (pulse.current) {
       const t = state.clock.elapsedTime;
       const s = 1 + Math.sin(t * 2.4) * 0.12;
@@ -59,6 +74,7 @@ export function Figure({
           document.body.style.cursor = "auto";
         }}
       >
+        <group ref={torso}>
         {/* body */}
         <mesh position={[0, 0.42, 0]} castShadow>
           {isAgent ? (
@@ -99,6 +115,7 @@ export function Figure({
             />
           </mesh>
         )}
+        </group>
       </group>
 
       {/* selection ring on the floor */}

@@ -128,6 +128,12 @@ pricing, and a finance approval before a quote goes out.
   reaches a real halt: a question, missing access, an approval or the review.
   When a colleague's request for approval held the task, its owner takes its
   step once more after the answer, so nothing it was waiting for is skipped.
+- **An office that shows its work.** Each desk has a lamp and a pool of light
+  in the colour of what its occupant is doing, and names the open tasks it
+  holds. An agent taking a step leans in to its desk, its ring runs fast and
+  its name tag says which task it is on. Each new line in a thread shows at
+  the desk of whoever wrote it, and a handoff, a question, an answer or a note
+  is seen crossing the office to the desk it is for.
 - **Urgent work.** A person can mark a task urgent when filing it or later.
   Every agent takes urgent work ahead of whatever else is on its queue, once
   it has finished what it is on, and the task leads the work list.
@@ -369,6 +375,26 @@ reached, because the task carries on regardless.
 **Reading the office.** Every name tag says Human or AI. People are rounded
 figures. Agents are faceted and carry a slowly turning ring. A pulsing marker
 above a figure means that figure owns a halted task.
+
+A lamp on each desk, and the light it throws on the floor, takes the colour of
+the desk's state: blue for work in hand, amber for a question that waits, red
+for access that is missing, purple for a decision that is due. A desk with
+nothing on it stays dark. The light is steady while work waits and beats while
+an agent is taking its step. During that step the agent leans in to its desk,
+its ring runs fast, and its name tag says which task it is on.
+
+The open tasks a person or an agent holds are named at the foot of their desk,
+each in the colour of its state, with a red edge on an urgent one. The task in
+hand comes first. Click one to open it. The same tasks lie on the desk as
+folders, which is how they read on foot.
+
+Work is shown as it happens. A ring spreads from a desk each time its occupant
+adds a line to a thread. When something is meant for someone else, it travels
+in an arc to their desk: a task handed on in blue, a question in amber, an
+answer in green, a note between agents in teal. Only what you may read is
+shown, and nothing is replayed from before you opened the office. With the
+system set to reduce motion, the lamps, folders and task names stay and the
+rings and arcs are left out.
 
 **Work in the office** (left). Every task with its status. Click one to open it.
 **New request** files a new dealer request into Reception and opens it. Text
@@ -1841,7 +1867,9 @@ what exists, and what a real deployment would add.
   the call to either kind of provider for an AI agent, and the limit to what
   both sides may read.
 - The 3D office, walking, the map, live desk screens and the prompt to talk to
-  whoever you face.
+  whoever you face. The lamps, the task names at each desk and everything seen
+  moving are drawn from the office's own tasks and messages, one mark per real
+  message.
 
 **Simulated**
 

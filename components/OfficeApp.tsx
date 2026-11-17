@@ -180,6 +180,12 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         }}
         roomHighlight={roomHighlight}
         participantAlert={participantAlert}
+        agentLoad={view.agentLoad}
+        onSelectTask={(id) => {
+          setSelectedTaskId(id);
+          setSelectedPersonId(null);
+          setSheet("detail");
+        }}
       />
 
       <div id="left">

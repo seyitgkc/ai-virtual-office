@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { CanvasTexture, SRGBColorSpace } from "three";
+import { useEffect, useMemo, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
+import { CanvasTexture, SRGBColorSpace, type MeshBasicMaterial, type MeshStandardMaterial } from "three";
 import type { DeskState, DeskTone } from "../lib/agentState";
 import type { Desk as DeskModel } from "../lib/model";
 
@@ -108,7 +109,115 @@ function Screen({ screen }: { screen: DeskScreen }) {
   );
 }
 
-export function DeskMesh({ desk, screen }: { desk: DeskModel; screen?: DeskScreen | null }) {
+/** A task lying on a desk, as a folder in the colour of its state. */
+export interface DeskFolder {
+  id: string;
+  /** How it is named, such as T-12. */
+  label: string;
+  /** Its title and state, for whoever points at it. */
+  hint: string;
+  colour: string;
+  urgent: boolean;
+}
+
+const LAMP_OFF = "#3a3f47";
+/** As many folders lie side by side. Any beyond that are stacked on the last. */
+const FOLDERS_ACROSS = 5;
+
+/**
+ * A lamp on the corner of the desk in the colour of what its occupant is
+ * doing, so the state of every desk reads from above. It glows steadily
+ * while work waits and beats while an agent is taking its step.
+ */
+function Lamp({ tone, active }: { tone: DeskTone; active: boolean }) {
+  const glass = useRef<MeshStandardMaterial>(null);
+  const pool = useRef<MeshBasicMaterial>(null);
+  const colour = tone === "idle" ? LAMP_OFF : TONE_COLOUR[tone];
+  useFrame((state) => {
+    const beat = Math.sin(state.clock.elapsedTime * 6);
+    if (glass.current) glass.current.emissiveIntensity = tone === "idle" ? 0 : active ? 1.6 + beat * 0.9 : 0.8;
+    if (pool.current) pool.current.opacity = active ? 0.42 + beat * 0.2 : 0.2;
+  });
+  return (
+    <>
+      <group position={[0.58, 0.75, -0.68]}>
+        <mesh position={[0, 0.04, 0]}>
+          <cylinderGeometry args={[0.09, 0.11, 0.08, 16]} />
+          <meshStandardMaterial color="#45494f" roughness={0.6} />
+        </mesh>
+        <mesh position={[0, 0.2, 0]}>
+          <sphereGeometry args={[0.12, 18, 18]} />
+          <meshStandardMaterial ref={glass} color={colour} emissive={colour} emissiveIntensity={0} roughness={0.35} />
+        </mesh>
+      </group>
+      {/* the lamp's light on the floor, wide enough to read from across the office */}
+      {tone !== "idle" && (
+        <mesh position={[0, 0.035, -0.12]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[1.28, 40]} />
+          <meshBasicMaterial ref={pool} color={colour} transparent opacity={0.2} depthWrite={false} toneMapped={false} />
+        </mesh>
+      )}
+    </>
+  );
+}
+
+/** The open tasks an occupant holds, laid out along the front of the desk. */
+function Folders({ folders, onOpen }: { folders: DeskFolder[]; onOpen: (taskId: string) => void }) {
+  return (
+    <>
+      {folders.map((folder, i) => {
+        const column = Math.min(i, FOLDERS_ACROSS - 1);
+        const layer = Math.max(0, i - (FOLDERS_ACROSS - 1));
+        return (
+          <group
+            key={folder.id}
+            position={[-0.56 + column * 0.225, 0.765 + layer * 0.03, -0.3]}
+            rotation={[0, ((i * 37) % 9) * 0.02 - 0.08, 0]}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (e.delta <= 4) onOpen(folder.id);
+            }}
+            onPointerOver={(e) => {
+              e.stopPropagation();
+              document.body.style.cursor = "pointer";
+            }}
+            onPointerOut={() => {
+              document.body.style.cursor = "auto";
+            }}
+          >
+            <mesh castShadow>
+              <boxGeometry args={[0.19, 0.026, 0.27]} />
+              <meshStandardMaterial color={folder.colour} emissive={folder.colour} emissiveIntensity={0.28} roughness={0.55} />
+            </mesh>
+            {/* an urgent task carries a red band */}
+            {folder.urgent && (
+              <mesh position={[0, 0.015, 0.09]}>
+                <boxGeometry args={[0.192, 0.006, 0.05]} />
+                <meshBasicMaterial color="#e0614f" toneMapped={false} />
+              </mesh>
+            )}
+          </group>
+        );
+      })}
+    </>
+  );
+}
+
+export function DeskMesh({
+  desk,
+  screen,
+  active = false,
+  folders = [],
+  onOpenTask,
+}: {
+  desk: DeskModel;
+  screen?: DeskScreen | null;
+  /** True while the agent at this desk is taking a step. */
+  active?: boolean;
+  /** The open tasks its occupant holds. */
+  folders?: DeskFolder[];
+  onOpenTask?: (taskId: string) => void;
+}) {
   const { x, z } = desk.position;
   return (
     <group position={[x, 0, z]} rotation={[0, desk.facing, 0]}>
@@ -139,6 +248,8 @@ export function DeskMesh({ desk, screen }: { desk: DeskModel; screen?: DeskScree
         <boxGeometry args={[0.1, 0.14, 0.08]} />
         <meshStandardMaterial color="#45494f" roughness={0.6} />
       </mesh>
+      {screen && <Lamp tone={screen.state.tone} active={active} />}
+      {folders.length > 0 && <Folders folders={folders} onOpen={(id) => onOpenTask?.(id)} />}
     </group>
   );
 }

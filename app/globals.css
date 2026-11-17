@@ -654,6 +654,28 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 .settings .unsaved { align-self: center; font-size: 11.5px; color: #e0a23f; }
 .kind-badge[data-playbook="true"] { background: #7a5a1c; color: #fbe9c4; }
 .name-tag .you { color: rgba(232,230,225,0.6); }
+/* the open tasks a desk holds, named at its foot in the colour of their state */
+.desk-work { display: flex; align-items: center; gap: 3px; margin-top: 30px; user-select: none; white-space: nowrap; }
+.desk-chip {
+  pointer-events: auto; cursor: pointer; font: inherit; font-size: 9.5px; font-weight: 700; line-height: 1;
+  padding: 3px 6px; border-radius: 5px; color: #14161b;
+  background: var(--accent); border: 1px solid rgba(0,0,0,0.35);
+}
+.desk-chip:hover { filter: brightness(1.15); }
+.desk-chip:focus-visible { outline: 2px solid #f5f1e8; outline-offset: 1px; }
+.desk-chip[data-urgent="true"] { box-shadow: 0 0 0 2px #e0614f; }
+.desk-more { font-size: 9.5px; font-weight: 600; color: rgba(232,230,225,0.75); padding-left: 2px; }
+/* what an agent is taking a step on, shown on its name tag while it does */
+.name-tag .at-task {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: 2px; padding: 1px 6px;
+  border-radius: 999px; background: rgba(110,169,217,0.2); color: #b7d8f2; font-weight: 600;
+}
+.name-tag .at-task::before {
+  content: ""; width: 5px; height: 5px; border-radius: 50%; background: #6ea9d9;
+  animation: at-task-beat 0.9s ease-in-out infinite;
+}
+@keyframes at-task-beat { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .name-tag .at-task::before { animation: none; } }
 @media (max-width: 720px) {
   .settings .choice, .settings .step-fields.three { grid-template-columns: 1fr; }
 }

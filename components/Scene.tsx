@@ -5,16 +5,21 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, ContactShadows } from "@react-three/drei";
 import { Fog, PerspectiveCamera, Vector3 } from "three";
 import type { Office } from "../lib/model";
-import { deskState } from "../lib/agentState";
+import { deskState, type AgentLoad } from "../lib/agentState";
+import { taskLabel } from "../lib/taskLabels";
 import { planExtent, roomCentre, seatPosition, type WalkPose } from "../lib/geometry";
 import { KindBadge } from "./Panels";
 import { RoomMesh } from "./RoomMesh";
-import { DeskMesh } from "./Desk";
+import { DeskMesh, type DeskFolder } from "./Desk";
 import { Figure } from "./Figure";
+import { statusOf } from "./TaskCard";
+import { WorkInMotion } from "./WorkInMotion";
 import { WalkControls } from "./WalkControls";
 import { LabelLayer, LabelProjector, type LabelSpec } from "./Labels";
 
 const FOV = 34;
+/** How many of a desk's tasks are named at its foot before the rest are counted. */
+const CHIPS_SHOWN = 4;
 /** The plan has no ceiling, so on foot the space above the walls is open sky. */
 const WALK_SKY = "#a9b3bd";
 /** Screen width taken by the left column and by the inspector, margins included. */
@@ -99,7 +104,13 @@ export function Scene({
   roomHighlight,
   participantAlert,
   inspectorOpen,
+  agentLoad,
+  onSelectTask,
 }: {
+  /** What each agent is taking a step on right now. */
+  agentLoad: AgentLoad;
+  /** A task's folder on a desk was pressed. */
+  onSelectTask: (taskId: string) => void;
   /** Whether the inspector is showing, which narrows the strip the office is framed in. */
   inspectorOpen: boolean;
   office: Office;
@@ -156,6 +167,36 @@ export function Scene({
       }),
     [office.participants, desks, viewerId],
   );
+  // Every open task lies on the desk of whoever holds it, in the colour of its state.
+  const folders = useMemo(() => {
+    const byDesk: Record<string, DeskFolder[]> = {};
+    for (const task of office.tasks) {
+      if (task.closedAt !== null || !task.ownerId) continue;
+      const deskId = office.participants.find((p) => p.id === task.ownerId)?.deskId;
+      if (!deskId) continue;
+      const status = statusOf(task);
+      (byDesk[deskId] ??= []).push({
+        id: task.id,
+        label: taskLabel(office, task.id),
+        hint: `${task.title} (${status.label})`,
+        colour: status.accent,
+        urgent: task.urgent === true,
+      });
+    }
+    // What is being worked on right now comes first, then what is urgent.
+    const inHand = new Set(Object.values(agentLoad).flatMap((load) => (load.taskId ? [load.taskId] : [])));
+    const weight = (folder: DeskFolder): number => (inHand.has(folder.id) ? 0 : folder.urgent ? 1 : 2);
+    for (const held of Object.values(byDesk)) held.sort((a, b) => weight(a) - weight(b));
+    return byDesk;
+  }, [office, agentLoad]);
+  const busy = (participantId: string | undefined): boolean =>
+    participantId !== undefined && (agentLoad[participantId]?.taskId ?? null) !== null;
+  const seatOf = (participantId: string): { x: number; z: number } | null => {
+    const deskId = office.participants.find((p) => p.id === participantId)?.deskId;
+    const desk = deskId ? deskById[deskId] : null;
+    return desk ? seatPosition(desk) : null;
+  };
+
   const walking = mode === "walk";
   // Coming back from a walk always returns to the fitted overview.
   if (walking) cameraTouched.current = false;
@@ -192,13 +233,53 @@ export function Scene({
               <KindBadge kind={p.kind} agentType={p.agentType} />
               {p.displayName}
               {p.id === viewerId && <span className="you">(You)</span>}
+              {agentLoad[p.id]?.taskId && (
+                <span className="at-task">
+                  {agentLoad[p.id].forNote ? "note on" : "on"} {taskLabel(office, agentLoad[p.id].taskId!)}
+                </span>
+              )}
             </div>
           ),
         },
       ];
     });
-    return [...roomLabels, ...nameTags];
-  }, [rooms, desks, office.participants, walking, walkRoomId, viewerId]);
+    // The open tasks each person or agent holds, as chips at the foot of their desk.
+    // On foot the folders on the desk are close enough to read by themselves.
+    const work: LabelSpec[] = walking
+      ? []
+      : office.participants.flatMap((p) => {
+          const desk = p.deskId ? desks.find((d) => d.id === p.deskId) : null;
+          const held = desk ? (folders[desk.id] ?? []) : [];
+          if (!desk || held.length === 0) return [];
+          const seat = seatPosition(desk);
+          return [
+            {
+              id: `work:${p.id}`,
+              position: [seat.x, 0, seat.z] as [number, number, number],
+              node: (
+                <div className="desk-work">
+                  {held.slice(0, CHIPS_SHOWN).map((folder) => (
+                    <button
+                      key={folder.id}
+                      type="button"
+                      className="desk-chip"
+                      data-urgent={folder.urgent}
+                      style={{ ["--accent" as string]: folder.colour }}
+                      title={folder.hint}
+                      onClick={() => onSelectTask(folder.id)}
+                    >
+                      {folder.label}
+                    </button>
+                  ))}
+                  {held.length > CHIPS_SHOWN && <span className="desk-more">+{held.length - CHIPS_SHOWN}</span>}
+                </div>
+              ),
+            },
+          ];
+        });
+    return [...roomLabels, ...nameTags, ...work];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rooms, desks, office.participants, office.tasks, agentLoad, folders, walking, walkRoomId, viewerId]);
 
   return (
     <>
@@ -265,7 +346,14 @@ export function Scene({
       ))}
 
       {desks.map((desk) => (
-        <DeskMesh key={desk.id} desk={desk} screen={screens[desk.id] ?? null} />
+        <DeskMesh
+          key={desk.id}
+          desk={desk}
+          screen={screens[desk.id] ?? null}
+          active={busy(office.participants.find((p) => p.deskId === desk.id)?.id)}
+          folders={folders[desk.id]}
+          onOpenTask={onSelectTask}
+        />
       ))}
 
       {office.participants.map((p) => {
@@ -282,10 +370,13 @@ export function Scene({
             facing={desk.facing + Math.PI}
             selected={selectedId === p.id}
             alert={participantAlert(p.id)}
+            working={busy(p.id)}
             onSelect={() => onSelectParticipant(p.id)}
           />
         );
       })}
+
+      <WorkInMotion key={office.id} office={office} seat={seatOf} />
 
       <ContactShadows
         position={[cx, 0.02, cz]}
