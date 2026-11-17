@@ -766,6 +766,10 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
   .office[data-sheet="detail"] #inspector { display: flex; }
 
   .notice { left: 10px; right: 10px; bottom: 62px; transform: none; max-width: none; min-width: 0; }
+  /* On a phone the top of the screen is the title card, so the status line sits above the section bar. */
+  .working { top: auto; bottom: calc(62px + env(safe-area-inset-bottom)); max-width: calc(100vw - 20px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .notice ~ .working { bottom: calc(124px + env(safe-area-inset-bottom)); }
+  .desk-chip { font-size: 10.5px; padding: 6px 9px; }
   .dialog-backdrop { padding: 10px; }
   /* Settings fill the screen. Wide tables scroll sideways inside their own box. */
   .dialog-backdrop:has(.settings) { display: block; padding: 0; }

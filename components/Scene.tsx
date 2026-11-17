@@ -376,7 +376,7 @@ export function Scene({
         );
       })}
 
-      <WorkInMotion key={office.id} office={office} seat={seatOf} />
+      <WorkInMotion key={office.id} office={office} seat={seatOf} close={walking} />
 
       <ContactShadows
         position={[cx, 0.02, cz]}

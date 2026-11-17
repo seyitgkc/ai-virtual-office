@@ -115,7 +115,16 @@ function Ping({ effect, onDone }: { effect: Extract<Effect, { kind: "ping" }>; o
 const TRAIL = 5;
 
 /** Something carried from one desk to another, in an arc over the walls. */
-function Flight({ effect, onDone }: { effect: Extract<Effect, { kind: "flight" }>; onDone: () => void }) {
+function Flight({
+  effect,
+  close,
+  onDone,
+}: {
+  effect: Extract<Effect, { kind: "flight" }>;
+  /** True when the viewer stands in the office, where what is carried can be smaller. */
+  close: boolean;
+  onDone: () => void;
+}) {
   const parcel = useRef<Group>(null);
   const trail = useRef<(Mesh | null)[]>([]);
   const landing = useRef<Mesh>(null);
@@ -179,7 +188,7 @@ function Flight({ effect, onDone }: { effect: Extract<Effect, { kind: "flight" }
       }
     }
   });
-  const size = effect.big ? 1 : 0.7;
+  const size = (effect.big ? 1 : 0.7) * (close ? 0.42 : 1);
   return (
     <>
       <primitive object={route} />
@@ -215,7 +224,10 @@ const MOST_AT_ONCE = 14;
 export function WorkInMotion({
   office,
   seat,
+  close = false,
 }: {
+  /** True on foot. Marks are drawn large enough to read from above, and smaller for someone among them. */
+  close?: boolean;
   office: Office;
   /** Where a person or an agent sits, or null when they have no desk. */
   seat: (participantId: string) => Spot | null;
@@ -250,7 +262,7 @@ export function WorkInMotion({
         effect.kind === "ping" ? (
           <Ping key={effect.id} effect={effect} onDone={() => done(effect.id)} />
         ) : (
-          <Flight key={effect.id} effect={effect} onDone={() => done(effect.id)} />
+          <Flight key={effect.id} effect={effect} close={close} onDone={() => done(effect.id)} />
         ),
       )}
     </>

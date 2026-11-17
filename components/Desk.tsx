@@ -145,8 +145,8 @@ function Lamp({ tone, active }: { tone: DeskTone; active: boolean }) {
           <cylinderGeometry args={[0.09, 0.11, 0.08, 16]} />
           <meshStandardMaterial color="#45494f" roughness={0.6} />
         </mesh>
-        <mesh position={[0, 0.2, 0]}>
-          <sphereGeometry args={[0.12, 18, 18]} />
+        <mesh position={[0, 0.18, 0]}>
+          <sphereGeometry args={[0.1, 18, 18]} />
           <meshStandardMaterial ref={glass} color={colour} emissive={colour} emissiveIntensity={0} roughness={0.35} />
         </mesh>
       </group>
