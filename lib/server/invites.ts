@@ -235,17 +235,17 @@ export interface InviteDetails {
   roomName: string;
 }
 
-/** The waiting invitation behind a link, with its office, or null when the link is no good. */
+/** The waiting invitation behind a link, with its office, or null when the link is not valid. */
 function liveInvite(token: string): { row: InviteRow; office: Office; now: number } | null {
   const db = officeDatabase();
   const row = get<InviteRow>(db, "SELECT * FROM invites WHERE token_hash = ?", sha256(token));
-  // A link into the demo office is never good: nobody signs in there with a password.
+  // A link into the demo office is never valid: nobody signs in there with a password.
   if (!row || isDemoOffice(row.office_id) || row.accepted_at !== null || row.expires_at <= Date.now()) return null;
   const state = loadEngineState(db, row.office_id);
   return state ? { row, office: state.office, now: state.now } : null;
 }
 
-/** What to show on the invite page, or null when the link is no longer good. */
+/** What to show on the invite page, or null when the link is no longer valid. */
 export function readInvite(token: string): InviteDetails | null {
   const live = liveInvite(token);
   if (!live || inviteProblem(live.office, live.row, Date.now())) return null;

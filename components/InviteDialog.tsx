@@ -250,7 +250,7 @@ export function InviteDialog({
                         </td>
                         <td>{invitation.invitedBy}</td>
                         <td data-warn={invitation.problem !== null}>
-                          {invitation.problem ?? `Good until ${dayOf(invitation.expiresAt)}`}
+                          {invitation.problem ?? `Valid until ${dayOf(invitation.expiresAt)}`}
                         </td>
                         <td className="actions">
                           {invitation.manageable ? (
