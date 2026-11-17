@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react";
 import type { Office } from "../lib/model";
 import {
+  landingSpot,
   planExtent,
   seatPosition,
   wallSegments,
@@ -16,7 +17,9 @@ const HALT_COLOUR = { question: "#e0a23f", permission: "#e0614f" } as const;
 
 /**
  * Top-down plan with the walker's position and heading. Drawn in world units
- * (metres), oriented like the overview: low z at the top.
+ * (metres), oriented like the overview: low z at the top. Picking a place on
+ * it puts the walker there, and picking a person puts the walker in front of
+ * them. Pointing at a person shows their name.
  */
 export function Minimap({
   office,
@@ -24,15 +27,44 @@ export function Minimap({
   currentRoomId,
   roomHighlight,
   participantAlert,
+  closedRooms,
+  viewerId,
 }: {
   office: Office;
   pose: RefObject<WalkPose>;
   currentRoomId: string | null;
   roomHighlight: (roomId: string) => "none" | "question" | "permission";
   participantAlert: (id: string) => "none" | "question" | "permission";
+  /** Rooms the walker may not enter. They cannot be picked. */
+  closedRooms: ReadonlySet<string>;
+  viewerId: string;
 }) {
   const { rooms, desks } = office.floorplan;
   const marker = useRef<SVGGElement>(null);
+  const plan = useRef<SVGSVGElement>(null);
+  const [pointedAt, setPointedAt] = useState<string | null>(null);
+  // Why the last pick went nowhere. It clears itself.
+  const [said, setSaid] = useState<string | null>(null);
+  useEffect(() => {
+    if (!said) return;
+    const timer = window.setTimeout(() => setSaid(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [said]);
+
+  const pick = (e: MouseEvent<SVGSVGElement>): void => {
+    const svg = plan.current;
+    const toPlan = svg?.getScreenCTM()?.inverse();
+    if (!svg || !toPlan) return;
+    const at = new DOMPoint(e.clientX, e.clientY).matrixTransform(toPlan);
+    const landing = landingSpot(office.floorplan, closedRooms, pose.current, { x: at.x, z: at.y });
+    if (landing.ok) {
+      // The walk reads this pose on its next frame, so the view moves at once.
+      Object.assign(pose.current, landing.pose);
+      setSaid(null);
+    } else {
+      setSaid(landing.why === "shut" ? "You may not enter that room." : "There is nowhere to stand there.");
+    }
+  };
 
   const ext = useMemo(() => planExtent(rooms), [rooms]);
   const walls = useMemo(() => rooms.flatMap((room) => wallSegments(room)), [rooms]);
@@ -60,16 +92,18 @@ export function Minimap({
         <span>{current ? current.name : "Outside"}</span>
       </div>
       <svg
+        ref={plan}
         viewBox={`${ext.minX - MARGIN} ${ext.minZ - MARGIN} ${ext.maxX - ext.minX + MARGIN * 2} ${
           ext.maxZ - ext.minZ + MARGIN * 2
         }`}
         role="img"
-        aria-label="Floor plan with your position"
+        aria-label="Floor plan with your position. Pick a place to go there."
+        onClick={pick}
       >
         {rooms.map((room) => {
           const halt = roomHighlight(room.id);
           return (
-            <g key={room.id}>
+            <g key={room.id} className={closedRooms.has(room.id) ? "map-shut" : undefined}>
               <rect
                 x={room.bounds.x}
                 y={room.bounds.z}
@@ -120,7 +154,16 @@ export function Minimap({
           const seat = seatPosition(desk);
           const alert = participantAlert(p.id);
           return (
-            <g key={p.id} transform={`translate(${seat.x} ${seat.z})`}>
+            <g
+              key={p.id}
+              className="map-person"
+              transform={`translate(${seat.x} ${seat.z})`}
+              aria-label={`${p.displayName} (${kindName(p).toLowerCase()})`}
+              onPointerEnter={() => setPointedAt(p.id)}
+              onPointerLeave={() => setPointedAt((now) => (now === p.id ? null : now))}
+            >
+              {/* The mark is a few pixels across, so the area that answers to the pointer is wider. */}
+              <circle r={1.25} fill="transparent" />
               {alert !== "none" && (
                 <circle r={0.95} fill="none" stroke={HALT_COLOUR[alert]} strokeWidth={0.22} />
               )}
@@ -138,7 +181,6 @@ export function Minimap({
               ) : (
                 <circle r={0.5} fill={p.appearance.color} stroke="#16181d" strokeWidth={0.1} />
               )}
-              <title>{`${p.displayName} (${kindName(p).toLowerCase()})`}</title>
             </g>
           );
         })}
@@ -148,6 +190,28 @@ export function Minimap({
           <circle r={0.72} fill="#ffffff" stroke="#16181d" strokeWidth={0.14} />
           <path d="M0 -1.5 L0.62 -0.5 L-0.62 -0.5 Z" fill="#ffffff" />
         </g>
+
+        {/* The name of whoever the pointer is on, drawn last so that nothing covers it. */}
+        {office.participants.map((p) => {
+          if (p.id !== pointedAt) return null;
+          const desk = desks.find((d) => d.id === p.deskId);
+          if (!desk) return null;
+          const seat = seatPosition(desk);
+          const width = ext.maxX - ext.minX;
+          const along = (seat.x - ext.minX) / (width || 1);
+          return (
+            <text
+              key={p.id}
+              className="map-name"
+              x={seat.x}
+              y={seat.z - ext.minZ < 2 ? seat.z + 2.6 : seat.z - 1.3}
+              textAnchor={along < 0.25 ? "start" : along > 0.75 ? "end" : "middle"}
+            >
+              {p.displayName}
+              {p.id === viewerId ? " (You)" : ""}
+            </text>
+          );
+        })}
       </svg>
       <div className="map-legend">
         <span>
@@ -159,6 +223,11 @@ export function Minimap({
         <span>
           <i className="mark you" /> You
         </span>
+        {said && (
+          <span className="map-said" role="status">
+            {said}
+          </span>
+        )}
       </div>
     </div>
   );

@@ -178,6 +178,7 @@ export function TitleCard({
           <span>
             <kbd>F</kbd> talk to whoever you face
           </span>
+          <span>Pick a place on the map to go there</span>
         </div>
         <button className="btn mode" onClick={onToggleMode}>
           Back to overview

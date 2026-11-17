@@ -241,6 +241,8 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
             currentRoomId={walkRoomId}
             roomHighlight={roomHighlight}
             participantAlert={participantAlert}
+            closedRooms={closedRooms}
+            viewerId={viewer.id}
           />
         ) : (
           <Feed feed={feed} office={office} />

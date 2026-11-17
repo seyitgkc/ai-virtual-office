@@ -5,15 +5,15 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { Fog, PerspectiveCamera } from "three";
 import type { Floorplan } from "../lib/model";
 import {
+  BODY_RADIUS,
   obstacles,
-  planExtent,
   roomAt,
   stepWalker,
+  walkBounds,
   type WalkPose,
 } from "../lib/geometry";
 
 const EYE_HEIGHT = 1.5;
-const BODY_RADIUS = 0.3;
 const WALK_SPEED = 4.0;
 const RUN_SPEED = 7.2;
 /** Head movement while walking: metres travelled per step, and how far the view rises and sways. */
@@ -29,8 +29,6 @@ const WALK_FOV = 68;
 const REACH = 3.2;
 const FACING_COS = Math.cos(0.5);
 const INTERACT_KEY = "KeyF";
-/** How far past the outer walls a walker may go. */
-const OUTSIDE_MARGIN = 2.6;
 
 const CONTROL_KEYS = new Set([
   "KeyW",
@@ -101,15 +99,7 @@ export function WalkControls({
     () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
     [],
   );
-  const bounds = useMemo(() => {
-    const ext = planExtent(floorplan.rooms);
-    return {
-      minX: ext.minX - OUTSIDE_MARGIN,
-      maxX: ext.maxX + OUTSIDE_MARGIN,
-      minZ: ext.minZ - OUTSIDE_MARGIN,
-      maxZ: ext.maxZ + OUTSIDE_MARGIN,
-    };
-  }, [floorplan]);
+  const bounds = useMemo(() => walkBounds(floorplan.rooms), [floorplan]);
 
   // Wide lens at eye level while walking; the overview lens comes back on exit.
   useEffect(() => {

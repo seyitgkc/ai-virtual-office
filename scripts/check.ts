@@ -1,7 +1,7 @@
 /** Exercises the access model against the seed office. Run: npx tsx check.ts */
 import { resolveAccess, hasConflict, canRead, type IndividualRule } from "../lib/model";
 import { office, contextFor, byId } from "../lib/seed";
-import { entryPose, freeDeskSpot, obstacles, planExtent, roomAt, stepWalker } from "../lib/geometry";
+import { entryPose, freeDeskSpot, landingSpot, obstacles, planExtent, roomAt, stepWalker } from "../lib/geometry";
 
 const ctx = contextFor(office);
 let failures = 0;
@@ -114,6 +114,35 @@ console.log("\n-- walking the plan --");
   };
   expect("a doorway into a room one may not enter stops the walker", tryDoor({ x: 25, z: 9.5 }), "hall");
   expect("the other doorways stay open", tryDoor({ x: 15, z: 9.5 }), "planning");
+
+  // Picking a place on the map.
+  const none = new Set<string>();
+  const here = { x: 5, z: 9.6, yaw: 0.4 };
+  const clear = (p: { x: number; z: number }, plan = office.floorplan): boolean =>
+    !obstacles(plan).some((o) => Math.abs(p.x - o.cx) < o.lx / 2 + 0.3 && Math.abs(p.z - o.cz) < o.lz / 2 + 0.3);
+  const open = landingSpot(office.floorplan, none, here, { x: 13, z: 6 });
+  expect("a free place is where the walker lands, facing as before", open.ok && `${open.pose.x} ${open.pose.z} ${open.pose.yaw}`, "13 6 0.4");
+  expect("a room one may not enter refuses", JSON.stringify(landingSpot(office.floorplan, new Set(["finance"]), here, { x: 25, z: 6 })), '{"ok":false,"why":"shut"}');
+  expect("the same room accepts someone who may enter it", landingSpot(office.floorplan, none, here, { x: 25, z: 6 }).ok, true);
+  const inWall = landingSpot(office.floorplan, none, here, { x: 10.02, z: 5 });
+  expect("a place inside a wall gives the nearest free spot in the same room", inWall.ok && clear(inWall.pose) && roomAt(rooms, inWall.pose.x, inWall.pose.z)?.id, "planning");
+  expect("and not far from what was picked", inWall.ok && Math.hypot(inWall.pose.x - 10.02, inWall.pose.z - 5) < 1, true);
+  const outside = landingSpot(office.floorplan, none, here, { x: -1.5, z: 9.6 });
+  expect("the strip outside the walls can be picked", outside.ok && roomAt(rooms, outside.pose.x, outside.pose.z), null);
+  expect("beyond it there is nowhere to stand", JSON.stringify(landingSpot(office.floorplan, none, here, { x: -12, z: 9.6 })), '{"ok":false,"why":"nowhere"}');
+  const samSeat = { x: 7, z: 3.32 };
+  const toSam = landingSpot(office.floorplan, none, here, { x: 7.2, z: 3.1 });
+  const gap = toSam.ok ? Math.hypot(toSam.pose.x - samSeat.x, toSam.pose.z - samSeat.z) : 0;
+  expect("picking a person puts the walker a step back from them", toSam.ok && clear(toSam.pose) && Math.abs(gap - 1.7) < 0.01, true);
+  expect("in their room", toSam.ok && roomAt(rooms, toSam.pose.x, toSam.pose.z)?.id, "reception");
+  // Forward is (-sin yaw, -cos yaw).
+  const facing = toSam.ok ? (-Math.sin(toSam.pose.yaw) * (samSeat.x - toSam.pose.x) + -Math.cos(toSam.pose.yaw) * (samSeat.z - toSam.pose.z)) / gap : 0;
+  expect("turned to face them", facing > 0.999, true);
+  expect("on the side the walker came from", toSam.ok && toSam.pose.z > samSeat.z, true);
+  expect("a person in a room one may not enter cannot be picked", JSON.stringify(landingSpot(office.floorplan, new Set(["reception"]), here, samSeat)), '{"ok":false,"why":"shut"}');
+  const emptyDesk = { ...office.floorplan, desks: office.floorplan.desks.map((d) => (d.id === "desk-pla-1" ? { ...d, occupantId: null } : d)) };
+  const byDesk = landingSpot(emptyDesk, none, here, { x: 15, z: 3.54 });
+  expect("a desk nobody sits at gives a spot beside it", byDesk.ok && clear(byDesk.pose, emptyDesk) && Math.hypot(byDesk.pose.x - 15, byDesk.pose.z - 3.54) < 1.9, true);
 }
 
 console.log("\n-- room for one more desk --");

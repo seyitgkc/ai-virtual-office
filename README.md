@@ -334,6 +334,11 @@ drawn low so every room stays visible from any angle.
 **Walking.** *Walk the office* puts you at the front door at eye level. Move
 with W A S D or the arrow keys, hold Shift to move faster, drag to look around
 and click someone to inspect them. A map in the corner shows where you are.
+Pick a place on the map and you are standing there: a free spot in any room
+you may enter, or the nearest one when you pick a wall or a desk. Pick a
+person on the map and you are a step back from them, facing them, with the
+prompt to talk already up. A room that is closed to you refuses, and says so.
+Point at anyone on the map to see their name.
 The inbox, the report, settings and sign out stay in reach while you walk.
 Escape returns to the overview. The view rises, falls and sways a little with
 each stride, and holds still for anyone whose system asks for reduced motion.

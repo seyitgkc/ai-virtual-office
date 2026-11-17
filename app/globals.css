@@ -114,7 +114,15 @@ body {
 }
 
 #minimap { margin-top: auto; }
-#minimap svg { display: block; width: 100%; height: auto; }
+#minimap svg { display: block; width: 100%; height: auto; cursor: pointer; touch-action: manipulation; }
+#minimap .map-shut { cursor: not-allowed; }
+#minimap .map-person { cursor: pointer; }
+#minimap .map-name {
+  font-size: 1.5px; font-weight: 600; fill: #ffffff; pointer-events: none;
+  paint-order: stroke; stroke: #16181d; stroke-width: 0.5px; stroke-linejoin: round;
+}
+#minimap .map-legend { flex-wrap: wrap; row-gap: 3px; }
+#minimap .map-said { flex-basis: 100%; color: rgba(224,162,63,0.9); }
 #minimap .map-room {
   font-size: 1.15px; font-weight: 600; letter-spacing: 0.08em;
   text-transform: uppercase; fill: rgba(232,230,225,0.55);

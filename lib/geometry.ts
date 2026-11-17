@@ -257,6 +257,87 @@ export function stepWalker(
   return { x, z };
 }
 
+/** How wide a walker is, and how far past the outer walls they may go. */
+export const BODY_RADIUS = 0.3;
+export const OUTSIDE_MARGIN = 2.6;
+
+/** The rectangle a walker is kept inside: the plan and a strip around it. */
+export function walkBounds(rooms: Room[]): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  const ext = planExtent(rooms);
+  return {
+    minX: ext.minX - OUTSIDE_MARGIN,
+    maxX: ext.maxX + OUTSIDE_MARGIN,
+    minZ: ext.minZ - OUTSIDE_MARGIN,
+    maxZ: ext.maxZ + OUTSIDE_MARGIN,
+  };
+}
+
+/** How near a picked point must be to someone's seat to mean "go to this person". */
+const PICKS_PERSON = 1.1;
+/** How far from a seat a walker stands when they go to its occupant. */
+const STANDS_OFF = 1.7;
+
+export type Landing = { ok: true; pose: WalkPose } | { ok: false; why: "shut" | "nowhere" };
+
+/**
+ * Where a walker ends up when they pick a point on the map, or why they
+ * cannot go there. A room that is shut to them refuses. A point inside a
+ * wall or a desk gives the nearest free spot in the same room. A point on
+ * someone's seat gives a spot a step back from them, on the side the walker
+ * is coming from when that side is free, turned to face them.
+ */
+export function landingSpot(
+  floorplan: Floorplan,
+  closed: ReadonlySet<string>,
+  from: WalkPose,
+  picked: { x: number; z: number },
+): Landing {
+  const bounds = walkBounds(floorplan.rooms);
+  const inBounds = (x: number, z: number): boolean => x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
+  const room = roomAt(floorplan.rooms, picked.x, picked.z);
+  if (room && closed.has(room.id)) return { ok: false, why: "shut" };
+  const all = obstacles(floorplan, closed);
+  const roomId = room?.id ?? null;
+  const free = (x: number, z: number): boolean =>
+    inBounds(x, z) && (roomAt(floorplan.rooms, x, z)?.id ?? null) === roomId && !blocked(x, z, BODY_RADIUS, all);
+
+  // The seat that was picked, if one was: the nearest within reach of the point.
+  let seat: { x: number; z: number } | null = null;
+  let nearest = PICKS_PERSON;
+  for (const desk of floorplan.desks) {
+    if (!desk.occupantId || desk.roomId !== roomId) continue;
+    const s = seatPosition(desk);
+    const d = Math.hypot(s.x - picked.x, s.z - picked.z);
+    if (d < nearest) {
+      nearest = d;
+      seat = s;
+    }
+  }
+  if (seat) {
+    const towards = Math.atan2(from.z - seat.z, from.x - seat.x);
+    for (let turn = 0; turn <= 6; turn++) {
+      for (const side of turn === 0 ? [0] : [1, -1]) {
+        const angle = towards + (side * turn * Math.PI) / 6;
+        const x = seat.x + Math.cos(angle) * STANDS_OFF;
+        const z = seat.z + Math.sin(angle) * STANDS_OFF;
+        // Forward is (-sin yaw, -cos yaw), so this yaw looks from the spot to the seat.
+        if (free(x, z)) return { ok: true, pose: { x, z, yaw: Math.atan2(x - seat.x, z - seat.z) } };
+      }
+    }
+  }
+
+  if (free(picked.x, picked.z)) return { ok: true, pose: { x: picked.x, z: picked.z, yaw: from.yaw } };
+  for (let ring = 1; ring <= 6; ring++) {
+    for (let step = 0; step < 16; step++) {
+      const angle = (step * Math.PI) / 8;
+      const x = picked.x + Math.cos(angle) * ring * 0.3;
+      const z = picked.z + Math.sin(angle) * ring * 0.3;
+      if (free(x, z)) return { ok: true, pose: { x, z, yaw: from.yaw } };
+    }
+  }
+  return { ok: false, why: "nowhere" };
+}
+
 /** The room containing a point, or null when the point is outside the plan. */
 export function roomAt(rooms: Room[], x: number, z: number): Room | null {
   return (
