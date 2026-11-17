@@ -154,7 +154,7 @@ export function Minimap({
           <i className="mark human" /> Human
         </span>
         <span>
-          <i className="mark agent" /> AI agent
+          <i className="mark agent" /> Agent
         </span>
         <span>
           <i className="mark you" /> You

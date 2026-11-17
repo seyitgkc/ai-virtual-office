@@ -10,7 +10,7 @@ import {
   type AgentStepResult,
 } from "../lib/engine";
 import { initialState } from "../lib/initialState";
-import { deskState, statusReply } from "../lib/agentState";
+import { deskState, handledWork, standingOf, statusReply } from "../lib/agentState";
 import { canRead, resolveAccess } from "../lib/model";
 import { authorize, contextOf, parseAction } from "../lib/policy";
 import { applyAdminOp } from "../lib/admin";
@@ -611,6 +611,29 @@ async function main(): Promise<void> {
   expect("an agent that cannot read Finance is never shown it", buildChatSystem(seeded, who("p-vera"), who("p-dana"), seededCtx, []).includes("dealer tier 2"), false);
   expect("live records it is handed are included", buildChatSystem(seeded, who("p-vera"), who("p-dana"), seededCtx, ["[Storefront, live] Product X"]).includes("[Storefront, live] Product X"), true);
   expect("the conversation instructions rule out changing anything", withDana.includes("You cannot change anything from this conversation"), true);
+
+  console.log("\n-- an agent answers for work it has passed on or seen closed --");
+  const irisHandled = handledWork(seeded, who("p-iris"));
+  expect("work an agent wrote on and handed on counts as handled", irisHandled.map((h) => `${h.task.id} ${h.last.kind}`).join(), "T-1001 handoff");
+  expect("work it still holds open does not", handledWork(seeded, who("p-quill")).length, 0);
+  expect("the latest comes first", handledWork(seeded, who("p-atlas")).map((h) => h.task.id).join(), "T-1001,T-1003");
+  expect("an open task says who has it now", standingOf(seeded, seeded.tasks.find((t) => t.id === "T-1001")!), "is with Quill at the execution stage");
+  expect("a closed one says so", standingOf(seeded, seeded.tasks.find((t) => t.id === "T-1003")!), "is completed");
+  expect("the Finance agent is shown the quote it released", withDana.includes("T-3,") && withDana.includes("Tier 2 pricing released") && withDana.includes("it is completed"), true);
+  expect("and is told that this work is its own", withDana.includes("is work you did yourself"), true);
+  expect("someone who cannot read Finance is shown none of it", withSam.includes("Tier 2 pricing released") || withSam.includes("T-3,"), false);
+  expect("an agent with nothing behind it is told so", buildChatSystem(seeded, who("p-quill"), who("p-dana"), seededCtx, []).endsWith("no longer hold (latest first):\n(none)"), true);
+  const irisReport = statusReply(seeded, who("p-iris"), who("p-dana"), seededCtx);
+  expect("a playbook agent with no open work names the last it had a hand in", irisReport.includes('The last work I had a hand in was T-1, "Dealer order 4471'), true);
+  expect("and where that stands", irisReport.includes("which is with Quill at the execution stage."), true);
+  const busy = { ...seeded, tasks: Array.from({ length: 9 }, (_, i) => ({ ...seeded.tasks.find((t) => t.id === "T-1003")!, id: `T-9${i}` })) };
+  const many = {
+    ...busy,
+    messages: busy.tasks.map((t, i) => ({ ...seeded.messages.find((m) => m.fromId === "p-ledger" && m.taskId === "T-1003")!, id: `m-9${i}`, taskId: t.id, at: initialState.now + i })),
+  };
+  const crowded = buildChatSystem(many, who("p-ledger"), who("p-dana"), contextOf(many, initialState.now), []);
+  expect("a long record is cut to the most recent", crowded.includes("(9 in all, the 6 most recent shown, latest first)"), true);
+  expect("and lists no more than that", crowded.split("\n").filter((l) => l.startsWith("- T-") && l.includes("it is completed")).length, 6);
 
   console.log("\n-- a grant made for one task counts only for that task --");
   const veraPerson = initialState.office.participants.find((p) => p.id === "p-vera")!;

@@ -101,6 +101,39 @@ export function deskState(office: Office, who: Participant, visible?: (message: 
 export const bothRead = (ctx: AccessContext, a: Participant, b: Participant) => (message: Message): boolean =>
   canRead(message, a, ctx) && canRead(message, b, ctx);
 
+/** A task someone has written on and no longer holds open, with the last thing they said on it. */
+export interface HandledWork {
+  task: Task;
+  last: Message;
+}
+
+/**
+ * The work someone has had a hand in and does not hold open now, most recent
+ * first. `visible` limits it to tasks on which a given onlooker may read at
+ * least one of their lines.
+ */
+export function handledWork(office: Office, who: Participant, visible?: (message: Message) => boolean): HandledWork[] {
+  const lastOn = new Map<string, Message>();
+  for (const m of office.messages) {
+    if (m.fromId !== who.id || (visible && !visible(m))) continue;
+    const seen = lastOn.get(m.taskId);
+    if (!seen || m.at >= seen.at) lastOn.set(m.taskId, m);
+  }
+  return office.tasks
+    .filter((t) => lastOn.has(t.id) && !(t.closedAt === null && t.ownerId === who.id))
+    .map((task) => ({ task, last: lastOn.get(task.id)! }))
+    .sort((a, b) => b.last.at - a.last.at);
+}
+
+/** Where a task stands now, as the end of a sentence: "is completed", "is with Arlo at the planning stage". */
+export function standingOf(office: Office, task: Task): string {
+  if (task.status === "rejected") return "was rejected";
+  if (task.closedAt !== null) return "is completed";
+  const owner = office.participants.find((p) => p.id === task.ownerId);
+  const stage = `at the ${stageSpec(task.stage).label.toLowerCase()} stage`;
+  return owner ? `is with ${owner.displayName} ${stage}` : `is open ${stage} with nobody holding it`;
+}
+
 /**
  * What a playbook agent says when someone asks it something. It follows
  * written steps and has no model, so it reports where its work stands.
@@ -109,7 +142,11 @@ export function statusReply(office: Office, agent: Participant, asker: Participa
   const state = deskState(office, agent, bothRead(ctx, agent, asker));
   const intro = "I follow a playbook, so I cannot hold a conversation, but I can tell you where my work stands.";
   if (!state.task || state.openTasks === 0) {
-    return `${intro} I have no open work at the moment. File a request and it will reach me when it gets to my stage.`;
+    const [recent] = handledWork(office, agent, bothRead(ctx, agent, asker));
+    const before = recent
+      ? ` The last work I had a hand in was ${taskLabel(office, recent.task.id)}, "${recent.task.title}", which ${standingOf(office, recent.task)}.`
+      : "";
+    return `${intro} I have no open work at the moment.${before} File a request and it will reach me when it gets to my stage.`;
   }
   const task = state.task;
   const others = state.openTasks > 1 ? ` I have ${state.openTasks - 1} more open besides.` : "";

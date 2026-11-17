@@ -349,8 +349,11 @@ hold a conversation, and a message to a person is theirs alone to read.
 **Messages.** Everyone's panel has a *Right now* line and a message box. Type
 and press Enter. A message to a person is delivered to their inbox, and anyone
 may write to anyone. A message to an agent is answered at once, and you can
-talk to an agent only if you may enter the room it sits in. Either way, only
-the two of you can read what is said. The activity log records that a message
+talk to an agent only if you may enter the room it sits in. An agent can
+answer for work it no longer holds as well as for what is on its desk: it
+knows the tasks it wrote on and passed along or saw closed, and where each
+stands now, as far as you may both read them. Either way, only the two of you
+can read what is said. The activity log records that a message
 was sent and never what it said. No task, rule or record changes because of a
 message: for work, file a request.
 
