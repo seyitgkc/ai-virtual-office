@@ -6,13 +6,17 @@ import type { Office, Permission, Role } from "../lib/model";
 /**
  * Adds a person to the office. The result is a single-use
  * link that the invited person opens to choose their own email and password.
+ * The demo office has no passwords, so a person added there gets no link.
  */
 export function InviteDialog({
   office,
   ownPermissions,
+  entersFreely,
   onClose,
 }: {
   office: Office;
+  /** True in the demo office, where people enter without a password and get no link. */
+  entersFreely: boolean;
   /** The inviter's own permissions. Nobody can hand out more than they hold. */
   ownPermissions: Permission[];
   onClose: () => void;
@@ -28,6 +32,8 @@ export function InviteDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [link, setLink] = useState<string | null>(null);
+  // True once a person was added to the demo office, which is entered without a link.
+  const [added, setAdded] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const submit = async () => {
@@ -41,7 +47,8 @@ export function InviteDialog({
       });
       const data: unknown = await response.json().catch(() => null);
       if (response.ok && data && typeof data === "object" && "path" in data) {
-        setLink(`${window.location.origin}${String(data.path)}`);
+        if (typeof data.path === "string") setLink(`${window.location.origin}${data.path}`);
+        else setAdded(true);
       } else {
         setError(
           data && typeof data === "object" && "error" in data && typeof data.error === "string"
@@ -66,7 +73,19 @@ export function InviteDialog({
       >
         <h2 id="invite-heading">Invite a person</h2>
 
-        {link ? (
+        {added ? (
+          <>
+            <p>
+              {displayName} now has a desk in the office. Nobody needs a password in the demo office. Sign out, and{" "}
+              {displayName} is among the people you can enter as on the sign-in page.
+            </p>
+            <div className="dialog-actions">
+              <button className="btn primary" onClick={onClose}>
+                Done
+              </button>
+            </div>
+          </>
+        ) : link ? (
           <>
             <p>
               {displayName} now has a desk in the office. Send them this link. It works once and
@@ -97,7 +116,10 @@ export function InviteDialog({
               void submit();
             }}
           >
-            <p>They get a desk and a role. Their access follows from the role, like everyone else.</p>
+            <p>
+              They get a desk and a role. Their access follows from the role, like everyone else.
+              {entersFreely ? " In the demo office they enter without a password, from the sign-in page." : ""}
+            </p>
             <label htmlFor="invite-name">Name</label>
             <input
               id="invite-name"
@@ -140,7 +162,7 @@ export function InviteDialog({
             )}
             <div className="dialog-actions">
               <button type="submit" className="btn primary" disabled={busy}>
-                Create invite
+                {entersFreely ? "Add person" : "Create invite"}
               </button>
               <button type="button" className="btn" onClick={onClose}>
                 Cancel

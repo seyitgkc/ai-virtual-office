@@ -314,7 +314,12 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         </div>
       )}
       {inviting && (
-        <InviteDialog office={office} ownPermissions={view.viewer.permissions} onClose={() => setInviting(false)} />
+        <InviteDialog
+          office={office}
+          ownPermissions={view.viewer.permissions}
+          entersFreely={view.isDemoOffice}
+          onClose={() => setInviting(false)}
+        />
       )}
       {inboxOpen && (
         <Inbox

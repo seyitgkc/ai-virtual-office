@@ -1159,7 +1159,7 @@ last reason, until `r-02` is revoked.
 | `POST /api/admin/systems` | Manage rooms, and read on the room | Read a connected system's live records. With a password account: connect, change or disconnect one |
 | `POST /api/chat` | signed in. For an agent: may enter its room | Send a direct message to a person or an agent, or mark a conversation or a note as opened |
 | `POST /api/offices` | signed in | Add an empty or a sample office, switch to another, or remove one. In the demo, with Manage the office: reset it |
-| `POST /api/invites` | Invite people | Create a person, a desk and an invite link |
+| `POST /api/invites` | Invite people | Create a person, a desk and an invite link. In the demo office: a person and a desk, entered without a password |
 | `POST /api/invites/accept` | invite holder | Set email and password, sign in |
 | `POST /api/tokens/:id` | Manage access, or holder to reveal | Reveal or revoke a permission token |
 | `GET /api/rooms/:room/thread` | permission token | Read a room's records, its connected systems' live records, and its thread |
@@ -1919,7 +1919,9 @@ playbook.
 - Offices are isolated on the server. Every request acts on the office of the
   session's seat, and ids from another office are treated as not existing.
 - Demo access cannot add offices, cannot remove the demo office and cannot
-  store an API key.
+  store an API key. It cannot hand out a password account either: a person
+  added to the demo office enters without a password like its seeded people,
+  gets no invite link, and is gone at the next reset.
 - A person removed from an office cannot sign in to it from that moment. An
   open session of theirs falls back to another office they have a seat in, or
   to none.
@@ -2127,7 +2129,7 @@ of the three with a database file starts sample services the same way.
 | What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, a need passed to a colleague, documents on a task, earlier work shown within an agent's access, records kept from a thread, the report, ids replaced by names in what an agent writes, and tasks named by number | `npm run agents` | 200 of 200 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 56 of 56 pass |
 | Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, a person leaving, and an office built from nothing | `npm run admin` | 125 of 125 pass |
-| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, a person leaving and losing their sign-in, removal | `npm run offices` | 103 of 103 pass |
+| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, a person leaving and losing their sign-in, the demo office giving out no password accounts, removal | `npm run offices` | 112 of 112 pass |
 | The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, an invoice voided, a rejected task whose order is cancelled in the storefront, and resetting the demo | `npm run systems` | 171 of 171 pass |
 | Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, work that is written down and picked up after a failure or a restart, urgent work first, standing work, who is on a task, a rejected task wound up between clicks and after a restart, providers that belong to an account, and the sample office | `npm run loop` | 118 of 118 pass |
 | A rejected task that had placed orders: the question to the person, each thing taken back by the agent that did it, refusals, an agent stopped from naming another task's record, playbook agents, and systems that hold actions for approval | `npm run windup` | 61 of 61 pass |

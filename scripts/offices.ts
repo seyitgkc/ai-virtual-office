@@ -180,7 +180,7 @@ async function main(): Promise<void> {
   const invites = await import("../lib/server/invites");
   const invite = invites.createInvite(await owner.read(), { displayName: "Robin Park", title: "Manager", roleId: managerRole, roomId: mainRoom });
   const robinPassword = randomBytes(18).toString("base64url");
-  await invites.acceptInvite(invite.path.split("/").pop()!, "robin@example.test", robinPassword);
+  await invites.acceptInvite(invite.path!.split("/").pop()!, "robin@example.test", robinPassword);
   const robinSeat = auth.seatsOf(db, auth.userByEmail(db, "robin@example.test")!.id)[0];
   expect("an invited person's seat carries the role's permissions", robinSeat.permissions.join(), "manage_rooms");
   const robin = await sessionFor("robin@example.test", robinSeat.participantId);
@@ -199,7 +199,7 @@ async function main(): Promise<void> {
   expect("the provider list is not sent to them", robinView.providers.length, 0);
   expect("their view lists what they may do", robinView.viewer.permissions.join(), "manage_rooms");
   view = await service.applyAdminOperation(await owner.read(), { type: "SET_ROLE_PERMISSION", roleId: managerRole, permission: "invite_people", allowed: true });
-  expect("with invite people, an invite into a plain role works", invites.createInvite(await robin.read(), { displayName: "Friend", title: "Guest", roleId: memberRole, roomId: mainRoom }).path.startsWith("/invite/"), true);
+  expect("with invite people, an invite into a plain role works", invites.createInvite(await robin.read(), { displayName: "Friend", title: "Guest", roleId: memberRole, roomId: mainRoom }).path?.startsWith("/invite/"), true);
   const adminRole = view.office.roles[view.office.participants[0].roleId].id;
   expect("but not into a role that holds more than the inviter", await refusal(async () => invites.createInvite(await robin.read(), { displayName: "Boss", title: "Chief", roleId: adminRole, roomId: mainRoom })), 403);
   robinView = service.getView(await robin.read());
@@ -234,6 +234,33 @@ async function main(): Promise<void> {
   await invites.acceptInvite(again.path!.split("/").pop()!, "robin@example.test", robinPassword);
   expect("invited again, the same account takes a new seat", auth.seatsOf(db, auth.userByEmail(db, "robin@example.test")!.id).length, 1);
   expect("the office then shows both the old and the new Robin", service.getView(await owner.read()).office.participants.filter((p) => p.displayName === "Robin Park").length, 2);
+
+  console.log("\n-- the demo office gives out no password accounts --");
+  const usersBefore = count("SELECT COUNT(*) AS n FROM users");
+  const added = invites.createInvite(await dana.read(), { displayName: "Casey Demo", title: "Guest", roleId: "intake", roomId: "reception" });
+  expect("adding a person to the demo gives no link", added.path, null);
+  const demoNow = auth.usersInOffice(db, service.DEMO_OFFICE_ID);
+  const casey = demoNow.find((u) => u.displayName === "Casey Demo");
+  expect("the person is in the demo", demoNow.length, 3);
+  expect("with a password-free entry like the seeded people", casey?.hasPassword, false);
+  expect("one account was made for them", count("SELECT COUNT(*) AS n FROM users"), usersBefore + 1);
+  expect("and no invite", count("SELECT COUNT(*) AS n FROM invites WHERE participant_id = ?", casey!.participantId), 0);
+  // A link made before this rule could still be lying around.
+  const stale = "stale-demo-link";
+  db.prepare("DELETE FROM memberships WHERE participant_id = ?").run(casey!.participantId);
+  db.prepare("INSERT INTO invites (id, token_hash, participant_id, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)").run(
+    "inv-stale",
+    auth.sha256(stale),
+    casey!.participantId,
+    "p-dana",
+    Date.now(),
+    Date.now() + 86_400_000,
+  );
+  expect("a link into the demo office is not shown as good", invites.readInvite(stale), null);
+  expect("and cannot be used to make an account", await refusal(async () => invites.acceptInvite(stale, "stranger@example.test", randomBytes(18).toString("base64url"))), 404);
+  expect("so no account came of it", auth.userByEmail(db, "stranger@example.test"), null);
+  await service.resetDemoOffice(await dana.read());
+  expect("a reset takes the added person out again", auth.usersInOffice(db, service.DEMO_OFFICE_ID).length, 2);
 
   console.log("\n-- removing offices --");
   const participantsBefore = count("SELECT COUNT(*) AS n FROM participants WHERE office_id = ?", second.officeId);

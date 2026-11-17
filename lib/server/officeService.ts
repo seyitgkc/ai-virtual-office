@@ -136,7 +136,7 @@ const slug = (name: string): string =>
     .replace(/^\.|\.$/g, "");
 
 /** Every person in the demo office gets a password-free demo sign-in. */
-function ensureDemoAccounts(db: Db, office: Office): void {
+export function ensureDemoAccounts(db: Db, office: Office): void {
   for (const p of office.participants) {
     if (p.kind !== "human" || !inOffice(p) || userByParticipant(db, p.id)) continue;
     const wanted = `${slug(p.displayName)}@office.test`;

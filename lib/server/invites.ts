@@ -6,6 +6,10 @@
  * invited person opens the link and chooses their own email and password, so
  * nobody else ever handles their credentials. Only a hash of the link's token
  * is stored.
+ *
+ * The demo office is entered without a password, by anyone. A person added
+ * there gets the same password-free entry as its seeded people and no link,
+ * so the demo never hands out an account that can hold offices of its own.
  */
 import { randomBytes, randomUUID } from "node:crypto";
 import { freeDeskSpot } from "../geometry";
@@ -25,7 +29,7 @@ import {
   type User,
 } from "./auth";
 import { get, run, transaction } from "./db";
-import { OfficeError, officeDatabase, recordAudit } from "./officeService";
+import { ensureDemoAccounts, isDemoOffice, OfficeError, officeDatabase, recordAudit } from "./officeService";
 import { loadEngineState, writeDesk, writeParticipant } from "./officeStore";
 
 const INVITE_DAYS = 7;
@@ -38,7 +42,8 @@ export interface InviteRequest {
   roomId: string;
 }
 
-export function createInvite(session: Session, request: InviteRequest): { path: string; expiresAt: number } {
+/** `path` is the invite link to send, or null in the demo office, which is entered without one. */
+export function createInvite(session: Session, request: InviteRequest): { path: string | null; expiresAt: number | null } {
   const db = officeDatabase();
   const state = session.officeId ? loadEngineState(db, session.officeId) : null;
   const inviter = state?.office.participants.find((p) => p.id === session.participantId);
@@ -87,33 +92,42 @@ export function createInvite(session: Session, request: InviteRequest): { path: 
     appearance: { color: COLOURS[state.office.participants.length % COLOURS.length] },
   };
 
+  const demo = isDemoOffice(state.office.id);
   const token = randomBytes(32).toString("base64url");
   const now = Date.now();
   const expiresAt = now + INVITE_DAYS * 86_400_000;
   transaction(db, () => {
     writeDesk(db, desk);
     writeParticipant(db, state.office.id, participant);
-    run(
-      db,
-      `INSERT INTO invites (id, token_hash, participant_id, created_by, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      `inv-${suffix}`,
-      sha256(token),
-      participant.id,
-      inviter.id,
-      now,
-      expiresAt,
-    );
+    if (demo) {
+      ensureDemoAccounts(db, { ...state.office, participants: [participant] });
+    } else {
+      run(
+        db,
+        `INSERT INTO invites (id, token_hash, participant_id, created_by, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        `inv-${suffix}`,
+        sha256(token),
+        participant.id,
+        inviter.id,
+        now,
+        expiresAt,
+      );
+    }
     recordAudit(db, {
       officeId: state.office.id,
       officeClock: state.now,
       actorId: inviter.id,
       actionType: "INVITE",
       subject: { taskId: null, subjectParticipantId: participant.id, ruleId: null, roomId: room.id },
-      notes: [`${inviter.displayName} invited ${displayName} as ${role.name}, with a desk in ${room.name}`],
+      notes: [
+        demo
+          ? `${inviter.displayName} added ${displayName} as ${role.name}, with a desk in ${room.name}`
+          : `${inviter.displayName} invited ${displayName} as ${role.name}, with a desk in ${room.name}`,
+      ],
     });
   });
-  return { path: `/invite/${token}`, expiresAt };
+  return demo ? { path: null, expiresAt: null } : { path: `/invite/${token}`, expiresAt };
 }
 
 export interface InviteDetails {
@@ -140,7 +154,8 @@ function liveInvite(token: string): InviteRow | null {
       WHERE i.token_hash = ?`,
     sha256(token),
   );
-  return row && row.accepted_at === null && row.expires_at > Date.now() ? row : null;
+  // A link into the demo office is never good: nobody signs in there with a password.
+  return row && !isDemoOffice(row.office_id) && row.accepted_at === null && row.expires_at > Date.now() ? row : null;
 }
 
 /** What to show on the invite page, or null when the link is no longer good. */
