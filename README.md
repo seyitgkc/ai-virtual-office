@@ -266,7 +266,13 @@ screen:
 - **The work list** on the left holds every task with its state. Once there
   are more than five it gains a search box, over each task's number, title
   and request, and four filters with counts: all, waiting for a person, moving
-  with agents, and closed.
+  with agents, and closed. The filters stay at the top of the list while it
+  scrolls.
+- **A summary at the top centre** is always in view: how many tasks are open,
+  how many of them wait for a person, how many agents are at work, how many
+  tasks are closed, and how many are urgent when any are. While agents work,
+  a second line under it names who is on which task. On a phone both sit
+  above the section bar, and the summary shows on the office view.
 - **The office is framed in the space the panels leave.** The view pulls back
   until the whole plan fits between the work list and the task panel, however
   long the corridor has grown, and takes the full width when no task or

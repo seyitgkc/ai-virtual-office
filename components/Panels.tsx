@@ -22,7 +22,7 @@ import {
 } from "../lib/model";
 import { dayOf, eligibleOwners, nextStage, roomForStage, stageSpec, type Action } from "../lib/engine";
 import { authorize } from "../lib/policy";
-import { atWorkOn, deskState } from "../lib/agentState";
+import { atWorkOn, deskState, type OfficeSummary } from "../lib/agentState";
 import { taskLabel, withTaskLabels } from "../lib/taskLabels";
 import { TaskText } from "./TaskText";
 import { KindBadge, statusOf, URGENT_ACCENT } from "./TaskCard";
@@ -52,6 +52,37 @@ const WORK_FILTERS: Record<WorkFilter, { label: string; hint: string; keeps: (ta
   },
   done: { label: "Closed", hint: "Tasks that were completed or rejected", keeps: (task) => task.closedAt !== null },
 };
+
+/**
+ * The office at a glance, always in view: open work, what waits for a
+ * person, who is at work and how much is closed.
+ */
+export function SummaryLine({ summary }: { summary: OfficeSummary }) {
+  const { open, waiting, urgent, closed, agents, atWork } = summary;
+  return (
+    <div className="office-summary" role="group" aria-label="The office at a glance">
+      <span data-zero={open === 0} title="Tasks that are not closed">
+        <b>{open}</b> open
+      </span>
+      {urgent > 0 && (
+        <span data-tone="urgent" title="Open tasks a person marked urgent">
+          <b>{urgent}</b> urgent
+        </span>
+      )}
+      <span data-zero={waiting === 0} data-tone={waiting > 0 ? "waiting" : undefined} title={WORK_FILTERS.you.hint}>
+        <b>{waiting}</b> waiting for a person
+      </span>
+      {agents > 0 && (
+        <span data-zero={atWork === 0} data-tone={atWork > 0 ? "working" : undefined} title="Agents taking a step or answering a note right now">
+          <b>{atWork}</b> of {agents} {agents === 1 ? "agent" : "agents"} at work
+        </span>
+      )}
+      <span data-zero={closed === 0} title={WORK_FILTERS.done.hint}>
+        <b>{closed}</b> closed
+      </span>
+    </div>
+  );
+}
 
 const time = (ms: number): string =>
   new Date(ms).toLocaleTimeString("en-CA", {
@@ -492,13 +523,16 @@ export function TaskList({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <div className="work-filters" role="group" aria-label="Which tasks to list">
-              {(Object.keys(WORK_FILTERS) as WorkFilter[]).map((id) => (
-                <button key={id} type="button" title={WORK_FILTERS[id].hint} aria-pressed={show === id} onClick={() => setShow(id)}>
-                  {WORK_FILTERS[id].label} {tasks.filter(WORK_FILTERS[id].keeps).length}
-                </button>
-              ))}
-            </div>
+          </div>
+        )}
+        {crowded && (
+          // Its own child of the scrolling list, so that it stays in view while the tasks pass under it.
+          <div className="work-filters" role="group" aria-label="Which tasks to list">
+            {(Object.keys(WORK_FILTERS) as WorkFilter[]).map((id) => (
+              <button key={id} type="button" title={WORK_FILTERS[id].hint} aria-pressed={show === id} onClick={() => setShow(id)}>
+                {WORK_FILTERS[id].label} {tasks.filter(WORK_FILTERS[id].keeps).length}
+              </button>
+            ))}
           </div>
         )}
         {crowded && listed.length === 0 && <div className="empty">No task matches.</div>}

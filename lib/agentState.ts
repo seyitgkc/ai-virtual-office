@@ -163,6 +163,32 @@ export function statusReply(office: Office, agent: Participant, asker: Participa
   }
 }
 
+/** The office at a glance: how much work is open, what waits for a person, and who is at work. */
+export interface OfficeSummary {
+  open: number;
+  /** Open tasks halted on a person: a question, missing access or a review. */
+  waiting: number;
+  /** Open tasks a person marked urgent. */
+  urgent: number;
+  closed: number;
+  agents: number;
+  /** Agents taking a step or answering a note right now. */
+  atWork: number;
+}
+
+export function summaryOf(office: Pick<Office, "tasks" | "participants">, load: AgentLoad): OfficeSummary {
+  const open = office.tasks.filter((t) => t.closedAt === null);
+  const agents = office.participants.filter((p) => p.kind === "agent");
+  return {
+    open: open.length,
+    waiting: open.filter((t) => t.status === "blocked_question" || t.status === "blocked_permission" || t.status === "in_review").length,
+    urgent: open.filter((t) => t.urgent).length,
+    closed: office.tasks.length - open.length,
+    agents: agents.length,
+    atWork: agents.filter((p) => (load[p.id]?.taskId ?? null) !== null).length,
+  };
+}
+
 /** What each agent is on and has waiting, as the office reports it. */
 export type AgentLoad = Record<string, { taskId: string | null; forNote: boolean; waiting: number; queued: string[] }>;
 

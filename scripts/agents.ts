@@ -10,7 +10,7 @@ import {
   type AgentStepResult,
 } from "../lib/engine";
 import { initialState } from "../lib/initialState";
-import { deskState, handledWork, standingOf, statusReply } from "../lib/agentState";
+import { deskState, handledWork, standingOf, statusReply, summaryOf } from "../lib/agentState";
 import { canRead, resolveAccess } from "../lib/model";
 import { authorize, contextOf, parseAction } from "../lib/policy";
 import { applyAdminOp } from "../lib/admin";
@@ -634,6 +634,20 @@ async function main(): Promise<void> {
   const crowded = buildChatSystem(many, who("p-ledger"), who("p-dana"), contextOf(many, initialState.now), []);
   expect("a long record is cut to the most recent", crowded.includes("(9 in all, the 6 most recent shown, latest first)"), true);
   expect("and lists no more than that", crowded.split("\n").filter((l) => l.startsWith("- T-") && l.includes("it is completed")).length, 6);
+
+  console.log("\n-- the office at a glance --");
+  const glance = summaryOf(seeded, {});
+  expect("open and closed work are counted", `${glance.open} ${glance.closed}`, "2 1");
+  expect("a halt for access and an open question both wait for a person", glance.waiting, 2);
+  expect("people are not counted as agents", glance.agents, 5);
+  expect("nobody is at work in a still office", glance.atWork, 0);
+  const lively = summaryOf(
+    { ...seeded, tasks: seeded.tasks.map((t) => (t.id === "T-1001" ? { ...t, urgent: true } : t.id === "T-1002" ? { ...t, status: "in_progress" as const } : t)) },
+    { "p-vera": { taskId: "T-1002", forNote: false, waiting: 0, queued: [] }, "p-iris": { taskId: null, forNote: false, waiting: 1, queued: ["T-1001"] } },
+  );
+  expect("an agent taking a step is at work, one with work only queued is not", lively.atWork, 1);
+  expect("work that is moving does not wait for a person", lively.waiting, 1);
+  expect("urgent open work is counted", lively.urgent, 1);
 
   console.log("\n-- a grant made for one task counts only for that task --");
   const veraPerson = initialState.office.participants.find((p) => p.id === "p-vera")!;

@@ -179,12 +179,18 @@ details.document pre {
   font-size: 11.5px; text-transform: none; letter-spacing: 0; color: rgba(232,230,225,0.8);
 }
 .request-form .urgent-box input { width: auto; margin: 0; }
-.work-find { margin: 0 0 9px; display: flex; flex-direction: column; gap: 6px; }
+.work-find { margin: 0 0 2px; display: flex; flex-direction: column; gap: 6px; }
 .work-find input {
   width: 100%; font: inherit; font-size: 11.5px; color: #e8e6e1; padding: 5px 8px;
   background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14); border-radius: 6px;
 }
-.work-filters { display: flex; gap: 4px; }
+/* The row stays at the top of the list while the tasks scroll under it. */
+.work-filters {
+  /* The list's own top padding is 10px, and the row covers it when it stops. */
+  position: sticky; top: -10px; z-index: 1; display: flex; gap: 4px;
+  margin: 0 -13px 9px; padding: 7px 13px; background: #14161b;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
 .work-filters button {
   font: inherit; font-size: 10px; color: rgba(232,230,225,0.6); padding: 2px 6px; cursor: pointer; white-space: nowrap;
   background: transparent; border: 1px solid rgba(255,255,255,0.14); border-radius: 999px;
@@ -333,8 +339,25 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 }
 .notice span { overflow-wrap: anywhere; }
 .notice .btn { margin: 0; flex: none; }
+/* Top centre: the summary that stays, and under it the line that says what is happening now. */
+.top-status {
+  position: absolute; top: 18px; left: 0; right: 0; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.top-status > * { position: relative; pointer-events: auto; max-width: max(220px, calc(100vw - 664px)); }
+.office-summary {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 14px;
+  padding: 6px 14px; font-size: 11px; line-height: 1.5; border-radius: 14px;
+  background: rgba(18,20,25,0.9); border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(232,230,225,0.72);
+}
+.office-summary span { white-space: nowrap; }
+.office-summary b { font-weight: 600; color: #e8e6e1; font-variant-numeric: tabular-nums; }
+.office-summary [data-zero="true"], .office-summary [data-zero="true"] b { color: rgba(232,230,225,0.45); }
+.office-summary [data-tone="waiting"] b { color: #e0a23f; }
+.office-summary [data-tone="working"] b { color: #6ea9d9; }
+.office-summary [data-tone="urgent"] b { color: #e0614f; }
 .working {
-  position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
   padding: 5px 11px; font-size: 11px; border-radius: 100px;
   background: rgba(18,20,25,0.9); border: 1px solid rgba(255,255,255,0.12);
   color: rgba(232,230,225,0.7);
@@ -766,9 +789,13 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
   .office[data-sheet="detail"] #inspector { display: flex; }
 
   .notice { left: 10px; right: 10px; bottom: 62px; transform: none; max-width: none; min-width: 0; }
-  /* On a phone the top of the screen is the title card, so the status line sits above the section bar. */
-  .working { top: auto; bottom: calc(62px + env(safe-area-inset-bottom)); max-width: calc(100vw - 20px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .notice ~ .working { bottom: calc(124px + env(safe-area-inset-bottom)); }
+  /* On a phone the top of the screen is the title card, so the summary and the status line sit above the section bar. */
+  .top-status { top: auto; bottom: calc(62px + env(safe-area-inset-bottom)); flex-direction: column-reverse; }
+  .top-status > * { max-width: calc(100vw - 20px); }
+  .working { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .notice ~ .top-status { bottom: calc(124px + env(safe-area-inset-bottom)); }
+  /* The other sheets fill the screen with a list, which a line that never leaves would cover. */
+  .office:not([data-sheet="office"]) .office-summary { display: none; }
   .desk-chip { font-size: 10.5px; padding: 6px 9px; }
   .dialog-backdrop { padding: 10px; }
   /* Settings fill the screen. Wide tables scroll sideways inside their own box. */

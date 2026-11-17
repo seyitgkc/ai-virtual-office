@@ -9,7 +9,8 @@ import { resolveAccess } from "../lib/model";
 import { authorize, contextOf } from "../lib/policy";
 import { entryPose } from "../lib/geometry";
 import type { OfficeView } from "../lib/view";
-import { Feed, Inspector, TaskList, TitleCard } from "./Panels";
+import { Feed, Inspector, SummaryLine, TaskList, TitleCard } from "./Panels";
+import { summaryOf } from "../lib/agentState";
 import { Minimap } from "./Minimap";
 import { Inbox, inboxCount } from "./Inbox";
 import { InviteDialog } from "./InviteDialog";
@@ -314,18 +315,22 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           </button>
         </div>
       )}
-      {pending && <div className="working">Working...</div>}
-      {!pending && view.agentsAtWork && (
-        <div className="working">
-          {Object.entries(view.agentLoad)
-            .filter(([, load]) => load.taskId !== null)
-            .map(([id, load]) => {
-              const who = office.participants.find((p) => p.id === id)?.displayName ?? "An agent";
-              return `${who} is on ${taskLabel(office, load.taskId ?? "")}${load.waiting > 0 ? `, ${load.waiting} more waiting` : ""}`;
-            })
-            .join(" · ") || "Agents are working..."}
-        </div>
-      )}
+      {/* The summary stays. The line under it comes and goes with the work. */}
+      <div className="top-status">
+        <SummaryLine summary={summaryOf(office, view.agentLoad)} />
+        {pending && <div className="working">Working...</div>}
+        {!pending && view.agentsAtWork && (
+          <div className="working">
+            {Object.entries(view.agentLoad)
+              .filter(([, load]) => load.taskId !== null)
+              .map(([id, load]) => {
+                const who = office.participants.find((p) => p.id === id)?.displayName ?? "An agent";
+                return `${who} is on ${taskLabel(office, load.taskId ?? "")}${load.waiting > 0 ? `, ${load.waiting} more waiting` : ""}`;
+              })
+              .join(" · ") || "Agents are working..."}
+          </div>
+        )}
+      </div>
       {inviting && (
         <InviteDialog
           office={office}
