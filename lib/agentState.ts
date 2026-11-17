@@ -176,12 +176,23 @@ export interface OfficeSummary {
   atWork: number;
 }
 
+/**
+ * Is this task halted on a person: a question, missing access, or a review
+ * that is theirs to decide? A task an agent is taking a step on is not, even
+ * in review, where an agent checks the work before a person decides.
+ */
+export function waitsForPerson(task: Task, load: AgentLoad): boolean {
+  if (task.closedAt !== null) return false;
+  if (task.status !== "blocked_question" && task.status !== "blocked_permission" && task.status !== "in_review") return false;
+  return !Object.values(load).some((l) => l.taskId === task.id && !l.forNote);
+}
+
 export function summaryOf(office: Pick<Office, "tasks" | "participants">, load: AgentLoad): OfficeSummary {
   const open = office.tasks.filter((t) => t.closedAt === null);
   const agents = office.participants.filter((p) => p.kind === "agent");
   return {
     open: open.length,
-    waiting: open.filter((t) => t.status === "blocked_question" || t.status === "blocked_permission" || t.status === "in_review").length,
+    waiting: open.filter((t) => waitsForPerson(t, load)).length,
     urgent: open.filter((t) => t.urgent).length,
     closed: office.tasks.length - open.length,
     agents: agents.length,

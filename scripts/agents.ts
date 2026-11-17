@@ -10,7 +10,7 @@ import {
   type AgentStepResult,
 } from "../lib/engine";
 import { initialState } from "../lib/initialState";
-import { deskState, handledWork, standingOf, statusReply, summaryOf } from "../lib/agentState";
+import { deskState, handledWork, standingOf, statusReply, summaryOf, waitsForPerson } from "../lib/agentState";
 import { canRead, resolveAccess } from "../lib/model";
 import { authorize, contextOf, parseAction } from "../lib/policy";
 import { applyAdminOp } from "../lib/admin";
@@ -648,6 +648,12 @@ async function main(): Promise<void> {
   expect("an agent taking a step is at work, one with work only queued is not", lively.atWork, 1);
   expect("work that is moving does not wait for a person", lively.waiting, 1);
   expect("urgent open work is counted", lively.urgent, 1);
+  const reviewed = { ...seeded, tasks: seeded.tasks.map((t) => (t.id === "T-1002" ? { ...t, status: "in_review" as const } : t)) };
+  const idle = { taskId: null, forNote: false, waiting: 0, queued: [] };
+  expect("a task in review waits for a person", summaryOf(reviewed, {}).waiting, 2);
+  expect("but not while an agent is still checking it", summaryOf(reviewed, { "p-ledger": { ...idle, taskId: "T-1002" } }).waiting, 1);
+  expect("an agent answering a note on it does not change that", summaryOf(reviewed, { "p-ledger": { ...idle, taskId: "T-1002", forNote: true } }).waiting, 2);
+  expect("a closed task never waits", waitsForPerson({ ...seeded.tasks.find((t) => t.id === "T-1003")!, status: "in_review" }, {}), false);
 
   console.log("\n-- a grant made for one task counts only for that task --");
   const veraPerson = initialState.office.participants.find((p) => p.id === "p-vera")!;

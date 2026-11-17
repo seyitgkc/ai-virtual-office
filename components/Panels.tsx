@@ -22,7 +22,7 @@ import {
 } from "../lib/model";
 import { dayOf, eligibleOwners, nextStage, roomForStage, stageSpec, type Action } from "../lib/engine";
 import { authorize } from "../lib/policy";
-import { atWorkOn, deskState, type OfficeSummary } from "../lib/agentState";
+import { atWorkOn, deskState, waitsForPerson, type AgentLoad, type OfficeSummary } from "../lib/agentState";
 import { taskLabel, withTaskLabels } from "../lib/taskLabels";
 import { TaskText } from "./TaskText";
 import { KindBadge, statusOf, URGENT_ACCENT } from "./TaskCard";
@@ -36,19 +36,17 @@ const WORK_FILTER_FROM = 5;
 type WorkFilter = "all" | "you" | "moving" | "done";
 
 /** Ways to narrow the work list, by what a person would be looking for. */
-const WORK_FILTERS: Record<WorkFilter, { label: string; hint: string; keeps: (task: Task) => boolean }> = {
+const WORK_FILTERS: Record<WorkFilter, { label: string; hint: string; keeps: (task: Task, load: AgentLoad) => boolean }> = {
   all: { label: "All", hint: "Every task", keeps: () => true },
   you: {
     label: "Waiting",
     hint: "Tasks that wait for a person: a question, missing access or a review",
-    keeps: (task) =>
-      task.closedAt === null &&
-      (task.status === "blocked_question" || task.status === "blocked_permission" || task.status === "in_review"),
+    keeps: waitsForPerson,
   },
   moving: {
     label: "Moving",
     hint: "Open tasks that agents are working on, or that wait for a day",
-    keeps: (task) => task.closedAt === null && (task.status === "in_progress" || task.status === "requested"),
+    keeps: (task, load) => task.closedAt === null && !waitsForPerson(task, load),
   },
   done: { label: "Closed", hint: "Tasks that were completed or rejected", keeps: (task) => task.closedAt !== null },
 };
@@ -436,6 +434,7 @@ function RequestForm({
 
 export function TaskList({
   tasks,
+  agentLoad,
   selectedId,
   onSelect,
   onSubmit,
@@ -443,6 +442,8 @@ export function TaskList({
   isDemoOffice,
   intakeRoomName,
 }: {
+  /** What each agent is on now. A task an agent is on does not count as waiting for a person. */
+  agentLoad: AgentLoad;
   isDemoOffice: boolean;
   /** The room new requests arrive in. */
   intakeRoomName: string;
@@ -480,7 +481,7 @@ export function TaskList({
   const listed = crowded
     ? ordered.filter(
         (task) =>
-          WORK_FILTERS[show].keeps(task) &&
+          WORK_FILTERS[show].keeps(task, agentLoad) &&
           (wanted === "" || `${taskLabel({ tasks }, task.id)} ${task.title} ${task.detail}`.toLowerCase().includes(wanted)),
       )
     : ordered;
@@ -530,7 +531,7 @@ export function TaskList({
           <div className="work-filters" role="group" aria-label="Which tasks to list">
             {(Object.keys(WORK_FILTERS) as WorkFilter[]).map((id) => (
               <button key={id} type="button" title={WORK_FILTERS[id].hint} aria-pressed={show === id} onClick={() => setShow(id)}>
-                {WORK_FILTERS[id].label} {tasks.filter(WORK_FILTERS[id].keeps).length}
+                {WORK_FILTERS[id].label} {tasks.filter((task) => WORK_FILTERS[id].keeps(task, agentLoad)).length}
               </button>
             ))}
           </div>

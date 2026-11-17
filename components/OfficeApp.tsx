@@ -211,6 +211,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         />
         <TaskList
           tasks={office.tasks}
+          agentLoad={view.agentLoad}
           selectedId={selectedTaskId}
           onSelect={(id) => {
             setSelectedTaskId(id);

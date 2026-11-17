@@ -270,7 +270,10 @@ screen:
   scrolls.
 - **A summary at the top centre** is always in view: how many tasks are open,
   how many of them wait for a person, how many agents are at work, how many
-  tasks are closed, and how many are urgent when any are. While agents work,
+  tasks are closed, and how many are urgent when any are. A task counts as
+  waiting for a person once no agent is still taking a step on it, so a
+  review an agent is checking is not yet counted. The summary is centred in
+  the space the side panels leave. While agents work,
   a second line under it names who is on which task. On a phone both sit
   above the section bar, and the summary shows on the office view.
 - **The office is framed in the space the panels leave.** The view pulls back
