@@ -6,6 +6,7 @@ import type { Action } from "../lib/engine";
 import {
   ALL_SCOPES,
   ANY_ROOM,
+  inOffice,
   PERMISSION_INFO,
   PERMISSIONS,
   type AccessScope,
@@ -41,7 +42,7 @@ export function RolesTab({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const role = office.roles[selected] ?? roles[0];
-  const holdersOf = (id: string) => office.participants.filter((p) => p.roleId === id);
+  const holdersOf = (id: string) => office.participants.filter((p) => p.roleId === id && inOffice(p));
   const heldByAgents = (id: string) => holdersOf(id).some((p) => p.kind === "agent");
   const [part, setPart] = useState<"roles" | "rooms" | "permissions">("roles");
   // Permissions are for people. A role an agent holds cannot carry any, so it
@@ -243,7 +244,7 @@ export function RulesTab({
   dispatch: (action: Action) => Promise<boolean>;
 }) {
   const rooms = office.floorplan.rooms;
-  const [participantId, setParticipantId] = useState(office.participants[0]?.id ?? "");
+  const [participantId, setParticipantId] = useState(office.participants.find(inOffice)?.id ?? "");
   const [cells, setCells] = useState<Record<string, CellEffect>>({});
   const [reason, setReason] = useState("");
   const who = (id: string): string => office.participants.find((p) => p.id === id)?.displayName ?? id;
@@ -347,7 +348,7 @@ export function RulesTab({
           <label>
             Who
             <select value={participantId} onChange={(e) => setParticipantId(e.target.value)}>
-              {office.participants.map((p) => (
+              {office.participants.filter(inOffice).map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.displayName}
                 </option>

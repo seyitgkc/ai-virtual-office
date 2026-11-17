@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -238,7 +238,10 @@ CREATE TABLE participants (
   title        TEXT NOT NULL,
   role_id      TEXT NOT NULL REFERENCES roles(id),
   desk_id      TEXT UNIQUE REFERENCES desks(id),
-  color        TEXT NOT NULL
+  color        TEXT NOT NULL,
+  -- When a person left the office. They stay as a row so that what they
+  -- asked, answered and decided keeps its name. NULL for everyone present.
+  left_at      INTEGER
 ) STRICT;
 
 CREATE TABLE participant_capabilities (
@@ -1249,5 +1252,9 @@ CREATE TABLE message_system_results (
   ok         INTEGER NOT NULL CHECK (ok IN (0, 1)),
   record     TEXT
 ) STRICT;
+`,
+  // Version 20 lets a person leave an office and stay in its record.
+  19: /* sql */ `
+ALTER TABLE participants ADD COLUMN left_at INTEGER;
 `,
 };

@@ -4,11 +4,11 @@
  */
 import { setupSteps } from "../lib/setup";
 import { AGENT_NAMES, AdminError, applyAdminOp, blankOffice, parseAdminOp, permissionFor, type AdminOp } from "../lib/admin";
-import { reduce } from "../lib/engine";
+import { eligibleOwners, reduce, standIn } from "../lib/engine";
 import { PlaybookRuntime } from "../lib/playbook";
 import { obstacles, planExtent, roomAt, stepWalker } from "../lib/geometry";
 import { initialState } from "../lib/initialState";
-import { PERMISSIONS, resolveAccess, type Office, type PlaybookStep } from "../lib/model";
+import { inOffice, may, PERMISSIONS, resolveAccess, type Office, type PlaybookStep } from "../lib/model";
 import { contextOf } from "../lib/policy";
 
 let failures = 0;
@@ -225,6 +225,62 @@ async function main(): Promise<void> {
   expect("an agent with history cannot", refusal(seed, { type: "REMOVE_PARTICIPANT", participantId: "p-quill" })?.includes("Clear the work"), true);
   expect("nobody can remove themselves", refusal(seed, { type: "REMOVE_PARTICIPANT", participantId: "p-dana" }), "You cannot remove yourself.");
   expect("the last person who manages roles cannot be demoted", refusal(seed, { type: "UPDATE_PARTICIPANT", participantId: "p-dana", roleId: "intake" }) !== null, true);
+
+  console.log("\n-- a person who leaves --");
+  const sam = seed.participants.find((p) => p.id === "p-sam")!;
+  const samDesk = sam.deskId!;
+  const left = apply(seed, { type: "REMOVE_PARTICIPANT", participantId: "p-sam", at: 1_800_000_000_000 });
+  const samGone = left.participants.find((p) => p.id === "p-sam")!;
+  expect("a person the record names stays in it", left.participants.length, seed.participants.length);
+  expect("marked with when they left", samGone.leftAt, 1_800_000_000_000);
+  expect("their request keeps their name", left.tasks.some((t) => t.requestedById === "p-sam"), true);
+  expect("they hold no desk", samGone.deskId, null);
+  expect("and the desk is gone from the floor", left.floorplan.desks.some((d) => d.id === samDesk), false);
+  expect("the rules made for them are gone", left.rules.some((r) => r.participantId === "p-sam"), false);
+  expect("rules they had before were counted", seed.rules.some((r) => r.participantId === "p-sam"), true);
+  const leftCtx = contextOf(left, initialState.now);
+  expect(
+    "no room is open to them any more",
+    left.floorplan.rooms.some((r) => resolveAccess(samGone, r.id, "enter", leftCtx).effect === "allow"),
+    false,
+  );
+  expect("while it was before", resolveAccess(sam, "reception", "enter", contextOf(seed, initialState.now)).effect, "allow");
+  expect("they are offered no work", eligibleOwners(left, "reception", leftCtx).some((p) => p.id === "p-sam"), false);
+  expect("what was meant for them goes to someone who manages access", standIn(left, "p-sam"), "p-dana");
+  expect("and to the person themselves while they are there", standIn(seed, "p-sam"), "p-sam");
+  expect("they cannot be removed twice", refusal(left, { type: "REMOVE_PARTICIPANT", participantId: "p-sam" }), "Sam Okafor has already left the office.");
+  expect("nor given a role", refusal(left, { type: "UPDATE_PARTICIPANT", participantId: "p-sam", roleId: "planner" }), "Sam Okafor has left the office.");
+  const owning: Office = { ...seed, tasks: seed.tasks.map((t, i) => (i === 0 ? { ...t, ownerId: "p-sam", closedAt: null } : t)) };
+  expect(
+    "a person who still has open work cannot leave",
+    refusal(owning, { type: "REMOVE_PARTICIPANT", participantId: "p-sam" }),
+    "Sam Okafor still has open work: T-1. Hand it to someone else first.",
+  );
+  expect(
+    "the only person who manages roles cannot be removed",
+    refusal(seed, { type: "REMOVE_PARTICIPANT", participantId: "p-dana" }, "p-sam"),
+    "That would leave the office with no person who can manage its roles.",
+  );
+  const promoted = apply(seed, { type: "UPDATE_PARTICIPANT", participantId: "p-sam", roleId: "supervisor" });
+  const danaGone = apply(promoted, { type: "REMOVE_PARTICIPANT", participantId: "p-dana" }, "p-sam");
+  expect("with a second one, the first can leave", inOffice(danaGone.participants.find((p) => p.id === "p-dana")!), false);
+  expect("and holds no permission afterwards", may(danaGone, danaGone.participants.find((p) => p.id === "p-dana")!, "manage_access"), false);
+  expect(
+    "the one left cannot then be demoted",
+    refusal(danaGone, { type: "UPDATE_PARTICIPANT", participantId: "p-sam", roleId: "intake" }, "p-sam") !== null,
+    true,
+  );
+  let roled = apply(seed, { type: "ADD_ROLE", name: "Temp", description: "" });
+  const temp = Object.values(roled.roles).find((r) => r.name === "Temp")!.id;
+  roled = apply(roled, { type: "UPDATE_PARTICIPANT", participantId: "p-sam", roleId: temp });
+  expect("a role someone holds cannot be removed", refusal(roled, { type: "REMOVE_ROLE", roleId: temp })?.includes("Sam Okafor"), true);
+  roled = apply(roled, { type: "REMOVE_PARTICIPANT", participantId: "p-sam" });
+  roled = apply(roled, { type: "REMOVE_ROLE", roleId: temp });
+  expect("once they have left, it can", temp in roled.roles, false);
+  expect("and they are filed under a role that remains", roled.participants.find((p) => p.id === "p-sam")!.roleId in roled.roles, true);
+  expect("the browser cannot choose to keep a person or when they left", JSON.stringify(parseAdminOp({ type: "REMOVE_PARTICIPANT", participantId: "p-sam", keep: true, at: 5 })), JSON.stringify({ type: "REMOVE_PARTICIPANT", participantId: "p-sam" }));
+  const withTally = apply(seed, { type: "ADD_AGENT", displayName: "Tally", title: "Counter", roleId: "intake", roomId: "reception", capabilities: [], agentType: "playbook" });
+  expect("keep applies to people only", apply(withTally, { type: "REMOVE_PARTICIPANT", participantId: withTally.participants.at(-1)!.id, keep: true }).participants.length, seed.participants.length);
 
   console.log("\n-- clearing work --");
   const cleared = apply(seed, { type: "CLEAR_WORK" });

@@ -10,6 +10,7 @@ import { freeDeskSpot } from "./geometry";
 import {
   ALL_SCOPES,
   ANY_ROOM,
+  inOffice,
   PERMISSIONS,
   PLAYBOOK_STAGES,
   type AccessGrant,
@@ -29,6 +30,7 @@ import {
   type Wall,
 } from "./model";
 import { checkedFields } from "./systems";
+import { taskLabel } from "./taskLabels";
 
 export type ConfigurableStage = keyof StageRooms;
 export const CONFIGURABLE_STAGES: ConfigurableStage[] = ["intake", "planning", "execution", "review"];
@@ -62,7 +64,15 @@ export type AdminOp =
       model?: string | null;
     }
   | { type: "SET_PLAYBOOK"; participantId: string; steps: PlaybookStep[] }
-  | { type: "REMOVE_PARTICIPANT"; participantId: string }
+  /**
+   * Take someone out of the office. An agent, or a person nothing refers to,
+   * is deleted. A person who appears in the office's record leaves it: they
+   * keep their name there and lose their desk, their access and their sign-in.
+   * `keep` and `at` are set by the office, never by the browser: `keep` makes
+   * a person leave even when the office model shows no trace of them, and `at`
+   * is the time they left.
+   */
+  | { type: "REMOVE_PARTICIPANT"; participantId: string; keep?: boolean; at?: number }
   | { type: "ADD_ROLE"; name: string; description: string }
   | { type: "UPDATE_ROLE"; roleId: string; name?: string; description?: string }
   | { type: "SET_ROLE_PERMISSION"; roleId: string; permission: Permission; allowed: boolean }
@@ -179,7 +189,7 @@ const hasPermissions = (role: Role | undefined): boolean => (role?.permissions.l
 /** Someone must always be able to repair the roles, or the office locks itself out. */
 function requireRoleManager(office: Office): void {
   const keepers = office.participants.filter(
-    (p) => p.kind === "human" && office.roles[p.roleId]?.permissions.includes("manage_roles"),
+    (p) => p.kind === "human" && inOffice(p) && office.roles[p.roleId]?.permissions.includes("manage_roles"),
   );
   if (keepers.length === 0) refuse("That would leave the office with no person who can manage its roles.");
 }
@@ -441,6 +451,7 @@ export function applyAdminOp(
 
     case "UPDATE_PARTICIPANT": {
       const person = findPerson(op.participantId);
+      if (!inOffice(person)) refuse(`${person.displayName} has left the office.`);
       let next: Participant = person;
       let desks = floorplan.desks;
 
@@ -523,11 +534,21 @@ export function applyAdminOp(
     case "REMOVE_PARTICIPANT": {
       const person = findPerson(op.participantId);
       if (person.id === actorId) refuse("You cannot remove yourself.");
+      if (!inOffice(person)) refuse(`${person.displayName} has already left the office.`);
       const history = historyOf(office, person.id);
-      if (history) {
+      if (history && person.kind === "agent") {
         refuse(
           `${person.displayName} appears in the office's ${history}. Clear the work first, or change their role instead.`,
         );
+      }
+      const leaves = person.kind === "human" && (history !== null || op.keep === true);
+      if (leaves) {
+        const open = office.tasks.filter((t) => t.closedAt === null && t.ownerId === person.id);
+        if (open.length > 0) {
+          refuse(
+            `${person.displayName} still has open work: ${open.map((t) => taskLabel(office, t.id)).join(", ")}. Hand it to someone else first.`,
+          );
+        }
       }
       const updated: Office = {
         ...office,
@@ -535,7 +556,11 @@ export function applyAdminOp(
           floorplan,
           floorplan.desks.filter((d) => d.id !== person.deskId),
         ),
-        participants: office.participants.filter((p) => p.id !== person.id),
+        participants: leaves
+          ? office.participants.map((p) =>
+              p.id === person.id ? { ...p, deskId: null, leftAt: op.at ?? Date.now() } : p,
+            )
+          : office.participants.filter((p) => p.id !== person.id),
         rules: office.rules.filter((r) => r.participantId !== person.id),
       };
       requireRoleManager(updated);
@@ -586,12 +611,21 @@ export function applyAdminOp(
 
     case "REMOVE_ROLE": {
       const role = findRole(op.roleId);
-      const holders = office.participants.filter((p) => p.roleId === role.id);
+      const holders = office.participants.filter((p) => p.roleId === role.id && inOffice(p));
       if (holders.length > 0) {
         refuse(`${holders.map((p) => p.displayName).join(", ")} still hold the ${role.name} role.`);
       }
       const { [role.id]: _removed, ...rest } = office.roles;
-      return { ...office, roles: rest };
+      // People who have left carry a role in name only. Theirs moves to one
+      // that remains, so the role they once held can still be taken away.
+      const gone = office.participants.filter((p) => p.roleId === role.id);
+      const spare = Object.values(rest).find((r) => r.permissions.length === 0) ?? Object.values(rest)[0];
+      if (gone.length > 0 && !spare) refuse("An office needs at least one role.");
+      return {
+        ...office,
+        roles: rest,
+        participants: office.participants.map((p) => (p.roleId === role.id ? { ...p, roleId: spare!.id } : p)),
+      };
     }
 
     case "SET_ROLE_GRANT": {

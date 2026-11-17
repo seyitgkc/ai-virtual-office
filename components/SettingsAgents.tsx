@@ -3,9 +3,10 @@
 import { useState } from "react";
 import type { AdminOp } from "../lib/admin";
 import { SUGGESTED_MODELS } from "../lib/aiModels";
-import { stageSpec } from "../lib/engine";
+import { dayOf, stageSpec } from "../lib/engine";
 import {
   ALL_SCOPES,
+  inOffice,
   PLAYBOOK_STAGES,
   type AccessScope,
   type AgentType,
@@ -111,12 +112,13 @@ export function PeopleTab({
   const agentRoles = roles.filter((r) => r.permissions.length === 0);
   const [configuring, setConfiguring] = useState<string | null>(null);
   const agent = office.participants.find((p) => p.id === configuring && p.kind === "agent") ?? null;
+  const gone = office.participants.filter((p) => !inOffice(p));
 
   return (
     <>
       <Section
         title="People and agents"
-        hint="Names and titles save when you leave the field. Changing the room moves the desk. People join through Invite on the main screen."
+        hint="Names and titles save when you leave the field. Changing the room moves the desk. People join through Invite on the main screen. Removing a person ends their sign-in to this office. If they asked, answered or decided anything here, their name stays on it."
       >
         <div className="table-scroll">
           <table className="grid-table">
@@ -131,7 +133,7 @@ export function PeopleTab({
               </tr>
             </thead>
             <tbody>
-              {office.participants.map((p) => {
+              {office.participants.filter(inOffice).map((p) => {
                 const desk = office.floorplan.desks.find((d) => d.id === p.deskId);
                 const source = worksFrom(p, providers);
                 return (
@@ -216,6 +218,39 @@ export function PeopleTab({
           </table>
         </div>
       </Section>
+
+      {gone.length > 0 && (
+        <Section
+          title="People who have left"
+          hint="They can no longer sign in to this office and hold no access. Their names stay on the work they took part in."
+        >
+          <div className="table-scroll">
+            <table className="grid-table">
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Title</th>
+                  <th scope="col">Left on</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gone.map((p) => (
+                  <tr key={p.id}>
+                    <td>
+                      <span className="name-cell">
+                        <KindBadge kind={p.kind} agentType={p.agentType} />
+                        {p.displayName}
+                      </span>
+                    </td>
+                    <td>{p.title}</td>
+                    <td className="muted">{dayOf(p.leftAt ?? 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
 
       {agent && <AgentEditor office={office} agent={agent} providers={providers} adminOp={adminOp} />}
 

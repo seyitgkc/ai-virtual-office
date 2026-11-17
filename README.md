@@ -195,7 +195,12 @@ pricing, and a finance approval before a quote goes out.
 - **Many offices.** An account can add offices, switch between them and remove
   them. Each office is separate, and a new one starts empty.
 - **Invites.** Someone whose role may invite adds a person, who gets a desk
-  and sets their own password.
+  and sets their own password. There is no open sign-up: an account comes
+  from an invite link, or from the administrator settings of the deployment.
+- **Leaving.** A person who is removed loses their desk, their access and
+  their sign-in to that office. If they asked, answered or decided anything
+  there, their name stays on it, and what was meant for them goes to someone
+  who manages access.
 - **Settings.** Rooms, people and agents, roles and their permissions, access
   rules and AI providers are all set up in the interface, each behind its own
   permission.
@@ -411,7 +416,7 @@ belong to your account, whichever office you are in, come after.
 | Records | Manage rooms | Edit the records kept in each room you can read, one fact per line. A line from a task's thread can also be kept as a record straight from the task panel. |
 | Connected systems | Manage rooms | See each connected system with the room it is operated from and what agents can do in it. Show what it holds right now. Connect a system, reword what agents are told about it, choose further rooms that are shown its records, and choose whether each action waits for approval. |
 | Standing work | Manage the office | Set up a request the office files by itself every day, every weekday or every week, with its title, details and whether it is urgent. Pause one, remove one, or file it now. Not available in the demo office. |
-| People and agents | Manage people and agents | Add an AI agent or a playbook agent with a desk and a role. An agent added with no name is given one that nobody in the office has. Choose an agent's provider and model, or write its playbook. Rename anyone, change their role, or move their desk. Remove someone who has no history. |
+| People and agents | Manage people and agents | Add an AI agent or a playbook agent with a desk and a role. An agent added with no name is given one that nobody in the office has. Choose an agent's provider and model, or write its playbook. Rename anyone, change their role, or move their desk. Remove an agent that has no history. Remove a person: their sign-in to this office ends at once, and if the office's record names them they are listed under *People who have left* with their name kept on that work. A person who still owns open work has to hand it over first. |
 | Roles and access | Manage roles | Three parts under one page. Roles: add, rename or remove a role. Permissions: tick what each role held by people may do. Room access: Tick allow or deny for each scope in each room, or set a whole row in one choice: work here, look in, walk through, keep out or not set. |
 | Access rules | Manage access | See every individual rule in a table and revoke one. Add rules for a person or agent by ticking cells and giving a reason. |
 | AI providers | Manage AI providers | Add, edit, test and remove the office's own providers. Each holds a type, a default model and an API key. See which providers people have brought in from their accounts. |
@@ -1315,6 +1320,7 @@ erDiagram
     text display_name
     text role_id FK
     text desk_id FK
+    int left_at "set when a person has left"
   }
   access_rules {
     text id PK
@@ -1914,6 +1920,9 @@ playbook.
   session's seat, and ids from another office are treated as not existing.
 - Demo access cannot add offices, cannot remove the demo office and cannot
   store an API key.
+- A person removed from an office cannot sign in to it from that moment. An
+  open session of theirs falls back to another office they have a seat in, or
+  to none.
 - The signing key comes from `AUTH_SECRET`, or is generated once and kept
   beside the database with owner-only permissions.
 - The container runs as a non-root user on a read-only filesystem, with one
@@ -1977,8 +1986,10 @@ playbook.
   database.
 - Rooms are rectangles placed along a corridor or against an existing room's
   wall. A room cannot be moved or resized once it exists.
-- A person or agent who appears in tasks or messages cannot be removed until
-  the work is cleared.
+- An agent that appears in tasks or messages cannot be removed until the work
+  is cleared. A person in the same position is kept in the record as having
+  left, and cannot be brought back: inviting them again gives them a new desk
+  and a second entry under the same name.
 - On a phone the interface shows one section at a time, chosen from a bar at
   the bottom, and walking is unavailable because it needs a keyboard. Settings
   tables scroll sideways there, and an office of more than four or five rooms
@@ -2115,8 +2126,8 @@ of the three with a database file starts sample services the same way.
 | Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
 | What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, a need passed to a colleague, documents on a task, earlier work shown within an agent's access, records kept from a thread, the report, ids replaced by names in what an agent writes, and tasks named by number | `npm run agents` | 200 of 200 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 56 of 56 pass |
-| Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, and an office built from nothing | `npm run admin` | 101 of 101 pass |
-| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, removal | `npm run offices` | 87 of 87 pass |
+| Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, a person leaving, and an office built from nothing | `npm run admin` | 125 of 125 pass |
+| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, a person leaving and losing their sign-in, removal | `npm run offices` | 103 of 103 pass |
 | The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, an invoice voided, a rejected task whose order is cancelled in the storefront, and resetting the demo | `npm run systems` | 171 of 171 pass |
 | Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, work that is written down and picked up after a failure or a restart, urgent work first, standing work, who is on a task, a rejected task wound up between clicks and after a restart, providers that belong to an account, and the sample office | `npm run loop` | 118 of 118 pass |
 | A rejected task that had placed orders: the question to the person, each thing taken back by the agent that did it, refusals, an agent stopped from naming another task's record, playbook agents, and systems that hold actions for approval | `npm run windup` | 61 of 61 pass |

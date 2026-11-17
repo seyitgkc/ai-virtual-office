@@ -12,6 +12,7 @@ import {
   canOwnWorkIn,
   canRead,
   DOCUMENT_LIMITS,
+  inOffice,
   may,
   resolveAccess,
   type AccessContext,
@@ -56,6 +57,7 @@ export function authorize(
   action: Action,
 ): Verdict {
   if (actor.kind !== "human") return no("Only people can take these actions.");
+  if (!inOffice(actor)) return no("You have left this office.");
 
   switch (action.type) {
     case "SUBMIT_REQUEST":

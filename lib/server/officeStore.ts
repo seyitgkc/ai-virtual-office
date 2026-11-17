@@ -242,7 +242,7 @@ export function writeParticipant(db: Db, officeId: string, p: Participant): void
     run(
       db,
       `UPDATE participants
-          SET kind = ?, display_name = ?, title = ?, role_id = ?, desk_id = ?, color = ?
+          SET kind = ?, display_name = ?, title = ?, role_id = ?, desk_id = ?, color = ?, left_at = ?
         WHERE id = ?`,
       p.kind,
       p.displayName,
@@ -250,14 +250,15 @@ export function writeParticipant(db: Db, officeId: string, p: Participant): void
       p.roleId,
       p.deskId,
       p.appearance.color,
+      p.leftAt ?? null,
       p.id,
     );
   } else {
     run(
       db,
       `INSERT INTO participants
-         (id, office_id, position, kind, display_name, title, role_id, desk_id, color)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, office_id, position, kind, display_name, title, role_id, desk_id, color, left_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       p.id,
       officeId,
       nextPosition(db, "participants"),
@@ -267,6 +268,7 @@ export function writeParticipant(db: Db, officeId: string, p: Participant): void
       p.roleId,
       p.deskId,
       p.appearance.color,
+      p.leftAt ?? null,
     );
   }
   run(db, "DELETE FROM participant_capabilities WHERE participant_id = ?", p.id);
@@ -1248,6 +1250,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     role_id: string;
     desk_id: string | null;
     color: string;
+    left_at: number | null;
   }>(db, "SELECT * FROM participants WHERE office_id = ? ORDER BY position", officeRow.id).map((p) => ({
     id: p.id,
     kind: p.kind,
@@ -1259,6 +1262,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     ...agentFields(p.id, p.kind),
     playbook: playbookOf(p.id),
     appearance: { color: p.color },
+    ...(p.left_at !== null ? { leftAt: p.left_at } : {}),
   }));
 
   // -- rules

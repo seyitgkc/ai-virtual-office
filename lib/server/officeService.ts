@@ -27,6 +27,7 @@ import { initialState } from "../initialState";
 import { statusReply } from "../agentState";
 import {
   may,
+  inOffice,
   PERMISSION_INFO,
   resolveAccess,
   type AccessContext,
@@ -137,7 +138,7 @@ const slug = (name: string): string =>
 /** Every person in the demo office gets a password-free demo sign-in. */
 function ensureDemoAccounts(db: Db, office: Office): void {
   for (const p of office.participants) {
-    if (p.kind !== "human" || userByParticipant(db, p.id)) continue;
+    if (p.kind !== "human" || !inOffice(p) || userByParticipant(db, p.id)) continue;
     const wanted = `${slug(p.displayName)}@office.test`;
     const email = userByEmail(db, wanted) ? `${slug(p.displayName)}.${randomUUID().slice(0, 6)}@office.test` : wanted;
     const user = createUser(db, { email, displayName: p.displayName, password: null });
@@ -1372,7 +1373,9 @@ function describeAdminOp(op: AdminOp, before: Office, after: Office, actor: Part
     case "SET_ROLE_PERMISSION":
       return `${who} ${op.allowed ? "gave" : "took away"} the "${PERMISSION_INFO[op.permission].label}" permission ${op.allowed ? "to" : "from"} the role ${quoted(after, op.roleId)}`;
     case "REMOVE_PARTICIPANT":
-      return `${who} removed ${quoted(before, op.participantId)} from the office`;
+      return after.participants.some((p) => p.id === op.participantId)
+        ? `${who} removed ${quoted(before, op.participantId)} from the office. They stay in its record and can no longer sign in to it`
+        : `${who} removed ${quoted(before, op.participantId)} from the office`;
     case "ADD_ROLE":
       return `${who} added the role ${op.name.trim()}`;
     case "UPDATE_ROLE":
@@ -1409,51 +1412,86 @@ export function applyAdminOperation(session: Session, op: AdminOp): Promise<Offi
       throw new OfficeError(403, "You cannot read that room, so you cannot change its records.");
     }
 
-    let office: Office;
+    // Removing a person happens at a time the office sets, never the browser.
+    const asked: AdminOp =
+      op.type === "REMOVE_PARTICIPANT" ? { type: op.type, participantId: op.participantId, at: before.now } : op;
     try {
-      office = applyAdminOp(
-        before.office,
-        op,
-        actor.id,
-        () => randomUUID().slice(0, 8),
-        // Providers this person may hand out, plus any an agent already runs
-        // on, so an unrelated edit to that agent is not refused.
-        new Set([
-          ...providerIds(db, before.office.id, session.userId, may(before.office, actor, "use_shared_providers")),
-          ...before.office.participants.flatMap((p) => (p.providerId ? [p.providerId] : [])),
-        ]),
-      );
+      changeSetup(db, session, before, actor, asked);
     } catch (error) {
-      if (error instanceof AdminError) throw new OfficeError(409, error.message);
-      throw error;
-    }
-    const after: EngineState = { ...before, office };
-
-    try {
-      transaction(db, () => {
-        saveEngineState(db, before, after);
-        if (isDemoOffice(after.office.id)) ensureDemoAccounts(db, after.office);
-        syncAccessTokens(db);
-        recordAudit(db, {
-          officeId: after.office.id,
-          officeClock: after.now,
-          actorId: actor.id,
-          actionType: op.type,
-          subject: { ...NO_SUBJECT, subjectParticipantId: "participantId" in op ? op.participantId : null },
-          notes: [describeAdminOp(op, before.office, after.office, actor)],
-        });
-      });
-    } catch (error) {
+      if (!(error instanceof StillReferred)) throw error;
       // The database keeps records the in-memory office does not see, such as
-      // audit entries. A constraint failure means one of them still refers to
-      // what was being removed.
-      if (error instanceof Error && /constraint/i.test(error.message)) {
-        throw new OfficeError(409, "That cannot be removed: the office's audit log still refers to it.");
+      // audit entries and conversations. A person one of them still names
+      // leaves the office and stays in its record. Nothing else can be kept
+      // that way.
+      const person =
+        asked.type === "REMOVE_PARTICIPANT" &&
+        before.office.participants.some((p) => p.id === asked.participantId && p.kind === "human");
+      if (!person) throw error.refusal();
+      try {
+        changeSetup(db, session, before, actor, { ...asked, keep: true });
+      } catch (again) {
+        throw again instanceof StillReferred ? again.refusal() : again;
       }
-      throw error;
     }
     return buildView(db, loadOffice(db, session), session);
   });
+}
+
+/** Thrown when the database still holds a row that names what was being removed. */
+class StillReferred extends Error {
+  refusal(): OfficeError {
+    return new OfficeError(409, "That cannot be removed: the office's audit log still refers to it.");
+  }
+}
+
+/** Work out one change to the office's set-up and store it with its audit entry. */
+function changeSetup(db: Db, session: Session, before: EngineState, actor: Participant, op: AdminOp): void {
+  let office: Office;
+  try {
+    office = applyAdminOp(
+      before.office,
+      op,
+      actor.id,
+      () => randomUUID().slice(0, 8),
+      // Providers this person may hand out, plus any an agent already runs
+      // on, so an unrelated edit to that agent is not refused.
+      new Set([
+        ...providerIds(db, before.office.id, session.userId, may(before.office, actor, "use_shared_providers")),
+        ...before.office.participants.flatMap((p) => (p.providerId ? [p.providerId] : [])),
+      ]),
+    );
+  } catch (error) {
+    if (error instanceof AdminError) throw new OfficeError(409, error.message);
+    throw error;
+  }
+  const after: EngineState = { ...before, office };
+  const wasPresent = new Set(before.office.participants.filter(inOffice).map((p) => p.id));
+
+  try {
+    transaction(db, () => {
+      saveEngineState(db, before, after);
+      // Someone who has just left can no longer sign in to this office, and
+      // an invite link that was waiting for them stops working.
+      for (const p of after.office.participants) {
+        if (inOffice(p) || !wasPresent.has(p.id)) continue;
+        run(db, "DELETE FROM memberships WHERE participant_id = ?", p.id);
+        run(db, "DELETE FROM invites WHERE participant_id = ? AND accepted_at IS NULL", p.id);
+      }
+      if (isDemoOffice(after.office.id)) ensureDemoAccounts(db, after.office);
+      syncAccessTokens(db);
+      recordAudit(db, {
+        officeId: after.office.id,
+        officeClock: after.now,
+        actorId: actor.id,
+        actionType: op.type,
+        subject: { ...NO_SUBJECT, subjectParticipantId: "participantId" in op ? op.participantId : null },
+        notes: [describeAdminOp(op, before.office, after.office, actor)],
+      });
+    });
+  } catch (error) {
+    if (error instanceof Error && /constraint/i.test(error.message)) throw new StillReferred(error.message);
+    throw error;
+  }
 }
 
 /** Where a provider is kept: in the office being viewed, or in the signed-in account. */
@@ -1600,6 +1638,7 @@ export async function sendDirectMessage(session: Session, toId: string, said: st
     const other = office.participants.find((p) => p.id === toId);
     if (!other) throw new OfficeError(404, "That person or agent is not in this office.");
     if (other.id === sender.id) throw new OfficeError(400, "You cannot send a message to yourself.");
+    if (!inOffice(other)) throw new OfficeError(409, `${other.displayName} has left the office.`);
     const body = said.trim();
     if (body.length === 0 || body.length > 600) throw new OfficeError(400, "Write a message of up to 600 characters.");
 
@@ -1910,7 +1949,7 @@ function fileStanding(
 
     const last = row.last_task_id ? before.office.tasks.find((t) => t.id === row.last_task_id) : undefined;
     if (last && last.closedAt === null) return skip(`the last one, ${last.id}, is still open.`);
-    const filer = before.office.participants.find((p) => p.id === row.created_by && p.kind === "human");
+    const filer = before.office.participants.find((p) => p.id === row.created_by && p.kind === "human" && inOffice(p));
     if (!filer) return skip("the person it was filed for is no longer in the office. It has been paused.", true);
     const action: Action = {
       type: "SUBMIT_REQUEST",

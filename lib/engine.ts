@@ -41,8 +41,9 @@ import {
   ANY_ROOM,
   canOwnWorkIn,
   canRead,
+  inOffice,
+  may,
   resolveAccess,
-  roleMay,
   type AccessContext,
   type AccessScope,
   type AccessDecision,
@@ -447,6 +448,20 @@ export function roomOf(office: Office, p: Participant): RoomId | null {
   return desk ? desk.roomId : null;
 }
 
+/**
+ * Who something meant for one person goes to. That person, unless they have
+ * left the office: then someone who manages access, or failing that any
+ * person still there.
+ */
+export function standIn(office: Office, id: ParticipantId): ParticipantId {
+  const meant = office.participants.find((p) => p.id === id);
+  if (!meant || inOffice(meant)) return id;
+  const other =
+    office.participants.find((p) => p.kind === "human" && may(office, p, "manage_access")) ??
+    office.participants.find((p) => p.kind === "human" && inOffice(p));
+  return other?.id ?? id;
+}
+
 /** Everyone who could legitimately own work in this room. Drives the "Hand to" buttons. */
 export function eligibleOwners(
   office: Office,
@@ -686,8 +701,8 @@ export async function reduce(
 
       if (!carrier) {
         const supervisor =
-          office.participants.find((p) => p.kind === "human" && roleMay(office.roles[p.roleId], "manage_access")) ??
-          office.participants.find((p) => p.kind === "human");
+          office.participants.find((p) => p.kind === "human" && may(office, p, "manage_access")) ??
+          office.participants.find((p) => p.kind === "human" && inOffice(p));
         const escalation: Message = {
           id: nextId("m"),
           kind: "escalation",
@@ -1406,7 +1421,7 @@ function deedQuestion(
     kind: "question",
     taskId: task.id,
     fromId: owner?.kind === "agent" ? owner.id : "system",
-    audience: { to: "participant", id: toId },
+    audience: { to: "participant", id: standIn(office, toId) },
     roomId: task.roomId,
     at: now,
     body,
@@ -1561,8 +1576,8 @@ async function windUp(
     }
     if (system.needsApproval) {
       const approver =
-        office.participants.find((p) => p.kind === "human" && roleMay(office.roles[p.roleId], "manage_access")) ??
-        office.participants.find((p) => p.kind === "human");
+        office.participants.find((p) => p.kind === "human" && may(office, p, "manage_access")) ??
+        office.participants.find((p) => p.kind === "human" && inOffice(p));
       if (!approver) {
         answer(`${system.name} holds every action for approval and there is nobody to approve it, so ${deed.message.did.record} stands.`);
         continue;
@@ -1748,7 +1763,7 @@ async function runAgent(
       records: mayRead(room.id) ? room.records : [],
     })),
     people: office.participants
-      .filter((p) => p.kind === "human")
+      .filter((p) => p.kind === "human" && inOffice(p))
       .map((p) => ({ id: p.id, displayName: p.displayName, title: p.title })),
     colleagues: office.participants
       .filter((p) => p.kind === "agent" && p.id !== participant.id)
@@ -1872,7 +1887,7 @@ async function runAgent(
       kind: "question",
       taskId: task.id,
       fromId: participant.id,
-      audience: { to: "participant", id: draft.toParticipantId },
+      audience: { to: "participant", id: standIn(office, draft.toParticipantId) },
       roomId: task.roomId,
       at: now,
       body: draft.body,
@@ -1947,8 +1962,8 @@ async function runAgent(
     if (verdict.effect === "allow") continue;
 
     const supervisor =
-      office.participants.find((p) => p.kind === "human" && roleMay(office.roles[p.roleId], "manage_access")) ??
-      office.participants.find((p) => p.kind === "human");
+      office.participants.find((p) => p.kind === "human" && may(office, p, "manage_access")) ??
+      office.participants.find((p) => p.kind === "human" && inOffice(p));
     // Someone to hand the work to must hold the access and be able to carry
     // the task into its next room, which is what a reassignment requires.
     const onward = nextStage(task.stage);
@@ -2005,7 +2020,8 @@ async function runAgent(
   // It is done when the halt is cleared and the agent takes the step again.
   // A note goes to one person or agent who is in the office. An agent's own
   // notes are written even when the step is halted, because they ask for nothing.
-  const tell = (toId: ParticipantId, body: string): void => {
+  const tell = (meantFor: ParticipantId, body: string): void => {
+    const toId = standIn(office, meantFor);
     const text = body.trim();
     if (!text || toId === participant.id || !office.participants.some((p) => p.id === toId)) return;
     if (said.has(`note:${text}`) || emitted.some((m) => m.kind === "note" && m.body === text)) return;
@@ -2064,8 +2080,8 @@ async function runAgent(
         const body = `May I ${(operation?.label ?? call.operation).toLowerCase()} in ${call.system.name}? ${details}.`;
         if (said.has(`question:${body}`) || emitted.some((m) => m.kind === "question" && m.body === body)) continue;
         const approver =
-          office.participants.find((p) => p.kind === "human" && roleMay(office.roles[p.roleId], "manage_access")) ??
-          office.participants.find((p) => p.kind === "human");
+          office.participants.find((p) => p.kind === "human" && may(office, p, "manage_access")) ??
+          office.participants.find((p) => p.kind === "human" && inOffice(p));
         if (!approver) continue;
         const ask: Message = {
           id: nextId("m"),

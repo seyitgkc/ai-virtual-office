@@ -6,6 +6,7 @@ import {
   ALL_SCOPES,
   DOCUMENT_LIMITS,
   hasConflict,
+  inOffice,
   may,
   resolveAccess,
   type AccessContext,
@@ -820,7 +821,10 @@ function TaskInspector({
             </div>
             <div className="kv">
               <span>Requested by</span>
-              <span>{name(task.requestedById)}</span>
+              <span>
+                {name(task.requestedById)}
+                {office.participants.some((p) => p.id === task.requestedById && !inOffice(p)) ? " (left the office)" : ""}
+              </span>
             </div>
           </div>
           {atWork.length > 0 && (
@@ -1327,6 +1331,7 @@ function TalkBox({
   focus: number;
   onSend: (body: string) => Promise<boolean>;
 }) {
+  const gone = !inOffice(other);
   const [text, setText] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
   const end = useRef<HTMLDivElement>(null);
@@ -1349,7 +1354,7 @@ function TalkBox({
 
   return (
     <div className="sec">
-      <h3>{isAgent ? `Talk to ${other.displayName}` : `Message ${other.displayName}`}</h3>
+      <h3>{isAgent ? `Talk to ${other.displayName}` : gone ? `Messages with ${other.displayName}` : `Message ${other.displayName}`}</h3>
       {isAgent && cannotEnter ? (
         <div className="empty">
           You cannot enter {cannotEnter}, so you cannot talk to {other.displayName} at their desk.
@@ -1358,7 +1363,9 @@ function TalkBox({
         <>
           {lines.length === 0 ? (
             <div className="empty">
-              {!isAgent
+              {gone
+                ? `You and ${other.displayName} did not write to each other.`
+                : !isAgent
                 ? `Write to ${other.displayName}. Only the two of you can read it.`
                 : other.agentType === "ai"
                   ? `Ask ${other.displayName} about its work or what it can see. It answers from what you may both read, and changes nothing.`
@@ -1375,8 +1382,10 @@ function TalkBox({
               <div ref={end} />
             </div>
           )}
+          {gone && <div className="empty">{other.displayName} has left the office, so nothing more can be sent.</div>}
           <form
             className="answer-box"
+            hidden={gone}
             onSubmit={(e) => {
               e.preventDefault();
               send();
@@ -1495,6 +1504,12 @@ function ParticipantInspector({
               <span>Role</span>
               <span>{role ? role.name : participant.roleId}</span>
             </div>
+            {participant.leftAt !== undefined && (
+              <div className="kv">
+                <span>Left the office</span>
+                <span>{dayOf(participant.leftAt)}</span>
+              </div>
+            )}
             {participant.kind === "agent" && participant.agentType === "ai" && (
               <div className="kv">
                 <span>Model</span>
@@ -1516,14 +1531,16 @@ function ParticipantInspector({
           </div>
         </div>
 
-        <div className="sec">
-          <h3>Right now</h3>
-          <div className="desk-state" data-tone={desk.tone}>
-            <strong>{desk.headline}</strong>
-            {desk.task && <span> · {taskLabel(office, desk.task.id)}</span>}
+        {inOffice(participant) && (
+          <div className="sec">
+            <h3>Right now</h3>
+            <div className="desk-state" data-tone={desk.tone}>
+              <strong>{desk.headline}</strong>
+              {desk.task && <span> · {taskLabel(office, desk.task.id)}</span>}
+            </div>
+            <div style={{ fontSize: 11.5, opacity: 0.75, marginTop: 4 }}>{desk.detail}</div>
           </div>
-          <div style={{ fontSize: 11.5, opacity: 0.75, marginTop: 4 }}>{desk.detail}</div>
-        </div>
+        )}
 
         {participant.id !== viewer.id && (
           <TalkBox

@@ -111,7 +111,16 @@ export interface Participant {
   /** Playbook agents: their steps, in order. Empty for everyone else. */
   playbook: PlaybookStep[];
   appearance: { color: string };
+  /**
+   * Set when a person has left the office. They stay in the record, so their
+   * requests, answers and decisions still carry a name, but they hold no desk,
+   * no access and no sign-in, and nothing new is addressed to them.
+   */
+  leftAt?: number;
 }
+
+/** True for someone who is in the office now, false for a person who has left it. */
+export const inOffice = (p: Participant): boolean => p.leftAt === undefined;
 
 // ---------------------------------------------------------------------------
 // Space
@@ -366,16 +375,18 @@ export function resolveAccess(
   ctx: AccessContext,
 ): AccessDecision {
   const candidates: DecisionSource[] = [];
+  // Someone who has left holds nothing: no rule and no grant counts for them.
+  const present = inOffice(participant);
 
   for (const rule of ctx.rules) {
-    if (rule.participantId !== participant.id) continue;
+    if (!present || rule.participantId !== participant.id) continue;
     if (!matchesRoom(rule.room, room)) continue;
     if (!rule.scopes.includes(scope)) continue;
     if (!isRuleLive(rule, ctx)) continue;
     candidates.push({ kind: "individual", ruleId: rule.id, effect: rule.effect });
   }
 
-  const role = ctx.roles[participant.roleId];
+  const role = present ? ctx.roles[participant.roleId] : undefined;
   if (role) {
     role.grants.forEach((grant, grantIndex) => {
       if (!matchesRoom(grant.room, room)) return;
@@ -728,4 +739,4 @@ export function canOwnWorkIn(
 
 /** May this participant do this, by the permissions of their role? */
 export const may = (office: Office, participant: Participant, permission: Permission): boolean =>
-  roleMay(office.roles[participant.roleId], permission);
+  inOffice(participant) && roleMay(office.roles[participant.roleId], permission);

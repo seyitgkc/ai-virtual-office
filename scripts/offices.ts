@@ -205,6 +205,36 @@ async function main(): Promise<void> {
   robinView = service.getView(await robin.read());
   expect("someone who invites can see the office's sign-in accounts", robinView.accounts.length > 0, true);
 
+  console.log("\n-- a person leaves the office --");
+  // Robin changed the office's set-up, so the audit log names them.
+  const robinId = robinSeat.participantId;
+  const friendId = robinView.office.participants.find((p) => p.displayName === "Friend")!.id;
+  expect("an invite is waiting for the friend", count("SELECT COUNT(*) AS n FROM invites WHERE participant_id = ?", friendId), 1);
+  view = await service.applyAdminOperation(await owner.read(), { type: "REMOVE_PARTICIPANT", participantId: friendId });
+  expect("a person nothing refers to is deleted outright", view.office.participants.some((p) => p.id === friendId), false);
+  expect("and their invite with them", count("SELECT COUNT(*) AS n FROM invites WHERE participant_id = ?", friendId), 0);
+  view = await service.applyAdminOperation(await owner.read(), { type: "REMOVE_PARTICIPANT", participantId: robinId });
+  const robinAfter = view.office.participants.find((p) => p.id === robinId);
+  expect("a person the records name stays in the office's record", robinAfter?.displayName, "Robin Park");
+  expect("marked as having left", typeof robinAfter?.leftAt, "number");
+  expect("with no desk", robinAfter?.deskId, null);
+  expect("their sign-in to this office is gone", view.accounts.some((a) => a.participantId === robinId), false);
+  expect("their account has no seat", auth.seatsOf(db, auth.userByEmail(db, "robin@example.test")!.id).length, 0);
+  expect("their open session is left with no office", (await robin.read()).officeId, null);
+  expect("and is refused a view", await refusal(async () => service.getView(await robin.read())), 409);
+  expect("the account itself still signs in", auth.authenticate(db, "robin@example.test", robinPassword) !== null, true);
+  expect("nobody can write to them", await refusal(async () => service.sendDirectMessage(await owner.read(), robinId, "Are you there?")), 409);
+  expect("removing them again is refused", await refusal(async () => service.applyAdminOperation(await owner.read(), { type: "REMOVE_PARTICIPANT", participantId: robinId })), 409);
+  expect(
+    "the audit log says what happened",
+    (all(db, "SELECT note FROM audit_notes ORDER BY rowid DESC LIMIT 1") as { note: string }[])[0]?.note.includes("can no longer sign in"),
+    true,
+  );
+  const again = invites.createInvite(await owner.read(), { displayName: "Robin Park", title: "Manager", roleId: managerRole, roomId: mainRoom });
+  await invites.acceptInvite(again.path!.split("/").pop()!, "robin@example.test", robinPassword);
+  expect("invited again, the same account takes a new seat", auth.seatsOf(db, auth.userByEmail(db, "robin@example.test")!.id).length, 1);
+  expect("the office then shows both the old and the new Robin", service.getView(await owner.read()).office.participants.filter((p) => p.displayName === "Robin Park").length, 2);
+
   console.log("\n-- removing offices --");
   const participantsBefore = count("SELECT COUNT(*) AS n FROM participants WHERE office_id = ?", second.officeId);
   expect("the office has rows before removal", participantsBefore > 0, true);

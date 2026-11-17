@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { stageSpec } from "../lib/engine";
-import type { Message, Office, Participant, Task } from "../lib/model";
+import { inOffice, type Message, type Office, type Participant, type Task } from "../lib/model";
 import type { OfficeView } from "../lib/view";
 import { KindBadge } from "./Panels";
 import { taskLabel, withTaskLabels } from "../lib/taskLabels";
@@ -109,7 +109,7 @@ export function Inbox({
     const last = [...view.directs].reverse().find((line) => line.withId === id);
     return other && last ? [{ other, last, unread: view.unread.directs[id] ?? 0 }] : [];
   });
-  const others = office.participants.filter((p) => p.id !== viewer.id);
+  const others = office.participants.filter((p) => p.id !== viewer.id && inOffice(p));
   const [startWith, setStartWith] = useState(others[0]?.id ?? "");
 
   return (

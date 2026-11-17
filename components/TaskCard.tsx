@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { atWorkOn, type AgentLoad } from "../lib/agentState";
 import { dayOf, stageSpec } from "../lib/engine";
-import type { Office, Participant, Task, TaskStatus } from "../lib/model";
+import { inOffice, type Office, type Participant, type Task, type TaskStatus } from "../lib/model";
 import { taskLabel, withTaskLabels } from "../lib/taskLabels";
 
 /**
@@ -77,8 +77,12 @@ export function TaskCard({
   isOpen: boolean;
   onOpen: () => void;
 }) {
-  const name = (id: string): string =>
-    id === "system" ? "The office" : (office.participants.find((p) => p.id === id)?.displayName ?? "Someone");
+  const name = (id: string): string => {
+    if (id === "system") return "The office";
+    const person = office.participants.find((p) => p.id === id);
+    // Someone who has left keeps their name on what they took part in.
+    return person ? `${person.displayName}${inOffice(person) ? "" : " (left the office)"}` : "Someone";
+  };
   const owner = office.participants.find((p) => p.id === task.ownerId);
   const status = statusOf(task);
   const thread = office.messages.filter((m) => m.taskId === task.id);
