@@ -1,11 +1,11 @@
 # AI Virtual Office
 
-A 3D office where people and AI agents hold desks, roles and room permissions.
-Work moves from room to room and stops at the point where its owner lacks
-access or information, so a supervisor can see where to step in and why.
+A 3D office where people and AI agents work side by side. Everyone has a desk,
+a role and rooms they are allowed into. Work moves from room to room, and when
+it gets stuck you can see where and why.
 
-People sign in. What each person can see and do is decided on the server by
-the same access rules that govern the agents.
+People sign in. The server decides what each person can see and do, using the
+same access rules it applies to the agents.
 
 **Live demo:** https://office.example.invalid
 
@@ -13,24 +13,29 @@ the same access rules that govern the agents.
 
 ## In two minutes
 
-**What it is.** A browser-based 3D office where AI agents and people work
-side by side. Each has a desk, a role and a set of rooms they may enter, read
-and act in. A piece of work is filed as a request and moves from room to room:
-intake, planning, execution, review, completion. Each stage has an owner, a
-status and a visible handoff.
+**What it is.** A 3D office in the browser. Each agent and each person has a
+desk, a role, and a set of rooms they may enter, read and act in. Work comes in
+as a request and goes through five stages: intake, planning, execution, review
+and completion. Every stage has an owner and a status, and you can watch each
+handoff happen.
 
-**The idea.** The room is the permission boundary. An agent that needs
-something from a room it may not use has to stop and say so, and the stop has
-a place: the room turns red, and the screen names the rule that decided it. A
-supervisor does not read logs to find out why work is stuck. They look at the
-floor.
+**The idea.** A room is a permission boundary. If an agent needs something
+from a room it may not use, it has to stop and say so. The stop has a place:
+the room turns red, and the screen names the rule that decided it. To find
+out why work is stuck, a supervisor looks at the floor.
 
-**How a team uses it.** Someone files a request. Agents carry it forward and
-hand it on by themselves. A person is brought in at five points: when an
-agent asks a question, when it needs access it does not hold, when it wants
-to do something in an outside system that needs approval, at the final
-review, and after a rejection, to say what should happen to an order or a
-booking the task had already made. Everything else moves without a click.
+**How a team uses it.** Someone files a request. The agents carry it forward
+and hand it on by themselves. A person is needed at five points:
+
+- an agent asks a question;
+- an agent needs access it does not have;
+- an agent wants to do something in an outside system that needs approval;
+- the final review;
+- after a rejection, to say what happens to an order or a booking the task
+  had already made.
+
+Everything else moves without a click. A summary at the top of the screen
+says how much work is open and what is waiting for a person.
 
 **What to try first.**
 
@@ -45,12 +50,12 @@ booking the task had already made. Everything else moves without a click.
 5. Click **Walk the office** to go through it on foot. Enter as Sam instead
    to meet the doorways Sam may not pass.
 
-**What is real and what is not.** The access model, the workflow, sign-in,
-the database, the audit trail and the calls to the five sample services all
-run for real. The demo's agents follow written playbooks, and the screen says
-so. Real AI agents on a language model work too, in any office where a
-provider is connected, and have been run end to end on the deployed site. The
-business data is invented. The full list is under
+**What is real and what is not.** The access rules, the workflow, sign-in,
+the database, the audit trail and the calls to the five sample services are
+real and run on the server. The demo's agents follow written playbooks, and
+the screen says so. Agents on a real language model work too, in any office
+with a provider connected, and have been run end to end on the live site. The
+business data is made up. The full list is under
 [What is functional, simulated and proposed](#what-is-functional-simulated-and-proposed).
 
 ![On foot as Sam: the Finance doorway is closed by a red pane, because Sam's role may not enter that room](docs/walk.jpg)
@@ -76,18 +81,18 @@ business data is invented. The full list is under
 
 ## The problem
 
-When a team adds AI agents to its order flow, the question a manager has to
-answer changes. Whether the agent can do the work matters less than what the
-agent is allowed to see, and who decided that. Today the answer usually sits in
-configuration files that only engineering reads.
+When a team gives AI agents a part in its order flow, a manager's first
+question changes. It used to be whether the agent can do the work. Now it is
+what the agent is allowed to see, and who decided that. The answer usually
+lives in configuration files that only engineers read.
 
-This project puts the access policy on a floor plan. Every room is a permission
-boundary. An agent that needs pricing data held in Finance has to get through
-the Finance door. When the rules say no, the task stops in the room where it
-happened, the room turns red, and the inspector shows which rule decided it. A
+This project draws the access policy as a floor plan. Each room is a
+permission boundary. An agent that needs pricing data kept in Finance has to
+get through the Finance door. If the rules say no, the task stops in that
+room, the room turns red, and the task panel shows which rule decided it. A
 manager can walk through the office and point at the policy.
 
-Two consequences shape the whole system.
+Two things follow from that, and they shape the whole system.
 
 1. Access control is the orchestration mechanism. Work moves between rooms and
    rooms have permissions, so a permission failure is a visible event with a
@@ -1783,7 +1788,7 @@ The choices that shaped the product, each with what it cost.
 | Rooms are the permission boundary | A manager already understands "who is allowed in that room". Putting access on a floor plan makes a policy something you can point at. | Work has to be modelled as moving between rooms, which suits staged work better than free-form chat. |
 | A task halts only for a person-shaped reason | A question, missing access, an approval and the review are the four places where a person adds something an agent cannot. Halting anywhere else is noise. | Agents must settle everything else themselves, which took the notes between agents and the waiting loop to make work. |
 | The model is never the guard | A model is told its limits, and it is also never shown what it may not read, its reply is checked field by field, and an action is carried out only if the engine finds it allowed. | More code than trusting a prompt. It is why a planted instruction in a request cannot place an order by itself. |
-| The engine is a pure function | State and an action go in, a new state comes out. The whole workflow runs under Node without a browser, a server or a model, which is how 600 checks run in seconds. | Anything with a side effect (a model call, an outside system) has to be passed in from outside. |
+| The engine is a pure function | State and an action go in, a new state comes out. The whole workflow runs under Node without a browser, a server or a model, which is how more than a thousand checks run in seconds. | Anything with a side effect (a model call, an outside system) has to be passed in from outside. |
 | One interface for every kind of agent | A playbook agent and an AI agent answer through the same `AgentRuntime`. The demo runs with no model and no key, and switching an agent to a real model is a change of setting. | The interface has to stay narrow: one step in, one structured result out. |
 | Every exception is scoped and explained | A grant can be for one task and expires with it. Every decision names the rule that made it. | The resolver carries precedence and expiry rules that a simple allow-list would not need. |
 | Simulated things say so | The brief asks for honesty about what is real. Each agent is labelled AI or Playbook, and each playbook output is marked. | Nothing, beyond the discipline of keeping the labels true. |
@@ -2246,10 +2251,9 @@ fresh filesystem.
 
 ## Verification
 
-Every script runs under Node and nothing leaves the machine. Six use an
-in-memory database and three a temporary database file. Two need no
-database: one of them starts a stand-in model service on a local port. One
-of the three with a database file starts sample services the same way.
+Every check is a plain script that runs under Node and prints what it checks,
+one sentence a line. Nothing leaves the machine: where a script needs a model
+or an outside system, it starts a stand-in on a local port.
 
 | What | Command | Result |
 | --- | --- | --- |
@@ -2266,6 +2270,8 @@ of the three with a database file starts sample services the same way.
 | A rejected task that had placed orders, and taking them back | `npm run windup` | 61 of 61 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
+
+That is 1,158 checks.
 
 `npm run verify` runs all of the above except the build. The Docker image
 refuses to build unless it passes.
