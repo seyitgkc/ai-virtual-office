@@ -494,6 +494,48 @@ type SampleService = (typeof SAMPLE_SERVICES)[number];
 const sampleKey = (): string => process.env.DEMO_SYSTEMS_KEY?.trim() ?? "";
 const sampleUrl = (sample: SampleService): string => (process.env[sample.env]?.trim() ?? "").replace(/\/+$/, "");
 
+/** Where the server's sample services run, for those it has been told about. */
+const sampleUrls = (): Set<string> => new Set(SAMPLE_SERVICES.map(sampleUrl).filter((url) => url !== ""));
+
+/**
+ * The names of an office's connected systems that are the server's own
+ * sample services. Everything those hold is made up, and the office says so.
+ */
+export function mockServiceNames(db: Db, officeId: string): string[] {
+  const known = sampleUrls();
+  if (known.size === 0) return [];
+  return rows(db, officeId)
+    .filter((r) => known.has(r.base_url.replace(/\/+$/, "")))
+    .map((r) => r.name);
+}
+
+/**
+ * Ask every sample service to put its sample data back. They are shared by
+ * every office on this server that connects to them. Returns the services
+ * that could not be reached, which keep what they held.
+ */
+export async function resetSampleServices(): Promise<string[]> {
+  const key = sampleKey();
+  const missed: string[] = [];
+  await Promise.all(
+    SAMPLE_SERVICES.map(async (sample) => {
+      const url = sampleUrl(sample);
+      if (!url || key.length < 8) return;
+      try {
+        const response = await fetch(`${url}/v1/reset`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${key}` },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (!response.ok) missed.push(MANIFESTS[sample.service].name);
+      } catch {
+        missed.push(MANIFESTS[sample.service].name);
+      }
+    }),
+  );
+  return missed;
+}
+
 /**
  * Connect one sample service, or bring an existing connection up to date. Its
  * description and operations are read from the service's own source, so the

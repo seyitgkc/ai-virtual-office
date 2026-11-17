@@ -297,6 +297,33 @@ async function main(): Promise<void> {
   expect("no demo account was duplicated", auth.usersInOffice(db, service.DEMO_OFFICE_ID).length, 2);
   expect("no dangling references after the reset", all(db, "PRAGMA foreign_key_check").length, 0);
 
+  console.log("\n-- a reset puts the mock services back as well --");
+  expect("the office names the mock services it is connected to", demo.mockServices.length, 2);
+  expect("the storefront holds no orders after the reset", (await api(`${shopUrl}/v1/orders`)).data.orders.length, 0);
+  expect("and its stock is whole again", await stock("GREE-MZ-12", "Laval"), 120);
+  const placeDemoOrder = async (): Promise<string> => {
+    let seen = await service.applyAction(await dana(), { type: "GRANT_ACCESS", participantId: "p-quill", room: "finance", scopes: ["read"], effect: "allow", reason: "Dealer tier for this order", grantedBy: "", expiresOnTaskId: "T-1001" });
+    const held = seen.office.messages.find((m) => m.kind === "question" && m.taskId === "T-1001" && m.heldAction);
+    seen = await service.applyAction(await dana(), { type: "ANSWER_QUESTION", questionId: held!.id, answeredById: "", body: "Approve", chosenOption: "Approve" });
+    return seen.office.messages.filter((m) => m.taskId === "T-1001" && m.kind === "status" && m.body.startsWith("Storefront:")).at(-1)?.body ?? "";
+  };
+  expect("the demo's own order is placed", /^Storefront: placed order SO-\d+ for account NOR-0188/.test(await placeDemoOrder()), true);
+  await service.resetDemoOffice(await dana());
+  const afresh = await placeDemoOrder();
+  expect("after a reset the same request places it afresh", /^Storefront: placed order SO-\d+ for account NOR-0188/.test(afresh), true);
+  expect("and is not told it was already done", afresh.includes("already done"), false);
+  expect("so the storefront holds that one order", (await api(`${shopUrl}/v1/orders`)).data.orders.length, 1);
+  expect("a mock service asked to put its data back needs the key", (await api(`${shopUrl}/v1/reset`, "POST", undefined, { authorization: "Bearer wrong" })).status, 401);
+  await service.resetDemoOffice(await dana());
+  expect("with a service unreachable the office is reset all the same", await (async () => {
+    const kept = process.env.DEMO_CARRIER_URL;
+    process.env.DEMO_CARRIER_URL = "http://127.0.0.1:1";
+    await service.resetDemoOffice(await dana());
+    process.env.DEMO_CARRIER_URL = kept;
+    await service.resetDemoOffice(await dana());
+    return service.getView(await dana()).office.tasks.length;
+  })(), 3);
+
   console.log("\n-- an agent leaves a note for another agent --");
   demo = await service.applyAction(await dana(), { type: "GRANT_ACCESS", participantId: "p-quill", room: "finance", scopes: ["read"], effect: "allow", reason: "Dealer tier for this order", grantedBy: "", expiresOnTaskId: "T-1001" });
   const quillNote = demo.office.messages.find((m) => m.kind === "note" && m.taskId === "T-1001");
@@ -310,6 +337,7 @@ async function main(): Promise<void> {
   const owner = await sessionFor("owner@example.test", auth.seatsOf(db, admin.id)[0].participantId);
   let view = service.getView(await owner());
   expect("an office other than the demo cannot be reset", await refusal(async () => service.resetDemoOffice(await owner())), 403);
+  expect("an office connected to no mock service names none", view.mockServices.length, 0);
   const main = view.office.floorplan.rooms[0].id;
   view = await service.applyAdminOperation(await owner(), { type: "ADD_ROOM", name: "Warehouse", purpose: "Stock and orders", width: 8, depth: 8, attachTo: main, side: "east" });
   const warehouse = view.office.floorplan.rooms.find((r) => r.name === "Warehouse")!.id;

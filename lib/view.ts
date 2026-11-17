@@ -158,6 +158,8 @@ export interface OfficeView {
   agentLoad: AgentLoad;
   /** A sentence or two on what the office is doing, written from the work list. */
   briefing: Briefing;
+  /** The office's connected systems that are this server's mock services, by name. Their data is made up. */
+  mockServices: string[];
   accessTokens: TokenView[];
   /** Invitations nobody has accepted yet. Empty unless the viewer may invite. */
   invitations: InvitationView[];

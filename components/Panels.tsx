@@ -128,7 +128,10 @@ export function TitleCard({
   onReport,
   inboxCount,
   onInbox,
+  mockServices,
 }: {
+  /** The connected systems here that are mock services, by name. */
+  mockServices: string[];
   mode: "overview" | "walk";
   onToggleMode: () => void;
   viewer: OfficeView["viewer"];
@@ -147,6 +150,13 @@ export function TitleCard({
   inboxCount: number;
   onInbox: () => void;
 }) {
+  // Said wherever an office is connected to one, so nobody takes an order or an invoice there for a real one.
+  const mock = mockServices.length > 0 && (
+    <div className="mock-note">
+      <b>Mock services:</b> {mockServices.join(", ")}. All data in {mockServices.length === 1 ? "this service" : "these services"} is
+      simulated for demonstration.
+    </div>
+  );
   const who = (
     <div className="who">
       <div>
@@ -201,6 +211,7 @@ export function TitleCard({
         <button className="btn mode" onClick={onToggleMode}>
           Back to overview
         </button>
+        {mock}
         {who}
       </div>
     );
@@ -240,6 +251,7 @@ export function TitleCard({
       {isDemoOffice && (
         <div className="sim">The agents in this demo follow written playbooks. No model is connected.</div>
       )}
+      {mock}
       <button className="btn primary mode" onClick={onToggleMode}>
         Walk the office
       </button>

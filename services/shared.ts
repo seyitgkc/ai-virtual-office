@@ -143,7 +143,7 @@ export interface ServiceDefinition {
   operations: Record<string, (input: Json) => Done>;
   /** Further read-only endpoints, by path, for programs that want the data itself. */
   reads?: Record<string, (query: URLSearchParams) => unknown>;
-  /** Put the sample data back. Called once a day, so shared use does not wear it out. */
+  /** Put the sample data back. Called once a day and whenever the service is asked to, so shared use does not wear it out. */
   reset: () => void;
 }
 
@@ -174,6 +174,13 @@ export function serve(definition: ServiceDefinition): Server {
         const read = definition.reads?.[path];
         if (read) return send(response, 200, read(url.searchParams));
         throw new Refusal(404, "not_found", "No such endpoint.");
+      }
+
+      // Putting the sample data back also forgets which requests were already answered.
+      if (request.method === "POST" && path === "/v1/reset") {
+        answered = new Map();
+        definition.reset();
+        return send(response, 200, { ok: true, summary: "put the sample data back." });
       }
 
       for (const operation of manifest.operations) {

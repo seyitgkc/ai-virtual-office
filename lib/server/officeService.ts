@@ -95,10 +95,12 @@ import {
   connectSampleServices,
   ensureDemoSystems,
   liveRecords,
+  mockServiceNames,
   performInSystem,
   readSystem,
   rereadOperations,
   removeSystem,
+  resetSampleServices,
   checkSystem,
   storeSystem,
   SystemError,
@@ -404,6 +406,7 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
     agentLoad: agentLoad(office.id),
     // Written from the whole task list, which every member sees, and from nothing said in a room.
     briefing: briefingFor(db, state.office, agentLoad(office.id)),
+    mockServices: mockServiceNames(db, office.id),
     feed: feedFor(db, state, viewer),
     hiddenMessages,
     // Keys never leave the server. The list is for people who connect
@@ -2341,6 +2344,11 @@ export function resetDemoOffice(session: Session): Promise<{ ok: true }> {
       ensureDemoSystems(db, initialState.office);
       syncAccessTokens(db);
     });
+    // The demo's orders, bookings and invoices live in the mock services, so
+    // those are put back as well. Otherwise the next run of the same request
+    // is told its order was already placed. One that cannot be reached keeps
+    // what it held, and the office is reset all the same.
+    await resetSampleServices();
     return { ok: true };
   });
 }

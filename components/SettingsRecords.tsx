@@ -87,7 +87,7 @@ export function RecordsTab({
         title="Connected systems"
         hint={
           view.isDemoOffice
-            ? "Sample services run beside this office. Their connections are fixed here, and an order in the storefront waits for approval. An office of your own connects its own."
+            ? "Mock services run beside this office. Their connections are fixed here, and an order in the storefront waits for approval. An office of your own connects its own."
             : locked
               ? "Sign in with a password account to connect a system."
               : "Whoever may read the room a system is operated from sees its live records. Whoever may act there can use it."

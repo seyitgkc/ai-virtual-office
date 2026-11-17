@@ -208,6 +208,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           offices={view.offices}
           onSwitchOffice={(officeId) => officeOp({ operation: "switch", officeId })}
           isDemoOffice={view.isDemoOffice}
+          mockServices={view.mockServices}
           onSignOut={signOut}
           onSettings={() => {
             setSettingsTab(undefined);

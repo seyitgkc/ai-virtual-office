@@ -44,14 +44,14 @@ says how much work is open and what is waiting for a person.
 2. The dealer order **T-1** is halted at the Finance door. Click **Grant
    read on Finance, for this task only**.
 3. The agent asks whether it may place the order in the storefront. Click
-   **Approve**. A real order is placed in a sample storefront service, and
+   **Approve**. A real order is placed in the mock storefront, and
    the task moves to review by itself.
 4. Click **Approve** to complete it.
 5. Click **Walk the office** to go through it on foot. Enter as Sam instead
    to meet the doorways Sam may not pass.
 
 **What is real and what is not.** The access rules, the workflow, sign-in,
-the database, the audit trail and the calls to the five sample services are
+the database, the audit trail and the calls to the five mock services are
 real and run on the server. The demo's agents follow written playbooks, and
 the screen says so. Agents on a real language model work too, in any office
 with a provider connected, and have been run end to end on the live site. The
@@ -197,7 +197,7 @@ pricing, and a finance approval before a quote goes out.
   person writes in Settings, and can be connected to an outside system whose
   records are read live. `read` on the room shows both. `act` on the room lets
   an agent do something in the system, such as placing an order.
-- **Five sample services in the stack.** A storefront, a freight carrier, an
+- **Five mock services in the stack.** A storefront, a freight carrier, an
   accounts ledger, a supplier portal and a service desk run as their own
   containers beside the office. Each refuses what its real counterpart would,
   such as an invoice past a credit limit. The demo office is connected to all
@@ -577,7 +577,7 @@ being usable in an office once you no longer have a seat there.
 
 **A sample office.** Under *Offices*, *Add the sample office* creates the
 demo's distributor as an office of your own: the same five rooms, roles and
-records, the sample services where the server has them, five AI
+records, the mock services where the server has them, five AI
 agents on the provider you pick from your account, and you as its manager. It
 starts with no work. Unlike the public demo it is yours alone, so model calls
 are spent only by people you invite.
@@ -606,7 +606,7 @@ back, as cancelling an order takes back placing one. And an answer can give
 the number of the record it made or took back, such as SO-1001. With both,
 the office knows from its own record what a task did that still stands, and
 an agent asked to take something back can only name a record that task made.
-The five sample services are built this way:
+The five mock services are built this way:
 
 | Service | Live records | Operations | Refuses, for example |
 | --- | --- | --- | --- |
@@ -647,9 +647,10 @@ names what is missing and opens the Settings tab where it is done. Demo access c
 
 If the demo has been used and T-1 is no longer halted, open Settings, This
 office, and click **Reset the demo**. That puts back the seeded people, rules
-and three tasks for every visitor. The storefront is a separate service and
-keeps the order it already holds for T-1, so after a reset the thread
-reports that order as already placed until the storefront's own daily reset.
+and three tasks for every visitor. It also puts the mock services back to
+their starting data, so the order T-1 places is placed afresh each time. The
+mock services are shared by every office on the server that connects to them,
+so a reset clears what those offices did there as well.
 
 Enter as Dana. Task **T-1** is selected: a dealer order for six multi-zone
 heads. It has already moved through Reception, Planning and Fulfilment,
@@ -874,7 +875,7 @@ app/page.tsx              the office, for a signed-in person
 app/login, app/invite     sign-in and invite pages
 components/               3D scene, panels, settings, sign-in and invite forms
 scripts/                  eleven check scripts
-services/                 the five sample services, one folder each, with
+services/                 the five mock services, one folder each, with
                           what they share and what each says about itself
 Dockerfile, compose.yaml  container build and run of the office and the services
 ```
@@ -1820,7 +1821,7 @@ what exists, and what a real deployment would add.
 | State updates | Every change goes through the server, is checked against the person's permissions, stored, and written to the audit log. Browsers re-read every five seconds, or every second and a half while agents work. | Updates pushed to the browser over a WebSocket or server-sent events, so a change shows the moment it happens. |
 | Persistence | SQLite, with migrations that bring an older database forward on start. | Postgres, for more than one server process, point-in-time backups and row-level locking. The schema carries over as it is. |
 | Real AI | Working today: several providers per office or per account, a model per agent, structured replies that are validated, a retry on an unreadable reply, and limits enforced outside the model. | Streaming, so a long step shows progress. Per-office spending limits and usage reports. Tools an agent can call during a step, in place of a fixed snapshot of each system. |
-| Outside systems | Any service that describes itself, read and write, behind the room's access rules, with per-action approval and repeat-safe requests. Tested against five sample services. | Connectors for named products such as Shopify or an accounting package, and retries with backoff when a system is down. |
+| Outside systems | Any service that describes itself, read and write, behind the room's access rules, with per-action approval and repeat-safe requests. Tested against five mock services. | Connectors for named products such as Shopify or an accounting package, and retries with backoff when a system is down. |
 | Identity | Password accounts, sign-up, sessions, invites and a public demo sign-in. | Single sign-on, password reset by email, and two-factor sign-in. |
 | Operations | A container that checks itself before it builds, a health check, an audit log. | Metrics, alerting, log shipping and a staging environment. |
 
@@ -1849,7 +1850,7 @@ what exists, and what a real deployment would add.
   not read the room the answers were given in. The check scripts cover the
   same path against a stand-in service on the same machine.
 - Room records edited in Settings, and connected systems. The office calls the
-  sample services over HTTP with a stored key, reads their records live,
+  mock services over HTTP with a stored key, reads their records live,
   and places and cancels orders and shipments in them. In the demo office, the
   agent working a dealer order places it in the storefront once its halt for
   Finance is cleared, and the storefront's stock goes down. This was run on
@@ -1942,12 +1943,15 @@ what exists, and what a real deployment would add.
   demo says so on its title card and on its request form.
 - All business data: dealers, branches, stock, pricing tiers, people. The
   records in `lib/referenceData.ts` are invented.
-- The five sample services: storefront, freight carrier, accounts ledger,
+- The five mock services: storefront, freight carrier, accounts ledger,
   supplier portal and service desk. They are real HTTP services with keys,
   validation, refusals and repeat-safe requests, and the office talks to them
   as it would to any other. Their catalogue, stock, accounts and rates are
-  invented, and they keep their data in memory: it returns to the sample
-  state when a service restarts and once a day.
+  invented, and they keep their data in memory: it returns to its starting
+  state when a service restarts, once a day, and when the demo is reset. An
+  office connected to any of them says so on its title card, in every view:
+  *Mock services*, their names, and that all data in them is simulated for
+  demonstration.
 
 The stored data says which is which. Every agent is labelled as an AI agent or
 a playbook agent, and every output message records whether it came from a
@@ -1966,7 +1970,7 @@ playbook.
 
 - Adapters for named products such as Shopify, WooCommerce or an accounting
   package. Each would be a small service in front of the product that
-  describes it in the format the sample services use. The office itself
+  describes it in the format the mock services use. The office itself
   needs no change for a new system.
 - Lookups an AI agent chooses for itself during a step. Today it is shown a
   fixed snapshot of each system it may read.
@@ -2048,7 +2052,7 @@ playbook.
   address inside the server's own network: this machine, a private or
   link-local range, or a bare host name of the kind one container uses to
   reach another. A stranger's account could otherwise make the server call
-  services that were never published. The sample services are connected by
+  services that were never published. The mock services are connected by
   the server itself and are not affected. A private installation, with
   `SIGNUP=0` or `ALLOW_PRIVATE_ADDRESSES=1`, may name its own network, for a
   model running on the same machine for example. The check reads the address
@@ -2066,14 +2070,14 @@ playbook.
 - Winding up a rejected task rests on what each system says about itself. A
   system that does not say which operation takes another back, or gives no
   record numbers, leaves its part to the person. A payment recorded in the
-  sample ledger cannot be taken back by anyone here. A playbook agent takes
+  mock ledger cannot be taken back by anyone here. A playbook agent takes
   back only where the operation needs the record's number and nothing else,
   and it cannot follow an answer given in a person's own words. A rejection
   takes no reason: the reviewer's words go into the answer about what the
   task did, or into "Send back".
 - A task's number is its place among the office's tasks. Clearing all work
   starts the count again.
-- A connected system has to describe itself in the format the sample services
+- A connected system has to describe itself in the format the mock services
   use. No existing ordering, accounting or carrier system does, so each would
   need a small adapter in front of it, and none has been tried. A playbook's
   action has fixed field values.
@@ -2129,8 +2133,8 @@ playbook.
 
 ### What a real office has that this one lacks
 
-Five jobs were run through an office of five AI agents and five sample
-systems on the deployed site: orders with a credit check, freight and an
+Five jobs were run through an office of five AI agents and the five mock
+services on the deployed site: orders with a credit check, freight and an
 invoice, a factory order for a shortfall, a warranty call and a refused
 return. They completed with correct figures, and a person was asked only for
 what was theirs to decide. The same runs showed where the office stops short
@@ -2158,7 +2162,7 @@ Requires Node 24 or later, for the built-in SQLite module.
 npm install
 npm run dev       # http://localhost:3000
 npm run verify    # type check, then all eleven check scripts
-npm run services  # the five sample services, on ports 8081 to 8085
+npm run services  # the five mock services, on ports 8081 to 8085
 npm run build     # production server in .next/standalone
 ```
 
@@ -2167,7 +2171,7 @@ office in it. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` to get an account with its
 own empty office. Delete the `data` folder to start again.
 
 Started this way the demo office has no connected systems. To give it the
-sample services, run `npm run services` in a second terminal and start the
+mock services, run `npm run services` in a second terminal and start the
 office with `DEMO_SYSTEMS_KEY=local-systems-key` and one address per service:
 `DEMO_STOREFRONT_URL=http://127.0.0.1:8081`,
 `DEMO_CARRIER_URL=http://127.0.0.1:8082`,
@@ -2194,14 +2198,14 @@ All optional. See `.env.example`.
 | `ALLOW_PRIVATE_ADDRESSES` | unset | `1` lets a connected system or an AI provider sit at an address inside the server's own network while sign-up is on. |
 | `OFFICE_DB_PATH` | `./data/office.db` | Where the SQLite file lives. |
 | `ADMIN_NAME` | taken from the email | The administrator's display name. |
-| `DEMO_STOREFRONT_URL`, `DEMO_CARRIER_URL`, `DEMO_LEDGER_URL`, `DEMO_SUPPLIER_URL`, `DEMO_SERVICE_DESK_URL` | set by `compose.yaml` | Where the demo office and a sample office find each sample service. A service with no address is not connected. |
-| `DEMO_SYSTEMS_KEY` | `sample-systems-key` in `compose.yaml` | The key the office and the sample services share. |
+| `DEMO_STOREFRONT_URL`, `DEMO_CARRIER_URL`, `DEMO_LEDGER_URL`, `DEMO_SUPPLIER_URL`, `DEMO_SERVICE_DESK_URL` | set by `compose.yaml` | Where the demo office and a sample office find each mock service. A service with no address is not connected. |
+| `DEMO_SYSTEMS_KEY` | `sample-systems-key` in `compose.yaml` | The key the office and the mock services share. |
 
 ### Docker
 
 The stack is six containers. The office image runs the checks, builds the
 server, and runs it as a non-root user on port 8080, with its data on a named
-volume. Each of the five sample services runs from its own file and two shared
+volume. Each of the five mock services runs from its own file and two shared
 ones, with no dependencies, also as a non-root user.
 
 ```bash
@@ -2234,7 +2238,7 @@ office builds from `Dockerfile` on every push to `main`. Each service builds
 from `services/Dockerfile` with the build argument `SERVICE`, has `PORT` and
 `API_KEY` in its environment, and is set to watch `services/**`, so it is
 rebuilt and restarted only by a push that changes something in that folder.
-A service keeps its data in memory, so a restart puts its sample data back,
+A service keeps its data in memory, so a restart puts its starting data back,
 and without that setting every push to the office would do so. No service has a domain, so only the office
 reaches them, by their internal names on Dokploy's network.
 
@@ -2265,13 +2269,13 @@ or an outside system, it starts a stand-in on a local port.
 | Playbook steps, and AI agents through both provider interfaces against stand-in services | `npm run providers` | 56 of 56 pass |
 | Set-up changes and their refusals, permissions, playbooks, rooms, a person leaving, an office built from nothing | `npm run admin` | 125 of 125 pass |
 | Several offices in one database: isolation, providers and their keys, invitations, accounts, the briefing, removal | `npm run offices` | 206 of 206 pass |
-| The five sample services and what each refuses, live records, actions held for approval, messages and notes | `npm run systems` | 171 of 171 pass |
+| The five mock services and what each refuses, live records, actions held for approval, messages and notes, and a demo reset that puts the services back | `npm run systems` | 181 of 181 pass |
 | Agents working between clicks: queues, waits, restarts, urgent work, standing work | `npm run loop` | 118 of 118 pass |
 | A rejected task that had placed orders, and taking them back | `npm run windup` | 61 of 61 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
-That is 1,158 checks.
+That is 1,168 checks.
 
 `npm run verify` runs all of the above except the build. The Docker image
 refuses to build unless it passes.

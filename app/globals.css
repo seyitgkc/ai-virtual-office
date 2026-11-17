@@ -112,6 +112,14 @@ body {
   border-top: 1px solid rgba(255,255,255,0.07);
   font-size: 10px; color: rgba(224,162,63,0.85);
 }
+/* Shown in every office that is connected to a mock service, on every screen size and in both views. */
+#title .mock-note {
+  margin-top: 9px; padding-top: 9px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  font-size: 10px; line-height: 1.45; color: rgba(224,162,63,0.85);
+}
+#title .sim + .mock-note { margin-top: 5px; padding-top: 0; border-top: 0; }
+#title .mock-note b { font-weight: 600; color: rgba(224,162,63,1); }
 
 #minimap { margin-top: auto; }
 #minimap svg { display: block; width: 100%; height: auto; cursor: pointer; touch-action: manipulation; }
@@ -816,7 +824,9 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
   .office[data-sheet="activity"] #minimap { display: block; margin-top: 0; }
   #minimap .map-leave { display: inline-block; }
   /* The title card stays small so the office shows beneath it. */
-  #title p, #title .legend, #title .sim { display: none; }
+  #title p, #title .legend { display: none; }
+  /* What is simulated is said on a phone as well, in one small block. */
+  #title .sim { margin-top: 6px; padding-top: 0; border-top: 0; }
 
   #inspector { display: none; top: 10px; left: 10px; right: 10px; width: auto; max-height: calc(100% - 72px); }
   .office[data-sheet="detail"] #inspector { display: flex; }
