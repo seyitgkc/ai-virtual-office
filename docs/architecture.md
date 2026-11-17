@@ -322,7 +322,9 @@ output given as bare text gets a label. A reply that still cannot be read is
 asked for once more, and if the second one fails too the step is not taken and
 the message says what was wrong with it.
 
-**Staying in its own stage.** Every step's prompt lists the stages in order
+### Staying in its own stage
+
+Every step's prompt lists the stages in order
 with the room that hosts each, says what each stage is for, marks the agent's
 own, and names the room every other agent works in. The agent is told to do
 its stage's part and stop, to build on what earlier stages wrote, and to leave
@@ -340,7 +342,9 @@ is allowed to read the room. A task still halts for a person when nobody in
 that room can answer, when the need is to enter or act, and whenever a
 playbook says so, because a playbook's need was written by a person.
 
-**Between clicks.** An agent does not only act at the moment a person clicks.
+### Between clicks
+
+An agent does not only act at the moment a person clicks.
 After every action the engine names the agents that now have something in
 front of them, and the server works through that in the background:
 

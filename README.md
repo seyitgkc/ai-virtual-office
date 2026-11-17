@@ -11,20 +11,20 @@ same access rules it applies to the agents.
 
 ![The office at load: five rooms along a hall, with Fulfilment outlined in red because a quote is waiting on access to Finance](docs/office.jpg)
 
-## In two minutes
+## Overview
 
-**What it is.** A 3D office in the browser. Each agent and each person has a
+The product is a 3D office in the browser. Each agent and each person has a
 desk, a role, and a set of rooms they may enter, read and act in. Work comes in
 as a request and goes through five stages: intake, planning, execution, review
 and completion. Every stage has an owner and a status, and you can watch each
 handoff happen.
 
-**The idea.** A room is a permission boundary. If an agent needs something
+The core idea is that a room is a permission boundary. If an agent needs something
 from a room it may not use, it has to stop and say so. The stop has a place:
 the room turns red, and the screen names the rule that decided it. To find
 out why work is stuck, a supervisor looks at the floor.
 
-**How a team uses it.** Someone files a request. The agents carry it forward
+In daily use, someone files a request. The agents carry it forward
 and hand it on by themselves. A person is needed at five points:
 
 - an agent asks a question;
@@ -37,7 +37,7 @@ and hand it on by themselves. A person is needed at five points:
 Everything else moves without a click. A summary at the top of the screen
 says how much work is open and what is waiting for a person.
 
-**What to try first.**
+### What to try first
 
 1. Open the [live demo](https://office.example.invalid) and enter as Dana, the
    operations manager. No password is needed.
@@ -50,7 +50,9 @@ says how much work is open and what is waiting for a person.
 5. Click **Walk the office** to go through it on foot. Enter as Sam instead
    to meet the doorways Sam may not pass.
 
-**What is real and what is not.** The access rules, the workflow, sign-in,
+### What is real and what is not
+
+The access rules, the workflow, sign-in,
 the database, the audit trail and the calls to the five mock services are
 real and run on the server. The demo's agents follow written playbooks, and
 the screen says so. Agents on a real language model work too, in any office
@@ -62,7 +64,7 @@ business data is made up. The full list is under
 
 ## Contents
 
-- [In two minutes](#in-two-minutes)
+- [Overview](#overview)
 - [Where to find things](#where-to-find-things)
 - [The problem](#the-problem)
 - [What it does](#what-it-does)
@@ -120,47 +122,46 @@ pricing, and a finance approval before a quote goes out.
 
 ## What it does
 
-- **One access model for people and agents.** Three scopes per room (enter,
-  read, act), roles, per-person overrides, and a fixed order of precedence.
-  Every decision comes with an explanation.
-- **A workflow that stops where a person is needed.** Agents record their
-  guesses as assumptions, ask when they cannot proceed, and escalate when they
-  need a room they may not use.
-- **Two kinds of agent.** An AI agent asks a language model at each step and
-  is shown only what it may read. A playbook agent follows when-then steps
-  that a person writes in Settings, with no model involved.
-- **Agents that keep working between clicks.** Each agent has a queue of its
-  own and takes its next step by itself: after an answer, after a colleague's
-  note, and when a stage is finished. A task runs until it reaches a real
-  halt: a question, missing access, an approval or the review. A click never
+- People and agents share one access model. It has three scopes per room
+  (enter, read, act), roles, per-person overrides and a fixed order of
+  precedence, and every decision comes with an explanation.
+- The workflow stops where a person is needed. Agents record their guesses
+  as assumptions, ask when they cannot proceed, and escalate when they need a
+  room they may not use.
+- There are two kinds of agent. An AI agent asks a language model at each
+  step and is shown only what it may read. A playbook agent follows when-then
+  steps that a person writes in Settings, with no model involved.
+- Agents keep working between clicks. Each has a queue of its own and takes
+  its next step by itself: after an answer, after a colleague's note, and
+  when a stage is finished. A task runs until it reaches a real halt, which
+  is a question, missing access, an approval or the review. A click never
   waits for a model.
-- **An office that shows its work.** Each desk has a lamp in the colour of
-  what its occupant is doing and names the tasks it holds. A handoff, a
-  question, an answer or a note is seen crossing the office to the desk it is
-  for.
-- **A summary that is always in view.** The top of the screen counts open
-  work, what waits for a person and who is at work, and says in a sentence or
-  two what that work is.
-- **Sign-in with real enforcement.** Each person receives only the messages
-  their access lets them read, and the server refuses actions their role does
-  not allow.
-- **Records and connected systems per room.** A room keeps records, and can
-  be connected to an outside system whose records are read live. `read` on
-  the room shows both. `act` lets an agent do something there, such as
-  placing an order, and a system can hold each action for a person's
-  approval. Five mock services run beside the office to show it.
-- **A rejected task settles what it already did.** An order that was placed
-  is still an order after the task is rejected, so whoever rejects it is
-  asked what should happen to it, and the agents carry the answer out.
-- **An audit log and permission tokens.** Every action is recorded with who
-  did it and why. Every access grant issues a signed, scoped token that a
-  program can use to read a room, and that stops working when the grant does.
-- **Everything is set up in the interface.** Rooms, people, agents, roles,
+- The office shows its work. Each desk has a lamp in the colour of what its
+  occupant is doing and names the tasks it holds. A handoff, a question, an
+  answer or a note is seen crossing the office to the desk it is for.
+- A summary is always in view. The top of the screen counts open work, what
+  waits for a person and who is at work, and says in a sentence or two what
+  that work is.
+- Signing in comes with real enforcement. Each person receives only the
+  messages their access lets them read, and the server refuses actions their
+  role does not allow.
+- Each room keeps records and can be connected to an outside system whose
+  records are read live. `read` on the room shows both. `act` lets an agent
+  do something there, such as placing an order, and a system can hold each
+  action for a person's approval. Five mock services run beside the office to
+  show it.
+- A rejected task settles what it already did. An order that was placed is
+  still an order after the task is rejected, so whoever rejects it is asked
+  what should happen to it, and the agents carry the answer out.
+- Every action goes into an audit log with who did it and why. Every access
+  grant also issues a signed, scoped token that a program can use to read a
+  room, and that stops working when the grant does.
+- Everything is set up in the interface: rooms, people, agents, roles,
   permissions, access rules, AI providers and connected systems, each behind
   its own permission. An account can hold many offices and invite people into
   them.
-- **A walkable office.** An overview from above, and a first-person walk with
-  a map, by keyboard or by touch.
+- The office can be walked. There is an overview from above and a
+  first-person walk with a map, by keyboard or by touch.
 
 The full list is in [What it does](docs/features.md). It adds urgent work,
 work that waits for a day, standing work, documents on a request, notes
@@ -197,20 +198,20 @@ that need nothing unusual go straight through to review. The supervisor's job
 is the exceptions, and the office is built so they are the first thing on
 screen:
 
-- **The work list** on the left holds every task with its state, with a
+- The work list on the left holds every task with its state, with a
   search box and filters once there are more than a few.
-- **The summary at the top centre** counts open work, what waits for a person
+- The summary at the top centre counts open work, what waits for a person
   and who is at work. Under it, a briefing says which tasks need a person and
   what each needs.
-- **A room outlined in amber** means an agent asked a question it could not
+- A room outlined in amber means an agent asked a question it could not
   answer itself. Someone picks an answer and the task continues.
-- **A room outlined in red** means an agent needed data in a room it may not
+- A room outlined in red means an agent needed data in a room it may not
   read. The supervisor can grant access for that one task, revoke the rule
   that blocked it, or hand the work to someone who already has access.
-- **Assumptions** are the guesses agents made in order to keep going, such as
+- Assumptions are the guesses agents made in order to keep going, such as
   which branch will fill the order. Each is listed on the task with its
   reasoning. Marking one wrong halts every task that rests on it.
-- **Review** always ends with a person, who approves the work, rejects it, or
+- Review always ends with a person, who approves the work, rejects it, or
   sends it back with what has to change. A request can also be rejected at
   any earlier point.
 
@@ -301,7 +302,7 @@ flowchart TB
   store --> db
 ```
 
-**Who does what**
+### Who does what
 
 | Part | Its job |
 | --- | --- |
@@ -313,7 +314,7 @@ flowchart TB
 | Agent runtime | One interface with a playbook agent or an AI agent behind it. One step goes in and one checked result comes out. |
 | Office store | Maps the office to 66 SQLite tables and back. |
 
-**How a task moves**
+### How a task moves
 
 1. A person files a request. It is stored, and the agent for the first stage
    finds it on its queue.
@@ -383,7 +384,9 @@ what exists, and what a real deployment would add.
 
 ## What is real, simulated and proposed
 
-**Real.** The access rules and the workflow engine. Sign-in, sessions,
+### Real
+
+The access rules and the workflow engine. Sign-in, sessions,
 invites and enforcement on the server. The database and the audit log. The
 settings screens. Playbook agents. AI agents on real models through both
 provider interfaces, which have taken requests through every stage on the
@@ -392,7 +395,7 @@ are taken back when a task is rejected. Agents working in the background, the
 summary and the briefing. The 3D office, with everything that moves in it
 drawn from real tasks and messages.
 
-**Simulated**
+### Simulated
 
 - The demo office's agents are playbook agents. Their playbooks were written
   for a dealer order of multi-zone heads and answer any request that way. The
@@ -408,14 +411,14 @@ drawn from real tasks and messages.
 Every agent is labelled as an AI agent or a playbook agent, on screen and in
 the stored data.
 
-**Not verified**
+### Not verified
 
 - The office ending a wait by itself on the day, on the live site. The check
   scripts cover it with a clock of their own.
 - An agent that cannot be reached while a rejected task is wound up, on the
   live site. The check scripts cover it.
 
-**Proposed**
+### Proposed
 
 - Adapters for named products such as Shopify or an accounting package, each
   a small service in front of the product that describes it to the office.

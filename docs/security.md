@@ -61,10 +61,10 @@ Part of the documentation of the [AI Virtual Office](../README.md).
   beside the database with owner-only permissions.
 - The container runs as a non-root user on a read-only filesystem, with one
   writable volume for data.
-- **Demo sign-in is on by default.** It lets anyone enter as a seeded person.
+- Demo sign-in is on by default. It lets anyone enter as a seeded person.
   That suits a public demo and nothing else. Set `DEMO_LOGIN=0` for any office
   that holds something you care about.
-- **Sign-up is on by default.** Anyone who reaches the sign-in page can create
+- Sign-up is on by default. Anyone who reaches the sign-in page can create
   an account and offices of their own. One address can create five accounts an
   hour and the whole server sixty. Set `SIGNUP=0` to leave invites as the only
   way in.

@@ -2,7 +2,7 @@
 
 Part of the documentation of the [AI Virtual Office](../README.md).
 
-**Functional**
+## Functional
 
 - The access resolver: precedence, conflict reporting, expiry by time or task,
   and limiting a grant made for one task to work on that task.
@@ -111,7 +111,7 @@ Part of the documentation of the [AI Virtual Office](../README.md).
   moving are drawn from the office's own tasks and messages, one mark per real
   message.
 
-**Simulated**
+## Simulated
 
 - The demo office's agents are playbook agents. Their playbooks were written
   for a dealer order of multi-zone heads and answer any request that way. The
@@ -132,7 +132,7 @@ The stored data says which is which. Every agent is labelled as an AI agent or
 a playbook agent, and every output message records whether it came from a
 playbook.
 
-**Not verified in this repository**
+## Not verified in this repository
 
 - The office ending a wait by itself on the day, on the deployed site. The
   one task waiting there is due on 21 December 2026. The check scripts cover
@@ -141,7 +141,7 @@ playbook.
   deployed site. The check scripts cover it: three tries, then the person is
   asked.
 
-**Proposed**
+## Proposed
 
 - Adapters for named products such as Shopify, WooCommerce or an accounting
   package. Each would be a small service in front of the product that

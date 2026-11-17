@@ -5,21 +5,21 @@ Part of the documentation of the [AI Virtual Office](../README.md).
 SQLite, one file, 66 tables. One database holds many offices. The schema is in
 third normal form:
 
-- **Every column holds one value.** Lists such as scopes, capabilities and
+- Every column holds one value. Lists such as scopes, capabilities and
   question options are rows in child tables. There are no JSON or delimited
   columns.
-- **Every fact is stored once.** A desk's occupant lives only in
+- Every fact is stored once. A desk's occupant lives only in
   `participants.desk_id`, and a room's desks only in `desks.room_id`, though
   the in-memory model carries both directions for convenience.
-- **No column depends on another non-key column.** A permission token stores
+- No column depends on another non-key column. A permission token stores
   only its rule and scope. The holder and the room are read through the rule.
-- **Each message kind has its own table.** The eleven kinds carry different
+- Each message kind has its own table. The eleven kinds carry different
   fields, so the shared part lives in `messages` and the rest in a detail
   table keyed by the message id.
-- **A NULL room on a grant or rule means every room.**
-- **Schema changes are migrations.** An older database is brought forward on
+- A NULL room on a grant or rule means every room.
+- Schema changes are migrations. An older database is brought forward on
   open, one version at a time, each step in its own transaction.
-- **`position` columns record order.** Rules and grants are evaluated in
+- `position` columns record order. Rules and grants are evaluated in
   sequence and threads are read in sequence, so order is data.
 
 The store rebuilds the engine's state from these tables and writes back only

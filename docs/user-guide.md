@@ -33,12 +33,12 @@ that need nothing unusual go straight through to review. The supervisor's job
 is the exceptions, and the office is built so they are the first thing on
 screen:
 
-- **The work list** on the left holds every task with its state. Once there
+- The work list on the left holds every task with its state. Once there
   are more than five it gains a search box, over each task's number, title
   and request, and four filters with counts: all, waiting for a person, moving
   with agents, and closed. The filters stay at the top of the list while it
   scrolls.
-- **A summary at the top centre** is always in view: how many tasks are open,
+- A summary at the top centre is always in view: how many tasks are open,
   how many of them wait for a person, how many agents are at work, how many
   tasks are closed, and how many are urgent when any are. A task counts as
   waiting for a person once no agent is still taking a step on it, so a
@@ -46,7 +46,7 @@ screen:
   the space the side panels leave. While agents work,
   a second line under it names who is on which task. On a phone both sit
   above the section bar, and the summary shows on the office view.
-- **A briefing under the counts** says in a sentence or two what the work is:
+- A briefing under the counts says in a sentence or two what the work is:
   which tasks need a person and what each needs, then what is in an agent's
   hands or waiting for a day. In an office with an AI agent, that agent's
   model writes it, in at most two sentences and 34 words, and it carries a
@@ -58,20 +58,20 @@ screen:
   in the work list: a task's name, its state, who holds it, and the day and
   reason it waits for. Nothing said in a room goes into it, so one briefing
   serves everyone whatever they may read.
-- **The office is framed in the space the panels leave.** The view pulls back
+- The office is framed in the space the panels leave. The view pulls back
   until the whole plan fits between the work list and the task panel, however
   long the corridor has grown, and takes the full width when no task or
   person is picked.
-- **A room outlined in amber** means an agent asked a question it could not
+- A room outlined in amber means an agent asked a question it could not
   answer itself. Someone picks an answer and the task continues.
-- **A room outlined in red** means an agent needed data in a room it may not
+- A room outlined in red means an agent needed data in a room it may not
   read. The supervisor can grant access for that one task, revoke the rule that
   blocked it, or hand the work to someone who already has access.
-- **Assumptions** are the guesses agents made in order to keep going, such as
+- Assumptions are the guesses agents made in order to keep going, such as
   which branch will fill the order. Each one is listed on the task with its
   reasoning and confidence. Confirming one closes it. Marking one wrong halts
   every task that rests on it and asks for the correct value.
-- **Review** always ends with a person. An agent can prepare the pricing sheet,
+- Review always ends with a person. An agent can prepare the pricing sheet,
   and only a human decision completes or rejects the task. A reviewer who
   finds the work unfinished writes what has to change and sends it back. The
   task returns to the room that carries work out, to whoever had it there,
@@ -81,7 +81,7 @@ screen:
   "Undo all of them" and "Leave them as they are" as ready answers and a box
   for their own words. The task shows as rejected and being wound up until
   the agents have done what was said.
-- **A request can be turned down before review.** Whoever may decide reviews
+- A request can be turned down before review. Whoever may decide reviews
   sees *Reject this request* on any open task, with a second click to
   confirm: one that is halted on a question, set to wait for a day, or still
   being planned. Its open questions and its wait go with it, and anything it
@@ -97,7 +97,9 @@ not shown that room while it works on a different task, or in a conversation.
 
 ## Using the office
 
-**Signing in.** The sign-in page takes an email and password. *Create an
+### Signing in
+
+The sign-in page takes an email and password. *Create an
 account* on the same page asks for a name, an email and a password of at least
 10 characters, and signs you in. A new account starts with an empty office of
 its own: one room, and you in it with every permission. The email is only the
@@ -118,10 +120,14 @@ Entering as Sam after Dana is the quickest way to see the enforcement: fewer
 messages, disabled controls, and a line on each task saying how many messages
 were withheld.
 
-**Moving around.** Drag to orbit, scroll to zoom, right-drag to pan. Walls are
+### Moving around
+
+Drag to orbit, scroll to zoom, right-drag to pan. Walls are
 drawn low so every room stays visible from any angle.
 
-**Walking.** *Walk the office* puts you at the front door at eye level. Move
+### Walking
+
+*Walk the office* puts you at the front door at eye level. Move
 with W A S D or the arrow keys, hold Shift to move faster, drag to look around
 and click someone to inspect them. A map in the corner shows where you are.
 Pick a place on the map and you are standing there: a free spot in any room
@@ -155,7 +161,9 @@ what to expect: an AI agent answers from what you may both read, a playbook
 agent reports where its work stands, since it follows written steps and cannot
 hold a conversation, and a message to a person is theirs alone to read.
 
-**Messages.** Everyone's panel has a *Right now* line and a message box. Type
+### Messages
+
+Everyone's panel has a *Right now* line and a message box. Type
 and press Enter. A message to a person is delivered to their inbox, and anyone
 may write to anyone. A message to an agent is answered at once, and you can
 talk to an agent only if you may enter the room it sits in. An agent can
@@ -166,7 +174,9 @@ can read what is said. The activity log records that a message
 was sent and never what it said. No task, rule or record changes because of a
 message: for work, file a request.
 
-**Inbox.** The *Inbox* button on the title card carries a count. Inside:
+### Inbox
+
+The *Inbox* button on the title card carries a count. Inside:
 
 | Section | What it holds | Clicking a row |
 | --- | --- | --- |
@@ -175,7 +185,9 @@ message: for work, file a request.
 | Between agents | Every note one agent left another, with who wrote to whom and on which task. Listed for people who may see everything | Opens the task |
 | Conversations | Everyone you have exchanged messages with, the latest line and how many are new | Opens their panel with the keyboard in the message box |
 
-**Notes.** An agent can leave a note for one person or one other agent while
+### Notes
+
+An agent can leave a note for one person or one other agent while
 it works on a task. It is for something they should know that the handoff and
 the outputs do not say, such as a detail the reviewer should check. A note
 lives in the task's thread, only its author and the one it is for can read it
@@ -187,7 +199,9 @@ with one note. It cannot halt or take over a task that is not its own. Whoever f
 a request also gets a note when a connected system refuses or cannot be
 reached, because the task carries on regardless.
 
-**Reading the office.** Every name tag says Human, AI or PB, where PB marks an
+### Reading the office
+
+Every name tag says Human, AI or PB, where PB marks an
 agent that follows a playbook. People are rounded
 figures. Agents are faceted and carry a slowly turning ring. A pulsing marker
 above a figure means that figure owns a halted task.
@@ -212,11 +226,15 @@ shown, and nothing is replayed from before you opened the office. With the
 system set to reduce motion, the lamps, folders and task names stay and the
 rings and arcs are left out.
 
-**Work in the office** (left). Every task with its status. Click one to open it.
-**New request** files a new dealer request into Reception and opens it. Text
-documents can be attached to it, and it can be marked urgent.
+### The work list
 
-**Inspector** (right), with a task selected:
+*Work in the office*, on the left, lists every task with its status. Click one
+to open it. *New request* files a new dealer request into Reception and opens
+it. Text documents can be attached to it, and it can be marked urgent.
+
+### The task panel
+
+With a task selected, the panel on the right shows:
 
 - A line under the task's details names the agent working on it at the
   moment, any colleague answering a note on it, and agents that have it
@@ -235,16 +253,22 @@ documents can be attached to it, and it can be marked urgent.
   opens the line for editing, with a choice of room, and adds it to that
   room's records, where every agent that reads the room is told it.
 
-**Inspector**, with a person or agent selected (click a figure in the scene):
-role, what they can do, whether a live model backs them, and a table of rooms
+### A person's or an agent's panel
+
+Click a figure in the scene and the panel on the right shows that person or
+agent: their role, what they can do, whether a live model backs them, and a table of rooms
 against the three access scopes. A cell marked `*` was decided between
 competing rules. Hover it for the explanation. Supervisors also see that
 participant's permission tokens, with *Copy token* and *Revoke token*.
 
-**Activity** (bottom left) is a plain-language log of what each action did,
+### Activity
+
+The panel at the bottom left is a plain-language log of what each action did,
 limited to rooms you can read.
 
-**Supervisor controls** (title card). *Inbox* opens what is waiting on you.
+### The buttons on the title card
+
+*Inbox* opens what is waiting on you.
 *Invite* invites a person and lists the invitations nobody has accepted yet,
 with their count on the button. The link is shown once, when it is made. *New
 link* replaces a lost or expired one, and the old link stops working.
@@ -278,7 +302,9 @@ belong to your account, whichever office you are in, come after.
 
 A page appears only for someone whose role carries its permission.
 
-**Permissions.** A role carries any of eleven permissions, ticked in a table of
+### Permissions
+
+A role carries any of eleven permissions, ticked in a table of
 permissions against roles:
 
 | Permission | Lets a person |
@@ -300,11 +326,15 @@ permissions their own role carries, and can give or invite into only a role
 whose permissions are a subset of their own. Permissions are for people: a
 role held by an agent cannot carry any.
 
-**Room access.** Each role has a table with a row per room, and an Allow box
+### Room access
+
+Each role has a table with a row per room, and an Allow box
 and a Deny box for each of enter, read and act. An empty pair means not set.
 Individual rules are added from the same kind of table.
 
-**Agents.** An agent is one of two kinds, chosen when it is added and
+### Agents
+
+An agent is one of two kinds, chosen when it is added and
 changeable afterwards:
 
 - An **AI agent** names one of the office's AI providers and, optionally, a
@@ -316,7 +346,9 @@ changeable afterwards:
   a room, something to do in a connected system, a note for someone). The agent takes the first step whose conditions all hold. When no
   step applies it does nothing and says so.
 
-**AI providers.** An office can hold several. A provider is any service that
+### AI providers
+
+An office can hold several. A provider is any service that
 speaks one of two common interfaces: OpenAI chat completions or Anthropic
 Messages. That covers the hosted services, gateways in front of them, and a
 model served on your own machine. Every provider is set up the same way:
@@ -336,14 +368,18 @@ is yours. They can give it to an agent only if their role has the *Use shared
 AI providers* permission, and they never see its address or its key. It stops
 being usable in an office once you no longer have a seat there.
 
-**A sample office.** Under *Offices*, *Add the sample office* creates the
+### A sample office
+
+Under *Offices*, *Add the sample office* creates the
 demo's distributor as an office of your own: the same five rooms, roles and
 records, the mock services where the server has them, five AI
 agents on the provider you pick from your account, and you as its manager. It
 starts with no work. Unlike the public demo it is yours alone, so model calls
 are spent only by people you invite.
 
-**Records and systems.** A room's records are sentences, one per line, such
+### Records and systems
+
+A room's records are sentences, one per line, such
 as a policy or an account's terms. A connected system is operated from one room:
 whoever may read that room is shown its records, and whoever may act there can
 use it. Its records can also be shown in further rooms, for people and agents
@@ -395,7 +431,9 @@ room that hosts a stage or still has people in it cannot be removed, the last
 person who can manage roles cannot lose that, and a role still in use cannot
 be deleted.
 
-**A new office starts empty**: a corridor and one room on it with you inside, two starter roles, no
+### A new office
+
+A new office starts empty: a corridor and one room on it with you inside, two starter roles, no
 agents, no work and no rules. Until the first request is filed, the panel on
 the right lists what the office still needs, worked out from the office
 itself: a role that may work in each room that hosts a stage, an agent who can
