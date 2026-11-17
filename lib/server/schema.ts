@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 20;
+export const SCHEMA_VERSION = 21;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -624,10 +624,20 @@ CREATE TABLE sessions (
   participant_id TEXT REFERENCES participants(id) ON DELETE SET NULL
 ) STRICT;
 
+-- An invitation into an office: who it is for, and the role and room they
+-- will have. The person is not in the office until they accept. Only then is
+-- participant_id set, when their desk and their seat are made. role_id or
+-- room_id goes NULL if that role or room is removed while the invitation
+-- waits, and it can then no longer be accepted.
 CREATE TABLE invites (
   id             TEXT PRIMARY KEY,
   token_hash     TEXT NOT NULL UNIQUE,
-  participant_id TEXT NOT NULL UNIQUE REFERENCES participants(id) ON DELETE CASCADE,
+  office_id      TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  display_name   TEXT NOT NULL,
+  title          TEXT NOT NULL,
+  role_id        TEXT REFERENCES roles(id) ON DELETE SET NULL,
+  room_id        TEXT REFERENCES rooms(id) ON DELETE SET NULL,
+  participant_id TEXT UNIQUE REFERENCES participants(id) ON DELETE CASCADE,
   created_by     TEXT NOT NULL REFERENCES participants(id),
   created_at     INTEGER NOT NULL,
   expires_at     INTEGER NOT NULL,
@@ -1256,5 +1266,33 @@ CREATE TABLE message_system_results (
   // Version 20 lets a person leave an office and stay in its record.
   19: /* sql */ `
 ALTER TABLE participants ADD COLUMN left_at INTEGER;
+`,
+  // Version 21 makes an invitation stand by itself. It used to hang on a
+  // person added to the office the moment they were invited. It now carries
+  // their name, title, role and room, and the person is added on acceptance.
+  20: /* sql */ `
+CREATE TABLE invites_next (
+  id             TEXT PRIMARY KEY,
+  token_hash     TEXT NOT NULL UNIQUE,
+  office_id      TEXT NOT NULL REFERENCES offices(id) ON DELETE CASCADE,
+  display_name   TEXT NOT NULL,
+  title          TEXT NOT NULL,
+  role_id        TEXT REFERENCES roles(id) ON DELETE SET NULL,
+  room_id        TEXT REFERENCES rooms(id) ON DELETE SET NULL,
+  participant_id TEXT UNIQUE REFERENCES participants(id) ON DELETE CASCADE,
+  created_by     TEXT NOT NULL REFERENCES participants(id),
+  created_at     INTEGER NOT NULL,
+  expires_at     INTEGER NOT NULL,
+  accepted_at    INTEGER
+) STRICT;
+INSERT INTO invites_next
+  (id, token_hash, office_id, display_name, title, role_id, room_id, participant_id, created_by, created_at, expires_at, accepted_at)
+SELECT i.id, i.token_hash, p.office_id, p.display_name, p.title, p.role_id, d.room_id, i.participant_id, i.created_by,
+       i.created_at, i.expires_at, i.accepted_at
+  FROM invites i
+  JOIN participants p ON p.id = i.participant_id
+  LEFT JOIN desks d ON d.id = p.desk_id;
+DROP TABLE invites;
+ALTER TABLE invites_next RENAME TO invites;
 `,
 };

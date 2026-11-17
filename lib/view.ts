@@ -25,6 +25,24 @@ export interface TokenView {
   problem: string | null;
 }
 
+/** An invitation that waits for its person to accept. The link itself is never included. */
+export interface InvitationView {
+  id: string;
+  displayName: string;
+  title: string;
+  /** Null when the role was removed while the invitation waited. */
+  roleName: string | null;
+  /** Null when the room was removed while the invitation waited. */
+  roomName: string | null;
+  invitedBy: string;
+  createdAt: number;
+  expiresAt: number;
+  /** Why it cannot be accepted as it stands, or null when it can. */
+  problem: string | null;
+  /** Whether this viewer may give it a new link or withdraw it. */
+  manageable: boolean;
+}
+
 export type ProviderKind = "anthropic" | "openai_compatible";
 
 /** One of an office's AI providers. The API key itself is never included. */
@@ -137,6 +155,8 @@ export interface OfficeView {
    */
   agentLoad: AgentLoad;
   accessTokens: TokenView[];
+  /** Invitations nobody has accepted yet. Empty unless the viewer may invite. */
+  invitations: InvitationView[];
   /** Sign-in accounts. Empty unless the viewer manages people. */
   accounts: { participantId: string; email: string; hasPassword: boolean }[];
 }

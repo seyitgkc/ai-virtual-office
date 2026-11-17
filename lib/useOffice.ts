@@ -209,6 +209,16 @@ export function useOffice(initial: OfficeView) {
     return () => window.clearInterval(timer);
   }, [view.agentsAtWork]);
 
+  // Read the office again now, after a change that was not sent through here.
+  const refresh = useCallback(async (): Promise<void> => {
+    try {
+      const { status, data } = await request("/api/office");
+      if (status === 200) setView(data as OfficeView);
+    } catch {
+      // The regular refresh will catch up.
+    }
+  }, []);
+
   const { office } = view;
 
   const roomHalts = useMemo(() => {
@@ -255,6 +265,7 @@ export function useOffice(initial: OfficeView) {
     talk,
     markOpened,
     tokenOperation,
+    refresh,
     signOut,
   };
 }

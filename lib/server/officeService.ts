@@ -55,6 +55,7 @@ import {
   type User,
 } from "./auth";
 import { all, database, get, run, transaction, type Db } from "./db";
+import { invitationViews, settleEarlyArrivals } from "./inviteRows";
 import {
   deleteOffice,
   freshIdScope,
@@ -263,6 +264,7 @@ export function officeDatabase(): Db {
   const db = database();
   if (boot.__officeBooted) return db;
   startClock();
+  settleEarlyArrivals(db);
   transaction(db, () => {
     if (demoLoginEnabled() && !hasOffice(db, DEMO_OFFICE_ID)) writeWholeOffice(db, initialState);
     ensureAdminAccount(db);
@@ -429,6 +431,7 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
     accessTokens: listAccessTokens(db, office.id)
       .filter((t) => can("manage_access") || t.participantId === viewer.id)
       .map((t) => ({ ...t, problem: tokenProblem(t, state.office, ctx) })),
+    invitations: can("invite_people") ? invitationViews(db, office, office.roles[viewer.roleId]?.permissions ?? [], Date.now()) : [],
     accounts: can("manage_people") || can("invite_people")
       ? usersInOffice(db, office.id).map((u) => ({
           participantId: u.participantId,
@@ -451,7 +454,7 @@ export function getView(session: Session): OfficeView {
 // Changes are applied one at a time. A transition can wait on an agent, and a
 // second change must start from the state the first one left behind.
 let queue: Promise<unknown> = Promise.resolve();
-function inTurn<T>(work: () => Promise<T>): Promise<T> {
+export function inTurn<T>(work: () => Promise<T>): Promise<T> {
   const next = queue.then(work, work);
   queue = next.catch(() => undefined);
   return next;

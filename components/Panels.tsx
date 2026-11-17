@@ -79,6 +79,7 @@ export function TitleCard({
   onSignOut,
   onSettings,
   onInvite,
+  waitingInvites,
   onReport,
   inboxCount,
   onInbox,
@@ -93,6 +94,8 @@ export function TitleCard({
   onSignOut: () => void;
   onSettings: () => void;
   onInvite: () => void;
+  /** How many invitations nobody has accepted yet. */
+  waitingInvites: number;
   /** Open the report on how the office is doing. */
   onReport: () => void;
   /** How many things in the inbox are waiting or unopened. */
@@ -110,8 +113,8 @@ export function TitleCard({
           Inbox{inboxCount > 0 ? ` (${inboxCount})` : ""}
         </button>
         {viewer.permissions.includes("invite_people") && (
-          <button className="btn" onClick={onInvite}>
-            Invite
+          <button className="btn" onClick={onInvite} title={waitingInvites > 0 ? `${waitingInvites} waiting to be accepted` : undefined}>
+            Invite{waitingInvites > 0 ? ` (${waitingInvites})` : ""}
           </button>
         )}
         {viewer.permissions.includes("see_everything") && (

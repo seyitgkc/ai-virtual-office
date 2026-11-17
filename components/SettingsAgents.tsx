@@ -118,7 +118,7 @@ export function PeopleTab({
     <>
       <Section
         title="People and agents"
-        hint="Names and titles save when you leave the field. Changing the room moves the desk. People join through Invite on the main screen. Removing a person ends their sign-in to this office. If they asked, answered or decided anything here, their name stays on it."
+        hint="Names and titles save when you leave the field. Changing the room moves the desk. People join through Invite on the main screen, and are listed here once they accept. Removing a person ends their sign-in to this office. If they asked, answered or decided anything here, their name stays on it."
       >
         <div className="table-scroll">
           <table className="grid-table">

@@ -196,9 +196,11 @@ pricing, and a finance approval before a quote goes out.
   them. Each office is separate, and a new one starts empty.
 - **Accounts.** Anyone can create an account on the sign-in page. It starts
   with an empty office of its own, in which that person is the administrator.
-- **Invites.** Someone whose role may invite adds a person, who gets a desk
-  and sets their own password. This is how a second person joins an office
-  that exists.
+- **Invites.** Someone whose role may invite names a person, a role and a
+  room, and gets a link to send. The person sets their own password, and is
+  added to the office with a desk when they accept. Until then the invitation
+  waits in a list, where it can be given a new link or withdrawn. This is how
+  a second person joins an office that exists.
 - **Leaving.** A person who is removed loses their desk, their access and
   their sign-in to that office. If they asked, answered or decided anything
   there, their name stays on it, and what was meant for them goes to someone
@@ -401,7 +403,11 @@ participant's permission tokens, with *Copy token* and *Revoke token*.
 limited to rooms you can read.
 
 **Supervisor controls** (title card). *Inbox* opens what is waiting on you.
-*Invite* adds a person. *Report* shows how the office is doing, for people
+*Invite* invites a person and lists the invitations nobody has accepted yet,
+with their count on the button. The link is shown once, when it is made. *New
+link* replaces a lost or expired one, and the old link stops working.
+*Withdraw* takes an invitation back. Nobody is in the office before they
+accept. *Report* shows how the office is doing, for people
 who see everything. *Settings* opens the set-up screen described next. They
 stay on screen while you walk the office.
 
@@ -1165,8 +1171,8 @@ last reason, until `r-02` is revoked.
 | `POST /api/admin/systems` | Manage rooms, and read on the room | Read a connected system's live records. With a password account: connect, change or disconnect one |
 | `POST /api/chat` | signed in. For an agent: may enter its room | Send a direct message to a person or an agent, or mark a conversation or a note as opened |
 | `POST /api/offices` | signed in | Add an empty or a sample office, switch to another, or remove one. In the demo, with Manage the office: reset it |
-| `POST /api/invites` | Invite people | Create a person, a desk and an invite link. In the demo office: a person and a desk, entered without a password |
-| `POST /api/invites/accept` | invite holder | Set email and password, sign in |
+| `POST /api/invites` | Invite people | Create an invitation and its link, give a waiting invitation a new link, or withdraw one. In the demo office: add a person and a desk, entered without a password |
+| `POST /api/invites/accept` | invite holder | Set email and password, get a desk in the office, sign in |
 | `POST /api/tokens/:id` | Manage access, or holder to reveal | Reveal or revoke a permission token |
 | `GET /api/rooms/:room/thread` | permission token | Read a room's records, its connected systems' live records, and its thread |
 
@@ -1594,7 +1600,7 @@ erDiagram
   participants ||--o| memberships : "is the seat of"
   users ||--o{ sessions : holds
   participants o|--o{ sessions : "currently viewing"
-  participants ||--o| invites : "invited by link"
+  participants ||--o| invites : "joined by accepting"
   access_rules ||--o{ access_tokens : issues
   access_rule_scopes ||--o| access_tokens : "one per scope"
   participants ||--o{ direct_messages : "writes or is written to"
@@ -1625,7 +1631,11 @@ erDiagram
   invites {
     text id PK
     text token_hash UK
-    text participant_id FK
+    text office_id FK
+    text display_name
+    text role_id FK "null if the role is removed"
+    text room_id FK "null if the room is removed"
+    text participant_id FK "set on acceptance"
     text created_by FK
     int expires_at
     int accepted_at
@@ -1890,7 +1900,13 @@ playbook.
   site.
 - Sign-in attempts are throttled per address and email.
 - Invite links and permission tokens are never stored. Only a hash of an
-  invite token, and only the id of a permission token, are kept.
+  invite token, and only the id of a permission token, are kept. A link can
+  therefore not be shown a second time: a new one is made, and the old one
+  stops working.
+- An invitation puts nobody in the office. The person exists there only once
+  they have accepted. Someone may change or withdraw only the invitations
+  into roles whose permissions they hold themselves, so a link into a stronger
+  role cannot be taken over by renewing it.
 - Input is parsed into known actions field by field. Unknown fields never
   reach the engine.
 - A provider's API key is entered in Settings, encrypted with AES-256-GCM
@@ -2000,6 +2016,9 @@ playbook.
   owner has a seat there.
 - When a connected system refuses or cannot be reached, the thread says so and
   the task carries on. It does not halt.
+- An office holds up to 20 invitations that wait. One whose role or room was
+  removed in the meantime cannot be repaired: it is withdrawn and made again.
+  The office does not send the link: whoever invites passes it on.
 - No password reset and no email. An administrator would issue a new invite.
   An email given at sign-up is not verified, so nothing proves that the person
   owns it.
@@ -2156,7 +2175,7 @@ of the three with a database file starts sample services the same way.
 | What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, a need passed to a colleague, documents on a task, earlier work shown within an agent's access, records kept from a thread, the report, ids replaced by names in what an agent writes, and tasks named by number | `npm run agents` | 200 of 200 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 56 of 56 pass |
 | Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, a person leaving, and an office built from nothing | `npm run admin` | 125 of 125 pass |
-| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, a person leaving and losing their sign-in, the demo office giving out no password accounts, creating an account, addresses inside the server's network, removal | `npm run offices` | 144 of 144 pass |
+| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, invitations that wait and are renewed or withdrawn, a person leaving and losing their sign-in, the demo office giving out no password accounts, creating an account, addresses inside the server's network, removal | `npm run offices` | 184 of 184 pass |
 | The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, an invoice voided, a rejected task whose order is cancelled in the storefront, and resetting the demo | `npm run systems` | 171 of 171 pass |
 | Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, work that is written down and picked up after a failure or a restart, urgent work first, standing work, who is on a task, a rejected task wound up between clicks and after a restart, providers that belong to an account, and the sample office | `npm run loop` | 118 of 118 pass |
 | A rejected task that had placed orders: the question to the person, each thing taken back by the agent that did it, refusals, an agent stopped from naming another task's record, playbook agents, and systems that hold actions for approval | `npm run windup` | 61 of 61 pass |

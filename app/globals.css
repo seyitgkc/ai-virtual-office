@@ -410,6 +410,14 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 .dialog select option { background: #1b1d23; color: #e8e6e1; }
 .dialog input:focus, .dialog select:focus { outline: none; border-color: rgba(110,169,217,0.65); }
 .dialog-actions { display: flex; gap: 8px; margin-top: 4px; }
+.dialog.invite { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow-y: auto; }
+.dialog.invite form, .dialog.invite > p, .dialog.invite > input { max-width: 380px; }
+.dialog.invite .dialog-actions { flex-wrap: wrap; }
+.invite-waiting { margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); }
+.invite-waiting h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; }
+.invite-waiting .empty { font-size: 12px; color: rgba(232,230,225,0.5); }
+.invite-waiting .grid-table { font-size: 12px; }
+.invite-waiting .grid-table div.muted { font-size: 11.5px; }
 .dialog-actions .btn { margin: 0; padding: 7px 12px; }
 .login-card a.btn { display: inline-block; text-decoration: none; margin: 0; }
 #title .who-actions { flex-wrap: wrap; }

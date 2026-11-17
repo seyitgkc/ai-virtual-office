@@ -48,6 +48,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     talk,
     markOpened,
     tokenOperation,
+    refresh,
     signOut,
   } = useOffice(initial);
 
@@ -196,6 +197,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
             setSettingsOpen(true);
           }}
           onInvite={() => setInviting(true)}
+          waitingInvites={view.invitations.length}
           onReport={() => setReportOpen(true)}
           inboxCount={inboxCount(view, viewer)}
           onInbox={() => setInboxOpen(true)}
@@ -318,6 +320,8 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
           office={office}
           ownPermissions={view.viewer.permissions}
           entersFreely={view.isDemoOffice}
+          invitations={view.invitations}
+          onChanged={() => void refresh()}
           onClose={() => setInviting(false)}
         />
       )}
