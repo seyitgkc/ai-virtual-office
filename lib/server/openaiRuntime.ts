@@ -2,7 +2,7 @@
  * An AI agent's runtime for any service that speaks the OpenAI chat
  * completions API: OpenAI itself, a gateway, or a model served locally.
  *
- * It is given the same prompt as the Anthropic runtime and must return the
+ * It is given the same prompt as the other runtime and must return the
  * same five fields, so what an agent is shown and how its reply is checked do
  * not depend on the provider.
  */

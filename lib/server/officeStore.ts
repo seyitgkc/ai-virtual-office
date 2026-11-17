@@ -1132,11 +1132,10 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
       model: string | null;
       provider_name: string | null;
       default_model: string | null;
-      has_key: number;
     }>(
       db,
       `SELECT a.participant_id, a.agent_type, a.provider_id, a.model,
-              v.name AS provider_name, v.default_model, v.api_key_cipher IS NOT NULL AS has_key
+              v.name AS provider_name, v.default_model
          FROM agent_settings a LEFT JOIN ai_providers v ON v.id = a.provider_id`,
     ).map((a) => [a.participant_id, a]),
   );
@@ -1225,7 +1224,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
         },
       };
     });
-  // An AI agent is "backed" only while its provider exists and holds a key.
+  // An AI agent is "backed" while the provider it names exists. A provider needs no key to be used.
   const agentFields = (
     id: string,
     kind: Participant["kind"],
@@ -1233,7 +1232,7 @@ export function loadEngineState(db: Db, officeId: string): EngineState | null {
     if (kind !== "agent") return { backing: null, agentType: null, providerId: null, model: null };
     const a = settings.get(id);
     const agentType: AgentType = a?.agent_type ?? "playbook";
-    const live = agentType === "ai" && a?.provider_name && a.has_key === 1;
+    const live = agentType === "ai" && a?.provider_name;
     return {
       backing: live ? { provider: a.provider_name!, model: a.model ?? a.default_model! } : null,
       agentType,

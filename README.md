@@ -185,9 +185,9 @@ pricing, and a finance approval before a quote goes out.
   used in every office you sit in, so a key is entered once.
 - **A sample office with AI agents.** Anyone signed in can add the demo's
   distributor as an office of their own, staffed by real AI agents.
-- **Several AI providers per office.** Anthropic, and any service that offers
-  the OpenAI chat completions interface. Each AI agent names the provider and
-  model it uses.
+- **Several AI providers per office.** A provider is any service that speaks
+  the OpenAI chat completions interface or the Anthropic Messages interface.
+  Each AI agent names the provider and model it uses.
 - **Records and connected systems per room.** Each room keeps records that a
   person writes in Settings, and can be connected to an outside system whose
   records are read live. `read` on the room shows both. `act` on the room lets
@@ -550,12 +550,15 @@ changeable afterwards:
   a room, something to do in a connected system, a note for someone). The agent takes the first step whose conditions all hold. When no
   step applies it does nothing and says so.
 
-**AI providers.** An office can hold several. A provider is either Anthropic or
-OpenAI compatible, which covers any service with the OpenAI chat completions
-interface, including a model served on your own machine. An Anthropic provider
-takes an optional address, for a gateway or another service that offers the
-Anthropic Messages interface under its own model ids. *Test* checks the key
-and the model with the provider without generating anything. A key is
+**AI providers.** An office can hold several. A provider is any service that
+speaks one of two common interfaces: OpenAI chat completions or Anthropic
+Messages. That covers the hosted services, gateways in front of them, and a
+model served on your own machine. Every provider is set up the same way:
+choose the interface, give the address of its API and the model id it
+expects, and add its key if it needs one. No service is assumed and nothing
+is filled in for you. *Test* checks the address, the key and the model. It
+asks the provider for its list of models, and a provider that keeps no such
+list is sent a request for a single token. A key is
 encrypted before it is stored and is never sent back to the page: afterwards
 the table shows only its last four characters. The shared demo office cannot
 hold a key.
@@ -777,7 +780,7 @@ flowchart TB
   end
 
   db[("SQLite<br/>66 tables in 3NF")]
-  llm["Anthropic or an OpenAI<br/>compatible service"]
+  llm["A model provider:<br/>OpenAI or Anthropic compatible"]
 
   hook -->|"action"| http
   http --> service
@@ -859,7 +862,7 @@ lib/briefing.ts           the briefing: the facts it is written from, the compos
 lib/server/briefings.ts   the stored briefing and the state of the office it was written for
 lib/sampleOffice.ts       the demo's distributor as an office of one's own, with AI agents
 lib/server/systems.ts     connected systems: storage, live records, carrying out operations
-lib/server/modelRuntime.ts   the AI agent runtime for Anthropic models
+lib/server/modelRuntime.ts   the AI agent runtime for Anthropic compatible services
 lib/server/openaiRuntime.ts  the AI agent runtime for OpenAI compatible services
 app/api/                  route handlers
 app/page.tsx              the office, for a signed-in person
@@ -1007,10 +1010,10 @@ flowchart LR
   step["Work reaches<br/>an agent"] --> kind{"Kind of agent"}
   kind -->|playbook| book["First playbook step<br/>whose conditions hold"]
   kind -->|AI| prov{"Its provider"}
-  prov -->|Anthropic| claude["Structured call<br/>through the Anthropic SDK"]
+  prov -->|Anthropic compatible| messages["Messages call<br/>to the provider's address"]
   prov -->|OpenAI compatible| chat["Chat completions call<br/>to the provider's address"]
   book --> result["AgentStepResult"]
-  claude --> result
+  messages --> result
   chat --> result
 ```
 
@@ -1018,11 +1021,12 @@ A playbook step is data: conditions (stage, text in the request, who asked) and
 an outcome made of the same five parts as `AgentStepResult`. `lib/playbook.ts`
 finds the first step that applies and returns its outcome. No model is called.
 
-An AI agent's step is one model call. Both provider types are given the same
-prompt and must return the same five fields. An Anthropic provider at its own
-address is sent a plain Messages request with the reply format described in
-the instructions, because such a service may not enforce one. For an OpenAI compatible service
-the reply format is requested as a JSON schema first, then as plain JSON mode,
+An AI agent's step is one model call. Both kinds of provider are given the
+same prompt and must return the same five fields. A service may not enforce a
+reply format, so the format is described in the instructions and every reply
+is checked before the engine sees it. An Anthropic compatible provider is
+sent a plain Messages request. For an OpenAI compatible provider the reply
+format is also requested as a JSON schema first, then as plain JSON mode,
 then with no format at all, because services differ in what they accept. An AI
 agent with no working provider stops the action with a message that says which
 setting is missing.
@@ -1458,8 +1462,8 @@ erDiagram
     text owner_user_id FK "set for an account's provider"
     int position
     text name
-    text kind
-    text base_url
+    text kind "the interface it speaks"
+    text base_url "the address of its API, always set"
     text default_model
     text api_key_cipher
     text key_hint
@@ -1796,7 +1800,7 @@ Each choice is here because it removed something to run or to explain.
 | 3D | three.js through @react-three/fiber and drei | The scene is declared as React components next to the panels that describe it, and it re-renders from the same state. No separate game loop to keep in step with the UI. |
 | Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (66 tables in third normal form), so moving to Postgres is a change of driver. |
 | Sign-in | jose for signed tokens, Node's scrypt for passwords | Small, standard and dependency-light. No outside identity service is needed for the demo to be public. |
-| AI providers | The Anthropic SDK, and plain `fetch` for anything that speaks the OpenAI chat interface | Two connection styles cover nearly every hosted and self-hosted model, so an office is not tied to one vendor. zod checks every reply before the engine sees it. |
+| AI providers | The Anthropic SDK for services that speak the Messages interface, and plain `fetch` for those that speak the OpenAI chat interface | Two connection styles cover nearly every hosted and self-hosted model, so an office is not tied to one vendor. Both are set up the same way and no service is assumed. zod checks every reply before the engine sees it. |
 | Checks | tsx running plain scripts | No test framework to learn. Each script prints what it checks in a sentence, and the Docker image refuses to build unless all of them pass. |
 | Hosting | Docker, behind a reverse proxy | Runs on any host that runs containers, with no paid service. The deployed site is three small containers on one server. |
 
@@ -1946,12 +1950,6 @@ playbook.
 
 **Not verified in this repository**
 
-- A live agent step against Anthropic's own service. The Anthropic provider
-  type has been run live against a compatible service at its own address,
-  where two agents took a request through every stage. Against Anthropic
-  itself only the connection test has been run, which correctly reported a
-  rejected key. No step has been run with a working Anthropic key, because
-  none was available while this was written.
 - The office ending a wait by itself on the day, on the deployed site. The
   one task waiting there is due on 21 December 2026. The check scripts cover
   it with a clock of their own.
@@ -2255,17 +2253,17 @@ of the three with a database file starts sample services the same way.
 
 | What | Command | Result |
 | --- | --- | --- |
-| Access precedence, expiry, read gating, walking the hall and through doors, doorways closed to someone who may not enter, desk placement | `npm run check` | 36 of 36 pass |
-| A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
-| Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 48 of 48 pass |
-| Passwords, sessions and seats, limits on repeated tries, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 47 of 47 pass |
-| What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, a need passed to a colleague, documents on a task, earlier work shown within an agent's access, records kept from a thread, the report, ids replaced by names in what an agent writes, and tasks named by number | `npm run agents` | 200 of 200 pass |
-| Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 56 of 56 pass |
-| Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, a person leaving, and an office built from nothing | `npm run admin` | 125 of 125 pass |
-| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, invitations that wait and are renewed or withdrawn, a person leaving and losing their sign-in, the demo office giving out no password accounts, creating an account, addresses inside the server's network, removal | `npm run offices` | 184 of 184 pass |
-| The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, an invoice voided, a rejected task whose order is cancelled in the storefront, and resetting the demo | `npm run systems` | 171 of 171 pass |
-| Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, work that is written down and picked up after a failure or a restart, urgent work first, standing work, who is on a task, a rejected task wound up between clicks and after a restart, providers that belong to an account, and the sample office | `npm run loop` | 118 of 118 pass |
-| A rejected task that had placed orders: the question to the person, each thing taken back by the agent that did it, refusals, an agent stopped from naming another task's record, playbook agents, and systems that hold actions for approval | `npm run windup` | 61 of 61 pass |
+| Access rules: which rule wins, expiry, what may be read. Walking, doorways, and picking a place on the map | `npm run check` | 51 of 51 pass |
+| One order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
+| Saving and loading the office after every action and every set-up change | `npm run store` | 48 of 48 pass |
+| Passwords, sessions, limits on repeated tries, policy, input parsing, what each person is sent, permission tokens | `npm run auth` | 47 of 47 pass |
+| What an agent is shown and how its reply is read, desk states, conversations, notes, the summary and the briefing, rejecting before review, the report | `npm run agents` | 253 of 253 pass |
+| Playbook steps, and AI agents through both provider interfaces against stand-in services | `npm run providers` | 56 of 56 pass |
+| Set-up changes and their refusals, permissions, playbooks, rooms, a person leaving, an office built from nothing | `npm run admin` | 125 of 125 pass |
+| Several offices in one database: isolation, providers and their keys, invitations, accounts, the briefing, removal | `npm run offices` | 206 of 206 pass |
+| The five sample services and what each refuses, live records, actions held for approval, messages and notes | `npm run systems` | 171 of 171 pass |
+| Agents working between clicks: queues, waits, restarts, urgent work, standing work | `npm run loop` | 118 of 118 pass |
+| A rejected task that had placed orders, and taking them back | `npm run windup` | 61 of 61 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 

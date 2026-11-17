@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import type { AdminOp } from "../lib/admin";
-import { SUGGESTED_MODELS } from "../lib/aiModels";
 import { dayOf, stageSpec } from "../lib/engine";
 import {
   ALL_SCOPES,
@@ -21,7 +20,7 @@ import { KindBadge } from "./Panels";
 import { ConfirmButton, SavedField, Section } from "./settingsParts";
 
 const KIND_LABEL: Record<ProviderKind, string> = {
-  anthropic: "Anthropic",
+  anthropic_compatible: "Anthropic compatible",
   openai_compatible: "OpenAI compatible",
 };
 
@@ -953,7 +952,8 @@ function PlaybookEditor({
 
 // ---------------------------------------------------------------------------
 
-const EMPTY_FORM = { id: "", name: "", kind: "anthropic" as ProviderKind, baseUrl: "", defaultModel: "", apiKey: "" };
+// Nothing is filled in ahead of the person: no interface, no address and no model is assumed.
+const EMPTY_FORM = { id: "", name: "", kind: "" as ProviderKind | "", baseUrl: "", defaultModel: "", apiKey: "" };
 
 /**
  * AI providers, of either kind. With scope "office" these are the office's
@@ -1074,9 +1074,8 @@ export function ProvidersTab({
           </table>
         </div>
         <p className="hint">
-          Testing checks the key and the model with the provider. Nothing is generated, so it costs nothing. The one
-          exception is an Anthropic provider at its own address that keeps no list of models, which is sent a request
-          for a single token.
+          Testing checks the address, the key and the model with the provider. It asks the provider for its list of
+          models, which costs nothing. A provider that keeps no such list is sent a request for a single token.
         </p>
       </Section>
 
@@ -1126,7 +1125,7 @@ export function ProvidersTab({
               operation: "save",
               ...(editing ? { id: editing.id } : {}),
               name: form.name,
-              kind: form.kind,
+              kind: form.kind as ProviderKind,
               baseUrl: form.baseUrl,
               defaultModel: form.defaultModel,
               ...(form.apiKey ? { apiKey: form.apiKey } : {}),
@@ -1147,51 +1146,41 @@ export function ProvidersTab({
             />
           </label>
           <label>
-            Type
+            Interface
             <select
               value={form.kind}
               disabled={locked}
               onChange={(e) => setForm({ ...form, kind: e.target.value as ProviderKind })}
+              required
             >
-              <option value="anthropic">{KIND_LABEL.anthropic}</option>
+              <option value="" disabled>
+                Choose one
+              </option>
+              <option value="anthropic_compatible">{KIND_LABEL.anthropic_compatible}</option>
               <option value="openai_compatible">{KIND_LABEL.openai_compatible}</option>
             </select>
           </label>
           <label className="wide">
-            {form.kind === "anthropic" ? "Address (optional)" : "Address"}
+            Address
             <input
               type="url"
               value={form.baseUrl}
               disabled={locked}
-              placeholder={
-                form.kind === "anthropic"
-                  ? "Leave empty for Anthropic itself, or enter a compatible service's address"
-                  : "https://api.openai.com/v1"
-              }
+              placeholder="The address the provider gives for its API"
               onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
-              required={form.kind === "openai_compatible"}
+              required
             />
           </label>
           <label>
             Default model
             <input
-              list={form.kind === "anthropic" && !form.baseUrl.trim() ? "suggested-models" : undefined}
               value={form.defaultModel}
               maxLength={100}
               disabled={locked}
-              placeholder={
-                form.kind === "anthropic" && !form.baseUrl.trim()
-                  ? SUGGESTED_MODELS[0]
-                  : "The model id the provider expects"
-              }
+              placeholder="The model id the provider expects"
               onChange={(e) => setForm({ ...form, defaultModel: e.target.value })}
               required
             />
-            <datalist id="suggested-models">
-              {SUGGESTED_MODELS.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
           </label>
           <label>
             API key
@@ -1204,12 +1193,9 @@ export function ProvidersTab({
               placeholder={
                 editing?.hasKey
                   ? "Leave empty to keep the stored key"
-                  : form.kind === "anthropic"
-                    ? "Paste the API key"
-                    : "Paste the API key, if the service needs one"
+                  : "Paste the API key, if the provider needs one"
               }
               onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-              required={form.kind === "anthropic" && !editing}
             />
           </label>
           <div className="wide row-actions">
@@ -1242,9 +1228,10 @@ export function ProvidersTab({
         </form>
         <p className="hint">
           A key is encrypted before it is stored, used only on the server when an agent takes a step, and never sent
-          back to this page. An OpenAI compatible provider is any service that offers the OpenAI chat completions
-          interface, including a model running on your own machine. An Anthropic provider with an address is a gateway
-          or another service that offers the Anthropic Messages interface.
+          back to this page. A provider is any service that speaks one of two common interfaces: OpenAI chat
+          completions or Anthropic Messages. That covers the hosted services, gateways in front of them, and a model
+          running on your own machine. Every provider is set up the same way: its address, the model id it expects,
+          and its key if it needs one.
         </p>
         <p className="hint">
           An AI agent is shown only the messages and room records it is allowed to read. One model call is made each

@@ -1,6 +1,6 @@
 /**
- * An AI agent's runtime for Anthropic models, and for services at another
- * address that speak the Anthropic Messages interface.
+ * An AI agent's runtime for any service that speaks the Anthropic Messages
+ * interface, at the address its provider is set up with.
  *
  * It implements the same `AgentRuntime` interface a playbook agent answers
  * through, so the engine does not know which one it is talking to. What the model is shown
@@ -14,7 +14,6 @@
  */
 import { randomBytes } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import {
   stageSpec,
@@ -25,35 +24,23 @@ import {
 import type { AccessScope, Message } from "../model";
 import { plainNames, type Named } from "../plainNames";
 
-export { DEFAULT_AGENT_MODEL } from "../aiModels";
-
-/** Models that accept the server-side refusal fallback. */
-const WITH_FALLBACK = new Set([
-  "claude-opus-5-5",
-  "claude-opus-5",
-  "claude-sonnet-5-5",
-  "claude-fable-5-2",
-  "claude-fable-5-1",
-]);
-
-export const validModelId = (model: string): boolean => /^claude-[a-z0-9.-]{3,60}$/.test(model);
-
 /**
- * A client for Anthropic itself, or for a compatible service at `baseUrl`.
- * The SDK adds the /v1 part of each path, so one typed at the end is dropped.
+ * A client for the service at `baseUrl`. The SDK adds the /v1 part of each
+ * path, so one typed at the end is dropped. A service that needs no key is
+ * sent a placeholder, since the SDK will not start without one.
  */
-const clientFor = (apiKey: string, baseUrl?: string | null): Anthropic =>
+const clientFor = (apiKey: string | null, baseUrl: string): Anthropic =>
   // A step should not hang the office for minutes, so the timeout is short
   // and retries are few.
   new Anthropic({
-    apiKey,
+    apiKey: apiKey ?? "none",
     timeout: 120_000,
     maxRetries: 1,
     // The address comes from the provider's settings and from nowhere else,
     // so a variable in the server's environment cannot redirect it.
-    baseURL: baseUrl ? baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, "") : "https://api.anthropic.com",
-    // Compatible services differ in which header they read the key from.
-    ...(baseUrl ? { defaultHeaders: { "x-api-key": apiKey } } : {}),
+    baseURL: baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, ""),
+    // Services differ in which header they read the key from.
+    ...(apiKey ? { defaultHeaders: { "x-api-key": apiKey } } : {}),
   });
 
 /** Turn a provider error into a sentence a person can act on. */
@@ -86,10 +73,11 @@ const lostOnTheWay = (error: unknown): boolean =>
   !(error instanceof Anthropic.APIError) || error instanceof Anthropic.APIConnectionError;
 
 /**
- * Check that a key works and that the provider knows the model, without
- * generating anything. Returns the model's display name.
+ * Check that the address, the key and the model work. The service is asked
+ * for the model by name, and where it keeps no list of models, for a single
+ * token. Returns the model's display name.
  */
-export async function testProvider(apiKey: string, model: string, baseUrl?: string | null): Promise<string> {
+export async function testProvider(apiKey: string | null, model: string, baseUrl: string): Promise<string> {
   const who = "Connection test failed";
   const client = clientFor(apiKey, baseUrl);
   try {
@@ -100,10 +88,10 @@ export async function testProvider(apiKey: string, model: string, baseUrl?: stri
       error instanceof Anthropic.AuthenticationError ||
       error instanceof Anthropic.PermissionDeniedError ||
       error instanceof Anthropic.APIConnectionError;
-    if (!baseUrl || rejected || !(error instanceof Anthropic.APIError)) throw explain(error, who);
+    if (rejected || !(error instanceof Anthropic.APIError)) throw explain(error, who);
   }
-  // A compatible service may not list its models. Ask it for a single token
-  // instead, which shows that the address, the key and the model all work.
+  // A service may not list its models. Ask it for a single token instead,
+  // which shows that the address, the key and the model all work.
   try {
     await client.messages.create({ model, max_tokens: 1, messages: [{ role: "user", content: "Hi" }] });
     return model;
@@ -633,21 +621,17 @@ export interface ConversationRuntime extends AgentRuntime {
 export class ModelRuntime implements ConversationRuntime {
   readonly model: string;
   private readonly client: Anthropic;
-  /** True for a compatible service at its own address. */
-  private readonly custom: boolean;
-
-  constructor(options: { apiKey: string; model: string; baseUrl?: string | null }) {
+  constructor(options: { apiKey: string | null; model: string; baseUrl: string }) {
     this.model = options.model;
-    this.custom = Boolean(options.baseUrl);
     this.client = clientFor(options.apiKey, options.baseUrl);
   }
 
   /**
-   * A step through a compatible service. Such a service may not enforce a
-   * reply format, so the format is described in the instructions and the
-   * reply is checked here.
+   * One step. A service may not enforce a reply format, so the format is
+   * described in the instructions and the reply is checked here, the same way
+   * for every service.
    */
-  private async plainStep(input: AgentStepInput): Promise<AgentStepResult> {
+  async step(input: AgentStepInput): Promise<AgentStepResult> {
     const who = input.participant.displayName;
     const marker = dataMarker();
     let problem = "";
@@ -693,36 +677,5 @@ export class ModelRuntime implements ConversationRuntime {
     const text = response.content.map((block) => (block.type === "text" ? block.text : "")).join("").trim();
     if (!text) throw new Error(`${who} gave an empty answer.`);
     return text;
-  }
-
-  async step(input: AgentStepInput): Promise<AgentStepResult> {
-    if (this.custom) return this.plainStep(input);
-    const who = input.participant.displayName;
-    const marker = dataMarker();
-    let response;
-    try {
-      response = await this.client.beta.messages.parse({
-        model: this.model,
-        max_tokens: 16000,
-        // Where the model supports it: if it declines a request, the API
-        // retries on the recommended fallback model inside the same call.
-        ...(WITH_FALLBACK.has(this.model)
-          ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
-          : {}),
-        system: systemPrompt(marker),
-        messages: [{ role: "user", content: buildStepPrompt(input, marker) }],
-        output_config: { effort: "medium", format: zodOutputFormat(StepSchema) },
-      });
-    } catch (error) {
-      throw explain(error, `${who} could not answer`);
-    }
-
-    if (response.stop_reason === "refusal") {
-      throw new Error(`${who} declined this request, so the step was not taken.`);
-    }
-    if (response.stop_reason === "max_tokens" || !response.parsed_output) {
-      throw new Error(`${who} gave an incomplete answer, so the step was not taken.`);
-    }
-    return toStepResult(response.parsed_output, input);
   }
 }

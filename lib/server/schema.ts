@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -70,8 +70,8 @@ CREATE TABLE ai_providers (
   owner_user_id  TEXT REFERENCES users(id) ON DELETE CASCADE,
   position       INTEGER NOT NULL,
   name           TEXT NOT NULL,
-  kind           TEXT NOT NULL CHECK (kind IN ('anthropic', 'openai_compatible')),
-  base_url       TEXT,
+  kind           TEXT NOT NULL CHECK (kind IN ('anthropic_compatible', 'openai_compatible')),
+  base_url       TEXT NOT NULL,
   default_model  TEXT NOT NULL,
   api_key_cipher TEXT,
   key_hint       TEXT,
@@ -1316,5 +1316,33 @@ CREATE TABLE briefings (
   written_by  TEXT NOT NULL,
   written_at  INTEGER NOT NULL
 ) STRICT;
+`,
+  // Version 23 sets every provider up the same way. A provider is named by
+  // the interface it speaks and always carries the address of its service. One
+  // stored without an address was the one service that used to be assumed.
+  22: /* sql */ `
+CREATE TABLE ai_providers_next (
+  id             TEXT PRIMARY KEY,
+  office_id      TEXT REFERENCES offices(id) ON DELETE CASCADE,
+  owner_user_id  TEXT REFERENCES users(id) ON DELETE CASCADE,
+  position       INTEGER NOT NULL,
+  name           TEXT NOT NULL,
+  kind           TEXT NOT NULL CHECK (kind IN ('anthropic_compatible', 'openai_compatible')),
+  base_url       TEXT NOT NULL,
+  default_model  TEXT NOT NULL,
+  api_key_cipher TEXT,
+  key_hint       TEXT,
+  updated_at     INTEGER NOT NULL,
+  CHECK ((office_id IS NULL) <> (owner_user_id IS NULL))
+) STRICT;
+INSERT INTO ai_providers_next
+  (id, office_id, owner_user_id, position, name, kind, base_url, default_model, api_key_cipher, key_hint, updated_at)
+SELECT id, office_id, owner_user_id, position, name,
+       CASE kind WHEN 'anthropic' THEN 'anthropic_compatible' ELSE kind END,
+       COALESCE(NULLIF(TRIM(base_url), ''), 'https://api.anthropic.com'),
+       default_model, api_key_cipher, key_hint, updated_at
+  FROM ai_providers;
+DROP TABLE ai_providers;
+ALTER TABLE ai_providers_next RENAME TO ai_providers;
 `,
 };

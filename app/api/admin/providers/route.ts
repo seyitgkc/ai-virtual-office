@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     switch (body?.operation) {
       case "save": {
         const kind = body.kind;
-        if (kind !== "anthropic" && kind !== "openai_compatible") throw new OfficeError(400, "Choose a provider type.");
+        if (kind !== "anthropic_compatible" && kind !== "openai_compatible") throw new OfficeError(400, "Choose the interface the provider speaks.");
         return saveProviderSettings(session, {
           ...(typeof body.id === "string" ? { id: body.id } : {}),
           name: text(body.name),

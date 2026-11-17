@@ -44,14 +44,15 @@ export interface InvitationView {
   manageable: boolean;
 }
 
-export type ProviderKind = "anthropic" | "openai_compatible";
+/** The interface a provider speaks. Both kinds are set up the same way. */
+export type ProviderKind = "anthropic_compatible" | "openai_compatible";
 
 /** One of an office's AI providers. The API key itself is never included. */
 export interface ProviderView {
   id: string;
   name: string;
   kind: ProviderKind;
-  /** The service address. Null for an Anthropic provider at Anthropic itself. */
+  /** The service address. Null when the viewer is not the one who may see it. */
   baseUrl: string | null;
   defaultModel: string;
   hasKey: boolean;

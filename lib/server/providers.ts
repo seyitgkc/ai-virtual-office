@@ -2,16 +2,18 @@
  * The AI providers an office has connected, and the runtime an AI agent gets
  * from its provider.
  *
- * An office can hold several providers of two kinds: Anthropic, and anything
- * that speaks the OpenAI chat completions API. Each AI agent names the one it
- * uses. API keys are stored encrypted and never leave the server.
+ * An office can hold several providers. A provider is any service that speaks
+ * one of two interfaces, OpenAI chat completions or Anthropic Messages, and
+ * both kinds are set up the same way: an address, a model id and a key if the
+ * service wants one. Each AI agent names the provider it uses. API keys are
+ * stored encrypted and never leave the server.
  */
 import { randomUUID } from "node:crypto";
 import type { AgentRuntime } from "../engine";
 import type { Participant } from "../model";
 import type { ProviderKind, ProviderView } from "../view";
 import { all, get, run, type Db } from "./db";
-import { ModelRuntime, testProvider, validModelId, type ConversationRuntime } from "./modelRuntime";
+import { ModelRuntime, testProvider, type ConversationRuntime } from "./modelRuntime";
 import { OpenAiCompatibleRuntime, testOpenAiCompatible } from "./openaiRuntime";
 import { seal, unseal } from "./secrets";
 
@@ -21,7 +23,7 @@ interface ProviderRow {
   owner_user_id: string | null;
   name: string;
   kind: ProviderKind;
-  base_url: string | null;
+  base_url: string;
   default_model: string;
   api_key_cipher: string | null;
   key_hint: string | null;
@@ -77,8 +79,8 @@ export function providerIds(db: Db, officeId: string, userId: string, mayUseOthe
 }
 
 /** A provider can be used once it holds a readable key, or needs none. */
-const usable = (r: ProviderRow): boolean =>
-  unseal(r.api_key_cipher) !== null || (r.kind === "openai_compatible" && r.api_key_cipher === null);
+/** A provider can be used when its key can be read, or when it was given none. */
+const usable = (r: ProviderRow): boolean => unseal(r.api_key_cipher) !== null || r.api_key_cipher === null;
 
 const toView = (r: ProviderRow, sharedBy: string | null, selectable: boolean): ProviderView => {
   const key = unseal(r.api_key_cipher);
@@ -207,20 +209,14 @@ export function saveProvider(db: Db, owner: ProviderOwner, input: ProviderInput)
 
   const name = input.name.trim();
   if (name.length < 2 || name.length > 40) throw new ProviderError("Give the provider a name (2 to 40 characters).");
-  if (input.kind !== "anthropic" && input.kind !== "openai_compatible") throw new ProviderError("Choose a provider type.");
-  // An Anthropic provider may sit at its own address: a gateway or another
-  // service that speaks the same interface. Its model ids are its own.
-  const baseUrl =
-    input.kind === "openai_compatible" || input.baseUrl?.trim()
-      ? checkedBaseUrl(input.baseUrl ?? "", "the provider's", existing?.base_url ?? null)
-      : null;
-  const model = input.defaultModel.trim();
-  const official = input.kind === "anthropic" && baseUrl === null;
-  if (official ? !validModelId(model) : !/^[\w.:/@-]{1,100}$/.test(model)) {
-    throw new ProviderError(
-      official ? "Enter a model id such as claude-opus-5-5." : "Enter the model id the provider expects.",
-    );
+  if (input.kind !== "anthropic_compatible" && input.kind !== "openai_compatible") {
+    throw new ProviderError("Choose the interface the provider speaks.");
   }
+  // Every provider is set up the same way: the address of its API, the model
+  // id it expects, and its key if it wants one. No service is assumed.
+  const baseUrl = checkedBaseUrl(input.baseUrl ?? "", "the provider's", existing?.base_url ?? null);
+  const model = input.defaultModel.trim();
+  if (!/^[\w.:/@-]{1,100}$/.test(model)) throw new ProviderError("Enter the model id the provider expects.");
 
   const typed = input.apiKey?.trim();
   if (typed && (typed.length < 8 || typed.length > 400 || /\s/.test(typed))) {
@@ -228,9 +224,6 @@ export function saveProvider(db: Db, owner: ProviderOwner, input: ProviderInput)
   }
   const cipher = input.removeKey ? null : typed ? seal(typed) : (existing?.api_key_cipher ?? null);
   const hint = input.removeKey ? null : typed ? typed.slice(-4) : (existing?.key_hint ?? null);
-  if (input.kind === "anthropic" && cipher === null && !existing) {
-    throw new ProviderError("An Anthropic provider needs an API key.");
-  }
 
   const id = existing?.id ?? `prov-${randomUUID().slice(0, 8)}`;
   if (existing) {
@@ -284,11 +277,9 @@ export async function testStoredProvider(db: Db, owner: ProviderOwner, id: strin
   const r = row(db, owner, id);
   if (!r) throw new ProviderError("That AI provider does not exist here.");
   const key = unseal(r.api_key_cipher);
-  if (r.kind === "anthropic") {
-    if (!key) throw new ProviderError("No readable API key is stored for this provider.");
-    return testProvider(key, r.default_model, r.base_url);
-  }
-  return testOpenAiCompatible(r.base_url ?? "", key, r.default_model);
+  return r.kind === "anthropic_compatible"
+    ? testProvider(key, r.default_model, r.base_url)
+    : testOpenAiCompatible(r.base_url, key, r.default_model);
 }
 
 const cache = new Map<string, { stamp: string; runtime: ConversationRuntime }>();
@@ -314,9 +305,9 @@ export function runtimeForAgent(db: Db, officeId: string, agent: Participant): C
   if (cached && cached.stamp === stamp) return cached.runtime;
 
   const runtime: ConversationRuntime =
-    r.kind === "anthropic"
-      ? new ModelRuntime({ apiKey: key!, model, baseUrl: r.base_url })
-      : new OpenAiCompatibleRuntime({ baseUrl: r.base_url ?? "", apiKey: key, model });
+    r.kind === "anthropic_compatible"
+      ? new ModelRuntime({ apiKey: key, model, baseUrl: r.base_url })
+      : new OpenAiCompatibleRuntime({ baseUrl: r.base_url, apiKey: key, model });
   cache.set(`${r.id}:${model}`, { stamp, runtime });
   return runtime;
 }
