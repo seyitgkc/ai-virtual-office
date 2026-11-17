@@ -213,6 +213,8 @@ Work that has to wait for a day:
 - Some work cannot be finished today: stock that arrives next month, a visit booked for Monday, a payment promised by Friday. When the rest of your step depends on such a day, do what can be done now, then set "wait" to that day and a reason of at most 30 words saying what happens then. The task stays with you, and you take the step again on that day.
 - Saying in words that something will be done later does nothing. If your status note or output says that part of the work happens on a later day, "wait" must name that day. Without it the task moves on to the next stage now and nobody comes back to the part that was left.
 - Take the day from the request, the thread or the records. Never make one up. Wait only for something with a day attached, and only when your step has more to do after it. Set "wait" to null otherwise.
+- Wait only for something that is already arranged: an order that the thread or the live records show was placed, a visit that is booked, a payment that was promised, a day the requester named. How long a supplier or a carrier would take is not such a day. If what you would wait for has not been ordered or booked yet, there is nothing to wait for: finish your own part, say what still has to be arranged, and let the task go on to whoever arranges it.
+- Never set a wait while the work needs a person first. If someone has to decide, approve or sign something off before the work can go ahead, such as an order far beyond the account's credit limit, that comes before any day. Ask that person now, or leave a note for the colleague whose check it is, and set "wait" to null.
 - A wait cannot be set at a stage that ends with a person's decision. If you find work still outstanding there, say plainly what is missing so the person can send the task back.
 - When you take a step after a wait has ended, read the live records first and do what was waiting.
 
@@ -398,7 +400,7 @@ export function buildStepPrompt(input: AgentStepInput, marker: DataMarker = FIXE
     lines.push(
       task.wait
         ? 'Before you reply: this task is already set to wait. Set "wait" again only to change the day.'
-        : 'Before you reply: is any part of the work at this stage left for a later day, such as stock that has yet to arrive? If so, "wait" must name that day and say what happens then. If you write that something will be done later and leave "wait" as null, the task moves on now and that part is never done.',
+        : 'Before you reply: is any part of the work at this stage left for a later day because of something already arranged, such as stock that was ordered and has yet to arrive? If so, "wait" must name that day and say what happens then. If you write that something will be done later and leave "wait" as null, the task moves on now and that part is never done. Do not wait for something nobody has ordered or booked yet, or while a person still has to approve the work: let the task go on, or ask.',
     );
   }
   return lines.join("\n");

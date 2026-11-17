@@ -147,7 +147,11 @@ pricing, and a finance approval before a quote goes out.
   it can now and sets the task to wait until that day. The task shows the day
   and the reason, stays with its owner, and is not handed on. On the day the
   office wakes the agent, which reads the live records and finishes the job.
-  A person can end a wait early with one click.
+  A person can end a wait early with one click. An agent is told to wait only
+  for something already arranged, such as an order that was placed or a visit
+  that is booked. A supplier's lead time is not a day to wait for, and work
+  that needs a person's approval first is put to that person, not parked.
+  These are instructions to a model and not something the office enforces.
 - **Work that survives a failure and a restart.** What each agent has been
   given is written down before it starts. A step that fails is tried again,
   up to three times, and a task is not handed on while a colleague still has
