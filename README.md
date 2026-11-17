@@ -276,6 +276,18 @@ screen:
   the space the side panels leave. While agents work,
   a second line under it names who is on which task. On a phone both sit
   above the section bar, and the summary shows on the office view.
+- **A briefing under the counts** says in a sentence or two what the work is:
+  which tasks need a person and what each needs, then what is in an agent's
+  hands or waiting for a day. In an office with an AI agent, that agent's
+  model writes it, in at most two sentences and 34 words, and it carries a
+  small *AI* mark. It is written once the agents have gone quiet and only
+  when the office has changed since the last one, so a look at the office
+  costs no model call by itself. Until it arrives, and in an office with no
+  model such as the demo, the briefing is composed from the same facts with
+  no mark. Either way it is written only from what every member already sees
+  in the work list: a task's name, its state, who holds it, and the day and
+  reason it waits for. Nothing said in a room goes into it, so one briefing
+  serves everyone whatever they may read.
 - **The office is framed in the space the panels leave.** The view pulls back
   until the whole plan fits between the work list and the task panel, however
   long the corridor has grown, and takes the full width when no task or
@@ -752,7 +764,7 @@ flowchart TB
     store["Office store<br/>load and save"]
   end
 
-  db[("SQLite<br/>65 tables in 3NF")]
+  db[("SQLite<br/>66 tables in 3NF")]
   llm["Anthropic or an OpenAI<br/>compatible service"]
 
   hook -->|"action"| http
@@ -831,6 +843,8 @@ lib/standing.ts           how often standing work is filed, and when next
 lib/report.ts             the counts behind the report
 lib/setup.ts              what a new office still needs
 lib/server/chat.ts        direct messages, read state, and what a model is shown for a conversation
+lib/briefing.ts           the briefing: the facts it is written from, the composed text, a model's instructions
+lib/server/briefings.ts   the stored briefing and the state of the office it was written for
 lib/sampleOffice.ts       the demo's distributor as an office of one's own, with AI agents
 lib/server/systems.ts     connected systems: storage, live records, carrying out operations
 lib/server/modelRuntime.ts   the AI agent runtime for Anthropic models
@@ -1244,7 +1258,7 @@ The same data feeds the 3D walls, the map and walking collision.
 
 ## Database
 
-SQLite, one file, 65 tables. One database holds many offices. The schema is in
+SQLite, one file, 66 tables. One database holds many offices. The schema is in
 third normal form:
 
 - **Every column holds one value.** Lists such as scopes, capabilities and
@@ -1765,7 +1779,7 @@ Each choice is here because it removed something to run or to explain.
 | Framework | Next.js 16, App Router, as a Node server | One project holds the page, the API and the server logic, so the demo deploys as a single container. Route handlers are plain functions, which keeps the API easy to read. |
 | Language | TypeScript 7, strict | The access model and the engine are mostly types and pure functions. Strict types catch a wrong room id or a missing field before anything runs. |
 | 3D | three.js through @react-three/fiber and drei | The scene is declared as React components next to the panels that describe it, and it re-renders from the same state. No separate game loop to keep in step with the UI. |
-| Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (65 tables in third normal form), so moving to Postgres is a change of driver. |
+| Database | SQLite through Node's built-in `node:sqlite` | One file, no server to host, nothing native to compile, and free to run anywhere. The schema is still fully relational (66 tables in third normal form), so moving to Postgres is a change of driver. |
 | Sign-in | jose for signed tokens, Node's scrypt for passwords | Small, standard and dependency-light. No outside identity service is needed for the demo to be public. |
 | AI providers | The Anthropic SDK, and plain `fetch` for anything that speaks the OpenAI chat interface | Two connection styles cover nearly every hosted and self-hosted model, so an office is not tied to one vendor. zod checks every reply before the engine sees it. |
 | Checks | tsx running plain scripts | No test framework to learn. Each script prints what it checks in a sentence, and the Docker image refuses to build unless all of them pass. |
@@ -2158,6 +2172,7 @@ All optional. See `.env.example`.
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | unset | Creates an account at start-up, with an empty office of its own. |
 | `DEMO_LOGIN` | `1` | Creates the demo office and allows password-free entry to it. `0` turns that off. |
 | `SIGNUP` | `1` | Lets anyone create an account on the sign-in page. `0` turns that off, which leaves invites and the administrator account. |
+| `BRIEFING` | `1` | Lets an office's model write the briefing at the top of the screen. `0` leaves the composed briefing everywhere and makes no model call for it. |
 | `ALLOW_PRIVATE_ADDRESSES` | unset | `1` lets a connected system or an AI provider sit at an address inside the server's own network while sign-up is on. |
 | `OFFICE_DB_PATH` | `./data/office.db` | Where the SQLite file lives. |
 | `ADMIN_NAME` | taken from the email | The administrator's display name. |

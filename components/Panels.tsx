@@ -23,6 +23,7 @@ import {
 import { dayOf, eligibleOwners, nextStage, roomForStage, stageSpec, type Action } from "../lib/engine";
 import { authorize } from "../lib/policy";
 import { atWorkOn, deskState, waitsForPerson, type AgentLoad, type OfficeSummary } from "../lib/agentState";
+import type { Briefing } from "../lib/briefing";
 import { taskLabel, withTaskLabels } from "../lib/taskLabels";
 import { TaskText } from "./TaskText";
 import { KindBadge, statusOf, URGENT_ACCENT } from "./TaskCard";
@@ -52,12 +53,14 @@ const WORK_FILTERS: Record<WorkFilter, { label: string; hint: string; keeps: (ta
 };
 
 /**
- * The office at a glance, always in view: open work, what waits for a
- * person, who is at work and how much is closed.
+ * The office at a glance, always in view: the counts of open work, what
+ * waits for a person, who is at work and how much is closed, and under them
+ * the briefing, a sentence or two on what that work is.
  */
-export function SummaryLine({ summary }: { summary: OfficeSummary }) {
+export function SummaryLine({ summary, briefing }: { summary: OfficeSummary; briefing: Briefing }) {
   const { open, waiting, urgent, closed, agents, atWork } = summary;
   return (
+    <div className="office-glance">
     <div className="office-summary" role="group" aria-label="The office at a glance">
       <span data-zero={open === 0} title="Tasks that are not closed">
         <b>{open}</b> open
@@ -78,6 +81,18 @@ export function SummaryLine({ summary }: { summary: OfficeSummary }) {
       <span data-zero={closed === 0} title={WORK_FILTERS.done.hint}>
         <b>{closed}</b> closed
       </span>
+    </div>
+      <p className="office-brief" aria-label="Briefing">
+        {briefing.by && (
+          <span
+            className="brief-by"
+            title={`Written by ${briefing.by}${briefing.at ? ` at ${time(briefing.at)}` : ""}, from the work list alone`}
+          >
+            AI
+          </span>
+        )}
+        {briefing.text}
+      </p>
     </div>
   );
 }

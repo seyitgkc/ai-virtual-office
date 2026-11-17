@@ -1,5 +1,6 @@
 import type { AccessScope, Office, Permission, TaskId } from "./model";
 import type { AgentLoad } from "./agentState";
+import type { Briefing } from "./briefing";
 import type { StandingView } from "./standing";
 
 export interface FeedEntry {
@@ -154,6 +155,8 @@ export interface OfficeView {
    * will take them.
    */
   agentLoad: AgentLoad;
+  /** A sentence or two on what the office is doing, written from the work list. */
+  briefing: Briefing;
   accessTokens: TokenView[];
   /** Invitations nobody has accepted yet. Empty unless the viewer may invite. */
   invitations: InvitationView[];

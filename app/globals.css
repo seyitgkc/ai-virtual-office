@@ -359,12 +359,26 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
   .office:has(#inspector:not([data-empty="true"])) .top-status { right: 370px; }
 }
 .top-status > * { position: relative; pointer-events: auto; max-width: 100%; }
-/* When it does not fit on one line it breaks into lines of about the same length. */
+/* One card: the counts, and under them the briefing in a sentence or two. */
+.office-glance {
+  width: fit-content; max-width: min(100%, 600px); border-radius: 14px;
+  background: rgba(18,20,25,0.9); border: 1px solid rgba(255,255,255,0.12);
+}
+/* When a row does not fit on one line it breaks into lines of about the same length. */
 .office-summary {
   text-align: center; text-wrap: balance;
-  padding: 6px 7px; font-size: 11px; line-height: 1.6; border-radius: 14px;
-  background: rgba(18,20,25,0.9); border: 1px solid rgba(255,255,255,0.12);
+  padding: 6px 7px; font-size: 11px; line-height: 1.6;
   color: rgba(232,230,225,0.72);
+}
+.office-brief {
+  margin: 0; padding: 6px 14px 8px; text-align: center; text-wrap: balance;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 11.5px; line-height: 1.5; color: rgba(232,230,225,0.9);
+}
+.office-brief .brief-by {
+  display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 100px; vertical-align: 1px;
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em; line-height: 14px;
+  color: #cfe3f7; background: rgba(110,169,217,0.28);
 }
 .office-summary span { display: inline-block; white-space: nowrap; margin: 0 7px; }
 .office-summary b { font-weight: 600; color: #e8e6e1; font-variant-numeric: tabular-nums; }
@@ -811,7 +825,7 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
   .working { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .notice ~ .top-status { bottom: calc(124px + env(safe-area-inset-bottom)); }
   /* The other sheets fill the screen with a list, which a line that never leaves would cover. */
-  .office:not([data-sheet="office"]) .office-summary { display: none; }
+  .office:not([data-sheet="office"]) .office-glance { display: none; }
   .desk-chip { font-size: 10.5px; padding: 6px 9px; }
   .dialog-backdrop { padding: 10px; }
   /* Settings fill the screen. Wide tables scroll sideways inside their own box. */

@@ -343,7 +343,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
       )}
       {/* The summary stays. The line under it comes and goes with the work. */}
       <div className="top-status">
-        <SummaryLine summary={summaryOf(office, view.agentLoad)} />
+        <SummaryLine summary={summaryOf(office, view.agentLoad)} briefing={view.briefing} />
         {pending && <div className="working">Working...</div>}
         {!pending && view.agentsAtWork && (
           <div className="working">

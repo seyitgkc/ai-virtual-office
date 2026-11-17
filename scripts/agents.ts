@@ -19,6 +19,7 @@ import { earlierWork } from "../lib/recall";
 import { splitAtTasks, taskLabel, taskNamed, withTaskLabels } from "../lib/taskLabels";
 import { span, workReport } from "../lib/report";
 import { buildChatSystem } from "../lib/server/chat";
+import { briefingFacts, composeBriefing, tidyBriefing } from "../lib/briefing";
 import { buildStepPrompt, dataMarker, readReply, SYSTEM_PROMPT, systemPrompt, toStepResult } from "../lib/server/modelRuntime";
 
 let failures = 0;
@@ -654,6 +655,39 @@ async function main(): Promise<void> {
   expect("but not while an agent is still checking it", summaryOf(reviewed, { "p-ledger": { ...idle, taskId: "T-1002" } }).waiting, 1);
   expect("an agent answering a note on it does not change that", summaryOf(reviewed, { "p-ledger": { ...idle, taskId: "T-1002", forNote: true } }).waiting, 2);
   expect("a closed task never waits", waitsForPerson({ ...seeded.tasks.find((t) => t.id === "T-1003")!, status: "in_review" }, {}), false);
+
+  console.log("\n-- the briefing, composed from the work list --");
+  const t = (id: string) => seeded.tasks.find((x) => x.id === id)!;
+  const withTasks = (tasks: typeof seeded.tasks) => ({ ...seeded, tasks });
+  expect("an office with no work says so", composeBriefing(withTasks([]), {}), "No work has been filed yet.");
+  expect("one with everything closed says that", composeBriefing(withTasks([t("T-1003")]), {}), "Nothing is open. The one task filed is closed.");
+  expect("what waits for a person comes first, by name", composeBriefing(seeded, {}), "2 tasks wait for a person: T-1 needs access for Quill, T-2 needs an answer.");
+  const moving = { ...t("T-1002"), status: "in_progress" as const };
+  expect(
+    "a task in an agent's hands is said to be with that agent",
+    composeBriefing(withTasks([t("T-1001"), moving, t("T-1003")]), {}),
+    "One task waits for a person: T-1 needs access for Quill. T-2 is with Vera at the execution stage.",
+  );
+  const dated = { ...moving, wait: { until: Date.UTC(2026, 11, 21, 17), reason: "Stock is due at Laval." } };
+  expect(
+    "one that waits for a day gives the day",
+    composeBriefing(withTasks([dated, t("T-1003")]), {}),
+    "Nothing waits for a person. T-1 waits until 21 December 2026.",
+  );
+  const inReview = { ...t("T-1002"), status: "in_review" as const };
+  expect("a review an agent is still checking does not wait for a person yet", composeBriefing(withTasks([inReview]), { "p-ledger": { taskId: "T-1002", forNote: false, waiting: 0, queued: [] } }), "Nothing waits for a person. T-1 is with Vera at the execution stage.");
+  expect("once checked, it is ready for a decision", composeBriefing(withTasks([inReview]), {}), "One task waits for a person: T-1 is ready for a decision.");
+  const five = Array.from({ length: 5 }, (_, i) => ({ ...t("T-1002"), id: `T-80${i}` }));
+  expect("a long list names three and counts the rest", composeBriefing(withTasks(five), {}).endsWith("T-3 needs an answer, and 2 more."), true);
+  const several = [moving, { ...dated, id: "T-811" }, { ...moving, id: "T-812" }];
+  expect("several in hand are counted by kind", composeBriefing(withTasks(several), {}), "Nothing waits for a person. Of the other 3, 2 are with agents and 1 waits for a day.");
+  const facts = briefingFacts(withTasks([t("T-1001"), dated, t("T-1003")]), {}, (kind, text) => `[${kind}:${text}]`);
+  expect("a model is given the counts", facts.includes("Open tasks: 2. Of those, waiting for a person: 1. Closed tasks: 1."), true);
+  expect("the day and the reason a task waits for", facts.some((l) => l.includes("waiting until 21 December 2026. Reason given: [reason:Stock is due at Laval.]")), true);
+  expect("and what closed last", facts.some((l) => l.includes("[title:Quote 4455: ecobee thermostats, 40 units]: completed.")), true);
+  expect("a model's answer loses its marks and line breaks", tidyBriefing('  "**T-1** waits.\n\n# T-2 is _moving_."  '), "T-1 waits. T-2 is moving.");
+  const cut = tidyBriefing(`${"First sentence about the work that is open today in this office. ".repeat(4)}And this one runs on far past the room there is for it at the top of the screen, well beyond the limit.`);
+  expect("one that runs long is cut at the end of a sentence", cut.length <= 300 && cut.endsWith("office."), true);
 
   console.log("\n-- a grant made for one task counts only for that task --");
   const veraPerson = initialState.office.participants.find((p) => p.id === "p-vera")!;

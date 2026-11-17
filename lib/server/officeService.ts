@@ -77,7 +77,9 @@ import {
   type ProviderInput,
   type ProviderOwner,
 } from "./providers";
-import { dataMarker } from "./modelRuntime";
+import { dataMarker, type ConversationRuntime } from "./modelRuntime";
+import { briefingFacts, briefingSystem, tidyBriefing } from "../briefing";
+import { briefedFingerprint, briefingFingerprint, briefingFor, saveBriefing } from "./briefings";
 import {
   buildChatSystem,
   directLines,
@@ -400,6 +402,8 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
     isDemoOffice: isDemoOffice(office.id),
     agentsAtWork: agentsAtWork(office.id),
     agentLoad: agentLoad(office.id),
+    // Written from the whole task list, which every member sees, and from nothing said in a room.
+    briefing: briefingFor(db, state.office, agentLoad(office.id)),
     feed: feedFor(db, state, viewer),
     hiddenMessages,
     // Keys never leave the server. The list is for people who connect
@@ -442,9 +446,100 @@ function buildView(db: Db, state: EngineState, session: Session): OfficeView {
   };
 }
 
-export function getView(session: Session): OfficeView {
+/**
+ * The office as this person sees it. `brief` is set by the page that someone
+ * is looking at: it lets a model write a new briefing when the last one no
+ * longer fits the office.
+ */
+export function getView(session: Session, options: { brief?: boolean } = {}): OfficeView {
   const db = officeDatabase();
-  return buildView(db, loadOffice(db, session), session);
+  const state = loadOffice(db, session);
+  if (options.brief) considerBriefing(db, state.office);
+  return buildView(db, state, session);
+}
+
+// ---------------------------------------------------------------------------
+// The briefing
+// ---------------------------------------------------------------------------
+
+/** How long to leave an office alone after its model failed to write a briefing. */
+const BRIEFING_RETRY_MS = 5 * 60_000;
+
+interface BriefingWork {
+  /** Offices a model is writing for now, and the state each is being written for. */
+  writing: Map<string, string>;
+  /** Offices where the last attempt failed, with the state it was for and when. */
+  failed: Map<string, { fingerprint: string; at: number }>;
+  /** For tests: answers in place of a model. */
+  reply?: (system: string, facts: string) => Promise<string>;
+}
+
+const briefingWork = (): BriefingWork => {
+  const held = globalThis as unknown as { __officeBriefings?: BriefingWork };
+  return (held.__officeBriefings ??= { writing: new Map(), failed: new Map() });
+};
+
+/** For tests: write every briefing with this function, or with the office's model again. */
+export function useBriefingReply(reply: BriefingWork["reply"]): void {
+  briefingWork().reply = reply;
+}
+
+/** For tests: wait until no briefing is being written. */
+export async function briefingsWritten(): Promise<void> {
+  while (briefingWork().writing.size > 0) await new Promise((resolve) => setTimeout(resolve, 5));
+}
+
+/**
+ * Have a model write the office's briefing if the stored one was written
+ * for a different state of the office. Nothing is asked while agents are
+ * still moving work, since the state would change under the answer, and
+ * nothing is awaited here: the briefing appears on a later look.
+ */
+function considerBriefing(db: Db, office: Office): void {
+  if (process.env.BRIEFING === "0" || office.tasks.length === 0 || agentsAtWork(office.id)) return;
+  const work = briefingWork();
+  if (work.writing.has(office.id)) return;
+  const load = agentLoad(office.id);
+  const fingerprint = briefingFingerprint(office, load);
+  if (briefedFingerprint(db, office.id) === fingerprint) return;
+  const failed = work.failed.get(office.id);
+  if (failed && failed.fingerprint === fingerprint && Date.now() - failed.at < BRIEFING_RETRY_MS) return;
+
+  // The model of the first AI agent that has a working provider writes it.
+  let writer: { runtime: ConversationRuntime; model: string } | null = null;
+  for (const agent of office.participants) {
+    if (agent.kind !== "agent" || agent.agentType !== "ai") continue;
+    try {
+      const runtime = runtimeForAgent(db, office.id, agent);
+      writer = { runtime, model: (runtime as { model?: string }).model ?? agent.model ?? "a model" };
+      break;
+    } catch {
+      // This agent has no usable provider. Another may.
+    }
+  }
+  if (!writer && !work.reply) return;
+
+  work.writing.set(office.id, fingerprint);
+  const marker = dataMarker();
+  const system = briefingSystem(marker.rule);
+  const facts = briefingFacts(office, load, marker.wrap).join("\n");
+  const names: Named[] = office.participants.map((p): Named => [p.id, p.displayName]);
+  void (async () => {
+    try {
+      const reply = work.reply
+        ? await work.reply(system, facts)
+        : await writer!.runtime.chat("The briefing", system, [{ role: "user", content: facts }]);
+      const body = tidyBriefing(withTaskLabels(office, plainNames(reply, names)));
+      if (!body) throw new Error("The briefing came back empty.");
+      await inTurn(async () => saveBriefing(db, office.id, fingerprint, body, writer?.model ?? "a model", Date.now()));
+      work.failed.delete(office.id);
+    } catch {
+      // The composed briefing stays up. The office is asked again later, or when its state changes.
+      work.failed.set(office.id, { fingerprint, at: Date.now() });
+    } finally {
+      work.writing.delete(office.id);
+    }
+  })();
 }
 
 // ---------------------------------------------------------------------------

@@ -1248,7 +1248,8 @@ export function ProvidersTab({
         </p>
         <p className="hint">
           An AI agent is shown only the messages and room records it is allowed to read. One model call is made each
-          time work reaches it.
+          time work reaches it. The briefing at the top of the office is written by the first AI agent&apos;s model,
+          once each time the work list changes and the agents have gone quiet.
         </p>
       </Section>
     </>

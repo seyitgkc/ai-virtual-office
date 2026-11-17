@@ -18,6 +18,8 @@ services:
       DEMO_LOGIN: ${DEMO_LOGIN:-1}
       # Whether anyone can create an account. Set to 0 to turn off.
       SIGNUP: ${SIGNUP:-1}
+      # Whether an office's model writes the briefing. Set to 0 to turn off.
+      BRIEFING: ${BRIEFING:-1}
       # Set to 1 to let a system or provider sit inside this server's network
       # while sign-up is on.
       ALLOW_PRIVATE_ADDRESSES: ${ALLOW_PRIVATE_ADDRESSES:-}

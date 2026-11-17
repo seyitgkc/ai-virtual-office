@@ -18,7 +18,7 @@
 import { CARRIER, STOREFRONT } from "../../services/manifests.ts";
 import type { ServiceManifest } from "../systems";
 
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 
 const quoted = (text: string): string => `'${text.replace(/'/g, "''")}'`;
 
@@ -711,6 +711,16 @@ CREATE TABLE note_reads (
   PRIMARY KEY (reader_id, message_id)
 ) STRICT;
 
+-- The briefing a model last wrote for an office, and the state of the office
+-- it was written for. One row per office, replaced when a new one is written.
+CREATE TABLE briefings (
+  office_id   TEXT PRIMARY KEY REFERENCES offices(id) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  written_by  TEXT NOT NULL,
+  written_at  INTEGER NOT NULL
+) STRICT;
+
 CREATE INDEX sessions_by_user       ON sessions(user_id);
 CREATE INDEX audit_by_office        ON audit_log(office_id, id);
 CREATE INDEX tokens_by_rule         ON access_tokens(rule_id);
@@ -1294,5 +1304,17 @@ SELECT i.id, i.token_hash, p.office_id, p.display_name, p.title, p.role_id, d.ro
   LEFT JOIN desks d ON d.id = p.desk_id;
 DROP TABLE invites;
 ALTER TABLE invites_next RENAME TO invites;
+`,
+  // Version 22 keeps the briefing a model wrote for each office.
+  21: /* sql */ `
+-- The briefing a model last wrote for an office, and the state of the office
+-- it was written for. One row per office, replaced when a new one is written.
+CREATE TABLE briefings (
+  office_id   TEXT PRIMARY KEY REFERENCES offices(id) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  written_by  TEXT NOT NULL,
+  written_at  INTEGER NOT NULL
+) STRICT;
 `,
 };
