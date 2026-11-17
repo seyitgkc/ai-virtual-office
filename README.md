@@ -2211,10 +2211,13 @@ them too, at `http://storefront:8081`, `http://carrier:8082`,
 with the value of `DEMO_SYSTEMS_KEY`. Back up the office by copying the volume.
 
 The deployed site runs the same six containers without compose, as six
-applications in one Dokploy project that build from this repository on every
-push to `main`. The office builds from `Dockerfile`. Each service builds from
-`services/Dockerfile` with the build argument `SERVICE` and has `PORT` and
-`API_KEY` in its environment. No service has a domain, so only the office
+applications in one Dokploy project that build from this repository. The
+office builds from `Dockerfile` on every push to `main`. Each service builds
+from `services/Dockerfile` with the build argument `SERVICE`, has `PORT` and
+`API_KEY` in its environment, and is set to watch `services/**`, so it is
+rebuilt and restarted only by a push that changes something in that folder.
+A service keeps its data in memory, so a restart puts its sample data back,
+and without that setting every push to the office would do so. No service has a domain, so only the office
 reaches them, by their internal names on Dokploy's network.
 
 ### Plesk
