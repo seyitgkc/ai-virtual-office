@@ -297,7 +297,12 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
 
       {faced && faced.id !== selectedPersonId && (
         <div className="interact-hint" role="status">
-          Press <kbd>F</kbd> to talk to {faced.displayName}
+          Press <kbd>F</kbd>{" "}
+          {faced.kind === "human"
+            ? `to write to ${faced.displayName}`
+            : faced.agentType === "ai"
+              ? `to talk to ${faced.displayName}`
+              : `to ask ${faced.displayName} where its work stands`}
         </div>
       )}
 

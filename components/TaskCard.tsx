@@ -39,11 +39,17 @@ export const statusOf = (task: Task): { label: string; accent: string } =>
       ? { label: task.status === "blocked_question" ? "rejected, needs an answer" : "rejected, winding up", accent: task.status === "blocked_question" ? "#e0a23f" : "#8a8a8a" }
       : STATUS[task.status];
 
+/** The short mark beside a name: Human, AI, or PB for an agent that follows a playbook. */
 export function KindBadge({ kind, agentType }: Pick<Participant, "kind" | "agentType">) {
   const playbook = kind === "agent" && agentType !== "ai";
   return (
-    <span className="kind-badge" data-kind={kind} data-playbook={playbook}>
-      {kind === "human" ? "Human" : playbook ? "Playbook" : "AI"}
+    <span
+      className="kind-badge"
+      data-kind={kind}
+      data-playbook={playbook}
+      title={kind === "human" ? "A person" : playbook ? "Playbook agent: follows written steps" : "AI agent: asks a language model"}
+    >
+      {kind === "human" ? "Human" : playbook ? "PB" : "AI"}
     </span>
   );
 }

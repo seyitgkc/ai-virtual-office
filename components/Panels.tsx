@@ -183,8 +183,10 @@ export function TitleCard({
           <KindBadge kind="human" agentType={null} /> a person, rounded
         </span>
         <span>
-          <KindBadge kind="agent" agentType="ai" /> <KindBadge kind="agent" agentType="playbook" /> an agent,
-          faceted
+          <KindBadge kind="agent" agentType="ai" /> an AI agent, faceted
+        </span>
+        <span>
+          <KindBadge kind="agent" agentType="playbook" /> a playbook agent, faceted
         </span>
       </div>
       {isDemoOffice && (

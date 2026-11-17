@@ -341,7 +341,10 @@ Each desk's monitor shows its occupant's name and state: working, waiting for
 access, waiting on an answer, waiting for a decision, or nothing on the desk,
 with the task and the last thing they said about it. When you stand within a
 few steps of someone in the same room and face them, a prompt appears: press F
-and their panel opens with the keyboard in the message box.
+and their panel opens with the keyboard in the message box. The prompt says
+what to expect: an AI agent answers from what you may both read, a playbook
+agent reports where its work stands, since it follows written steps and cannot
+hold a conversation, and a message to a person is theirs alone to read.
 
 **Messages.** Everyone's panel has a *Right now* line and a message box. Type
 and press Enter. A message to a person is delivered to their inbox, and anyone
@@ -372,7 +375,8 @@ with one note. It cannot halt or take over a task that is not its own. Whoever f
 a request also gets a note when a connected system refuses or cannot be
 reached, because the task carries on regardless.
 
-**Reading the office.** Every name tag says Human or AI. People are rounded
+**Reading the office.** Every name tag says Human, AI or PB, where PB marks an
+agent that follows a playbook. People are rounded
 figures. Agents are faceted and carry a slowly turning ring. A pulsing marker
 above a figure means that figure owns a halted task.
 
