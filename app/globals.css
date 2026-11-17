@@ -322,6 +322,9 @@ details.document pre {
 }
 fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 .waiting { margin: 0 0 8px; padding: 8px 10px; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; }
+/* Turning a request down sits apart from the moves that carry it forward. */
+.turn-down { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.07); }
+.turn-down .btn { margin: 0; }
 .waiting p { margin: 0 0 6px; font-size: 12px; line-height: 1.4; color: rgba(232,230,225,0.8); }
 .withheld {
   font-size: 10.5px; color: rgba(224,162,63,0.9);

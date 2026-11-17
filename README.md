@@ -315,6 +315,14 @@ screen:
   "Undo all of them" and "Leave them as they are" as ready answers and a box
   for their own words. The task shows as rejected and being wound up until
   the agents have done what was said.
+- **A request can be turned down before review.** Whoever may decide reviews
+  sees *Reject this request* on any open task, with a second click to
+  confirm: one that is halted on a question, set to wait for a day, or still
+  being planned. Its open questions and its wait go with it, and anything it
+  already did in a connected system is settled the same way as at review.
+  The button waits while an agent is in the middle of a step on the task.
+  Approving, and sending work back, stay at review, where there is finished
+  work to rule on.
 
 Every permission change records who made it and why. A grant made for one task
 counts only for work on that task and expires when the task closes, so an
@@ -511,7 +519,7 @@ permissions against roles:
 | --- | --- |
 | Manage access | Grant and revoke individual access rules and permission tokens. Escalations go to people with this permission. |
 | Hand work over | Give a task to a different owner. |
-| Decide reviews | Approve or reject work at the review stage, or send it back with what has to change. |
+| Decide reviews | Approve or reject work at the review stage, or send it back with what has to change. Reject a request at any earlier stage. |
 | See everything | Read every message and the whole activity log. |
 | Invite people | Add a person to the office with a role and a desk. |
 | Manage people and agents | Add, configure and remove agents. Rename people, change roles, move desks. |
@@ -928,6 +936,9 @@ stateDiagram-v2
   in_progress --> in_review: advanced into Finance
   in_review --> completed: approved
   in_review --> rejected: rejected, having done nothing in any system
+  in_progress --> rejected: turned down before review
+  blocked_question --> rejected: turned down before review
+  blocked_permission --> rejected: turned down before review
   in_review --> blocked_question: rejected, with orders or bookings still standing
   blocked_question --> rejected: told to leave them, or everything taken back
   in_review --> in_progress: sent back to Fulfilment with a reason
@@ -965,7 +976,7 @@ server enforces it and the interface uses it to disable controls.
 | Answer a question | being the person asked, or `act` in that room |
 | Grant or revoke an access rule | the Manage access permission |
 | Hand work to another owner | the Hand work over permission |
-| Approve or reject at review | the Decide reviews permission |
+| Approve or reject at review, or reject an open task before it | the Decide reviews permission |
 | Change the office's set-up | the permission for that part: rooms, people and agents, roles, AI providers or the office itself |
 
 The server overwrites every "who did this" field with the signed-in person

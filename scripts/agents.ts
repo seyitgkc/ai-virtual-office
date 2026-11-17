@@ -656,6 +656,41 @@ async function main(): Promise<void> {
   expect("an agent answering a note on it does not change that", summaryOf(reviewed, { "p-ledger": { ...idle, taskId: "T-1002", forNote: true } }).waiting, 2);
   expect("a closed task never waits", waitsForPerson({ ...seeded.tasks.find((t) => t.id === "T-1003")!, status: "in_review" }, {}), false);
 
+  console.log("\n-- turning a request down before review --");
+  {
+    const idle = new Recorder(() => ({ questions: [], assumptions: [] }));
+    const taskIn = (state: typeof initialState, id: string) => state.office.tasks.find((x) => x.id === id)!;
+    const asking = taskIn(initialState, "T-1002");
+    expect("a task halted on a question has it open", `${asking.status} ${asking.openQuestionIds.length}`, "blocked_question 1");
+    const openQuestion = asking.openQuestionIds[0];
+    const turnedDown = (await reduce(initialState, { type: "DECIDE", taskId: "T-1002", byId: "p-dana", verdict: "rejected" }, idle)).state;
+    expect("rejecting it closes it where it stands", `${taskIn(turnedDown, "T-1002").status} ${taskIn(turnedDown, "T-1002").closedAt !== null} ${taskIn(turnedDown, "T-1002").stage}`, "rejected true execution");
+    expect("and its question goes with it", taskIn(turnedDown, "T-1002").openQuestionIds.length, 0);
+    expect("no agent is asked to do anything for it", idle.inputs.length, 0);
+    const tooLate = (await reduce(turnedDown, { type: "ANSWER_QUESTION", questionId: openQuestion, answeredById: "p-sam", body: "Dartmouth" }, idle)).state;
+    expect("answering that question afterwards changes nothing", `${taskIn(tooLate, "T-1002").status} ${tooLate.office.messages.some((m) => m.kind === "answer" && m.questionId === openQuestion)}`, "rejected false");
+    const parked = {
+      ...initialState,
+      office: {
+        ...initialState.office,
+        tasks: initialState.office.tasks.map((x) =>
+          x.id === "T-1002" ? { ...x, status: "in_progress" as const, openQuestionIds: [], wait: { until: initialState.now + 40 * 86_400_000, reason: "Stock is due." }, owed: true } : x,
+        ),
+      },
+    };
+    const unparked = (await reduce(parked, { type: "DECIDE", taskId: "T-1002", byId: "p-dana", verdict: "rejected" }, idle)).state;
+    expect("a task set to wait for a day can be rejected too", `${taskIn(unparked, "T-1002").status} ${taskIn(unparked, "T-1002").closedAt !== null}`, "rejected true");
+    expect("and it waits for nothing afterwards", `${taskIn(unparked, "T-1002").wait} ${taskIn(unparked, "T-1002").owed}`, "undefined undefined");
+    const early = await reduce(initialState, { type: "DECIDE", taskId: "T-1002", byId: "p-dana", verdict: "approved" }, idle);
+    expect("work that has not reached review cannot be approved", `${taskIn(early.state, "T-1002").status} ${taskIn(early.state, "T-1002").closedAt}`, "blocked_question null");
+    expect("and the office says why", early.notes.some((n) => n.includes("where it can be rejected but not approved")), true);
+    const back = await reduce(initialState, { type: "DECIDE", taskId: "T-1002", byId: "p-dana", verdict: "changes_requested", comment: "Redo it." }, idle);
+    expect("nor sent back for changes", `${taskIn(back.state, "T-1002").status} ${back.notes.some((n) => n.includes("not sent back"))}`, "blocked_question true");
+    const notHers = await reduce(initialState, { type: "DECIDE", taskId: "T-1002", byId: "p-sam", verdict: "rejected" }, idle);
+    expect("someone whose role does not decide cannot reject", authorize(initialState.office, contextOf(initialState.office, initialState.now), who("p-sam"), { type: "DECIDE", taskId: "T-1002", byId: "p-sam", verdict: "rejected" }).allowed, false);
+    void notHers;
+  }
+
   console.log("\n-- the briefing, composed from the work list --");
   const t = (id: string) => seeded.tasks.find((x) => x.id === id)!;
   const withTasks = (tasks: typeof seeded.tasks) => ({ ...seeded, tasks });

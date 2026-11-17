@@ -1271,6 +1271,14 @@ export async function reduce(
         return done();
       }
 
+      // A request can be turned down at any point. Approving it, or sending it
+      // back for changes, is a ruling on work that has been done and checked,
+      // so those wait for the stage a person closes.
+      if (action.verdict !== "rejected" && !stageSpec(task.stage).humanGate) {
+        notes.push(`${task.id} is at ${stageSpec(task.stage).label}, where it can be rejected but not ${action.verdict === "approved" ? "approved" : "sent back"}`);
+        return done();
+      }
+
       // Work that is sent back returns to the room that carries it out, to
       // whoever had it there, and that room is where the reason is said.
       const comment = action.comment?.trim() ?? "";
@@ -1365,9 +1373,12 @@ export async function reduce(
       }
 
       const closed = action.verdict === "approved" || action.verdict === "rejected";
+      // A rejected task waits for nothing and asks nothing more: a day it was
+      // set to wait for and the questions it had open go with it.
+      const { wait: _waited, owed: _owing, ...settled } = task;
       office = {
         ...replaceTask(office, {
-          ...task,
+          ...(action.verdict === "rejected" ? { ...settled, openQuestionIds: [] } : task),
           stage: action.verdict === "approved" ? "done" : task.stage,
           status:
             action.verdict === "approved"

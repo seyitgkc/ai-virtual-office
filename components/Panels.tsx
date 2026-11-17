@@ -27,6 +27,7 @@ import type { Briefing } from "../lib/briefing";
 import { taskLabel, withTaskLabels } from "../lib/taskLabels";
 import { TaskText } from "./TaskText";
 import { KindBadge, statusOf, URGENT_ACCENT } from "./TaskCard";
+import { ConfirmButton } from "./settingsParts";
 
 export { KindBadge };
 import type { DirectLine, FeedEntry, OfficeView, TokenView } from "../lib/view";
@@ -661,6 +662,7 @@ export function Inspector({
         dispatch={dispatch}
         keepRecord={keepRecord}
         atWork={atWorkOn(task.id, agentLoad, (id) => office.participants.find((p) => p.id === id)?.displayName ?? "An agent")}
+        inHand={Object.values(agentLoad).some((load) => load.taskId === task.id)}
         onClear={onClear}
       />
     );
@@ -745,6 +747,7 @@ function TaskInspector({
   dispatch,
   keepRecord,
   atWork,
+  inHand,
   onClear,
 }: {
   office: Office;
@@ -757,6 +760,8 @@ function TaskInspector({
   keepRecord: KeepRecord | null;
   /** Who is working on this task at the moment, one line each. */
   atWork: string[];
+  /** True while an agent is taking a step on this task. */
+  inHand: boolean;
   onClear: () => void;
 }) {
   // A record is kept in a room, so only rooms this person reads are offered.
@@ -1138,6 +1143,22 @@ function TaskInspector({
             >
               {target ? `Advance to ${stageSpec(target).label}` : "Advance"}
             </button>
+          )}
+
+          {/* Before review there is nothing to approve, but a request can still be turned down. */}
+          {task.closedAt === null && !task.windUp && !awaitingDecision && mayDecide && (
+            <div className="turn-down">
+              {inHand ? (
+                <button className="btn warn" disabled title="An agent is taking a step on this now. It can be rejected once that step is done.">
+                  Reject this request
+                </button>
+              ) : (
+                <ConfirmButton
+                  label="Reject this request"
+                  onConfirm={() => dispatch({ type: "DECIDE", taskId: task.id, byId: supervisor.id, verdict: "rejected" })}
+                />
+              )}
+            </div>
           )}
 
           {needsSupervisor && (
