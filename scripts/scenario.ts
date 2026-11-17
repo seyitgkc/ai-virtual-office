@@ -1,5 +1,5 @@
 /**
- * End-to-end walkthrough. Doubles as the README's example workflow.
+ * End-to-end walkthrough. Doubles as one of the documented example workflows.
  * Run: npx tsx scenario.ts
  */
 import { resolveAccess, type Office } from "../lib/model";
