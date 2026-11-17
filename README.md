@@ -1942,6 +1942,15 @@ playbook.
   an account and offices of their own. One address can create five accounts an
   hour and the whole server sixty. Set `SIGNUP=0` to leave invites as the only
   way in.
+- While sign-up is on, a connected system or an AI provider cannot sit at an
+  address inside the server's own network: this machine, a private or
+  link-local range, or a bare host name of the kind one container uses to
+  reach another. A stranger's account could otherwise make the server call
+  services that were never published. The sample services are connected by
+  the server itself and are not affected. A private installation, with
+  `SIGNUP=0` or `ALLOW_PRIVATE_ADDRESSES=1`, may name its own network, for a
+  model running on the same machine for example. The check reads the address
+  as typed. A public name that resolves to a private address is not caught.
 
 ## Limitations
 
@@ -2062,6 +2071,10 @@ office with `DEMO_SYSTEMS_KEY=local-systems-key` and one address per service:
 `DEMO_SERVICE_DESK_URL=http://127.0.0.1:8085`. A service with no address is
 left out.
 
+To connect a system or an AI provider on this machine by hand, such as a model
+served on `127.0.0.1`, also start the office with `ALLOW_PRIVATE_ADDRESSES=1`
+or `SIGNUP=0`.
+
 ### Configuration
 
 All optional. See `.env.example`.
@@ -2072,6 +2085,7 @@ All optional. See `.env.example`.
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | unset | Creates an account at start-up, with an empty office of its own. |
 | `DEMO_LOGIN` | `1` | Creates the demo office and allows password-free entry to it. `0` turns that off. |
 | `SIGNUP` | `1` | Lets anyone create an account on the sign-in page. `0` turns that off, which leaves invites and the administrator account. |
+| `ALLOW_PRIVATE_ADDRESSES` | unset | `1` lets a connected system or an AI provider sit at an address inside the server's own network while sign-up is on. |
 | `OFFICE_DB_PATH` | `./data/office.db` | Where the SQLite file lives. |
 | `ADMIN_NAME` | taken from the email | The administrator's display name. |
 | `DEMO_STOREFRONT_URL`, `DEMO_CARRIER_URL`, `DEMO_LEDGER_URL`, `DEMO_SUPPLIER_URL`, `DEMO_SERVICE_DESK_URL` | set by `compose.yaml` | Where the demo office and a sample office find each sample service. A service with no address is not connected. |
@@ -2142,7 +2156,7 @@ of the three with a database file starts sample services the same way.
 | What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, a need passed to a colleague, documents on a task, earlier work shown within an agent's access, records kept from a thread, the report, ids replaced by names in what an agent writes, and tasks named by number | `npm run agents` | 200 of 200 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 56 of 56 pass |
 | Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, a person leaving, and an office built from nothing | `npm run admin` | 125 of 125 pass |
-| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, a person leaving and losing their sign-in, the demo office giving out no password accounts, creating an account, removal | `npm run offices` | 131 of 131 pass |
+| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, a person leaving and losing their sign-in, the demo office giving out no password accounts, creating an account, addresses inside the server's network, removal | `npm run offices` | 144 of 144 pass |
 | The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, an invoice voided, a rejected task whose order is cancelled in the storefront, and resetting the demo | `npm run systems` | 171 of 171 pass |
 | Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, work that is written down and picked up after a failure or a restart, urgent work first, standing work, who is on a task, a rejected task wound up between clicks and after a restart, providers that belong to an account, and the sample office | `npm run loop` | 118 of 118 pass |
 | A rejected task that had placed orders: the question to the person, each thing taken back by the agent that did it, refusals, an agent stopped from naming another task's record, playbook agents, and systems that hold actions for approval | `npm run windup` | 61 of 61 pass |

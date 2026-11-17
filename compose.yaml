@@ -18,6 +18,9 @@ services:
       DEMO_LOGIN: ${DEMO_LOGIN:-1}
       # Whether anyone can create an account. Set to 0 to turn off.
       SIGNUP: ${SIGNUP:-1}
+      # Set to 1 to let a system or provider sit inside this server's network
+      # while sign-up is on.
+      ALLOW_PRIVATE_ADDRESSES: ${ALLOW_PRIVATE_ADDRESSES:-}
       # The sample services below, which the demo office is connected to.
       # They are reached over the stack's own network and published nowhere.
       DEMO_STOREFRONT_URL: http://storefront:8081

@@ -30,6 +30,8 @@ async function main(): Promise<void> {
   process.env.ADMIN_PASSWORD = adminPassword;
   process.env.ADMIN_NAME = "Alex Kim";
   delete process.env.DEMO_LOGIN;
+  // The stand-in services of these checks sit on this machine.
+  process.env.ALLOW_PRIVATE_ADDRESSES = "1";
   delete process.env.OFFICE_AGENTS_PAUSED;
   delete process.env.DEMO_STOREFRONT_URL;
   delete process.env.DEMO_CARRIER_URL;

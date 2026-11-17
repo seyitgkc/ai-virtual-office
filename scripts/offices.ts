@@ -29,6 +29,8 @@ async function main(): Promise<void> {
   process.env.ADMIN_NAME = "Alex Kim";
   delete process.env.DEMO_LOGIN;
   delete process.env.SIGNUP;
+  // The stand-in providers of these checks sit on this machine.
+  process.env.ALLOW_PRIVATE_ADDRESSES = "1";
 
   // Imported after the environment is set, because the server reads it once.
   const service = await import("../lib/server/officeService");
@@ -291,6 +293,34 @@ async function main(): Promise<void> {
   expect("with sign-up turned off nobody can create an account", await refusal(() => service.registerAccount({ displayName: "Late Comer", email: "late@example.test", password: joPassword })), 403);
   delete process.env.SIGNUP;
   expect("none of the refusals left an account behind", count("SELECT COUNT(*) AS n FROM users"), usersSoFar + 1);
+
+  console.log("\n-- addresses inside the server's network --");
+  const { internalHost } = await import("../lib/server/providers");
+  const inside = ["localhost", "127.0.0.1", "127.8.9.1", "10.0.0.5", "172.16.0.1", "172.31.255.1", "192.168.1.4", "169.254.169.254", "100.64.0.1", "0.0.0.0", "[::1]", "[fd00::1]", "[fe80::1]", "[::ffff:7f00:1]", "storefront", "dokploy", "db.internal", "printer.local", "2130706433"];
+  const outside = ["api.anthropic.com", "llm.example.test", "8.8.8.8", "172.32.0.1", "100.128.0.1", "193.168.1.4", "[2606:4700::1111]"];
+  expect("hosts that can only be inside are recognised", inside.filter((h) => !internalHost(h)).join(), "");
+  expect("and public ones are left alone", outside.filter((h) => internalHost(h)).join(), "");
+  const home = { name: "Home model", kind: "openai_compatible" as const, defaultModel: "llama3" };
+  let joProviders = await service.saveProviderSettings(await jo.read(), { ...home, baseUrl: "http://127.0.0.1:11434/v1" });
+  const homeId = joProviders.providers.find((p) => p.name === "Home model")!.id;
+  expect("an installation that says so may name this machine", joProviders.providers.some((p) => p.id === homeId), true);
+  delete process.env.ALLOW_PRIVATE_ADDRESSES;
+  const tryAddress = (baseUrl: string) => refusal(async () => service.saveProviderSettings(await jo.read(), { ...home, name: "Probe", baseUrl }));
+  expect("a server open to sign-up refuses this machine", await tryAddress("http://127.0.0.1:11434/v1"), 400);
+  expect("a private range", await tryAddress("http://10.0.0.5/v1"), 400);
+  expect("another container by its name", await tryAddress("http://storefront:8081"), 400);
+  expect("this machine written as IPv6", await tryAddress("http://[::1]:8080/v1"), 400);
+  expect("and as one number", await tryAddress("http://2130706433/v1"), 400);
+  expect("nothing was stored for any of them", service.getView(await jo.read()).providers.some((p) => p.name === "Probe"), false);
+  joProviders = await service.saveProviderSettings(await jo.read(), { ...home, id: homeId, name: "Home model, renamed", baseUrl: "http://127.0.0.1:11434/v1" });
+  expect("an address already stored can be kept when something else changes", joProviders.providers.find((p) => p.id === homeId)!.name, "Home model, renamed");
+  expect("but not swapped for another inside address", await refusal(async () => service.saveProviderSettings(await jo.read(), { ...home, id: homeId, baseUrl: "http://10.0.0.5/v1" })), 400);
+  joProviders = await service.saveProviderSettings(await jo.read(), { ...home, name: "Public model", baseUrl: "https://llm.example.test/v1" });
+  expect("a public address is accepted", joProviders.providers.some((p) => p.name === "Public model"), true);
+  process.env.SIGNUP = "0";
+  expect("with sign-up off, a private installation may name its own network", await tryAddress("http://10.0.0.5/v1"), null);
+  delete process.env.SIGNUP;
+  process.env.ALLOW_PRIVATE_ADDRESSES = "1";
 
   console.log("\n-- removing offices --");
   const participantsBefore = count("SELECT COUNT(*) AS n FROM participants WHERE office_id = ?", second.officeId);

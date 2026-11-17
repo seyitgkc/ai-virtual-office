@@ -117,8 +117,54 @@ export function providerViews(db: Db, officeId: string, userId: string, mayUseOt
 export const accountProviderViews = (db: Db, userId: string): ProviderView[] =>
   rows(db, { userId }).map((r) => toView(r, "you", true));
 
-/** Refuse addresses that are malformed or point at a machine's own metadata. */
-export function checkedBaseUrl(input: string, whose = "the provider's"): string {
+/**
+ * Whether addresses inside the server's own network may be named. They may
+ * when the installation is private, with sign-up turned off, or when it says
+ * so outright. A server that lets anyone create an account must not fetch
+ * whatever internal address such an account types in.
+ */
+export const internalAddressesAllowed = (): boolean =>
+  process.env.ALLOW_PRIVATE_ADDRESSES === "1" || process.env.SIGNUP === "0";
+
+/**
+ * True for a host that can only be inside the server's own network: this
+ * machine, a private or link-local range, or a name with no dot in it, which
+ * is how one container reaches another. A public name that resolves to a
+ * private address is not caught here.
+ */
+export function internalHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (host === "" || host === "localhost" || /\.(localhost|local|internal|lan|home|intranet)$/.test(host)) return true;
+  if (host.includes(":")) {
+    // IPv6: loopback, unspecified, unique local, link-local, and IPv4 written inside IPv6.
+    if (host === "::1" || host === "::" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host)) return true;
+    const mapped = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    return mapped ? internalHost(mapped[1]) : /^::ffff:/.test(host);
+  }
+  const v4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    );
+  }
+  // A whole number is an IPv4 address in another spelling. A single label is a local name.
+  return /^(0x[0-9a-f]+|\d+)$/.test(host) || !host.includes(".");
+}
+
+/**
+ * Refuse addresses that are malformed, point at a machine's own metadata, or
+ * lie inside the server's own network. `kept` is the address already stored
+ * for the thing being changed: saving it again unchanged is always allowed,
+ * so a system the server connected by itself can still be edited.
+ */
+export function checkedBaseUrl(input: string, whose = "the provider's", kept: string | null = null): string {
   let url: URL;
   try {
     url = new URL(input.trim());
@@ -132,7 +178,13 @@ export function checkedBaseUrl(input: string, whose = "the provider's"): string 
   if (/^169\.254\./.test(url.hostname) || url.hostname === "metadata.google.internal") {
     throw new ProviderError("That address is not allowed.");
   }
-  return url.toString().replace(/\/+$/, "");
+  const address = url.toString().replace(/\/+$/, "");
+  if (address !== kept && !internalAddressesAllowed() && internalHost(url.hostname)) {
+    throw new ProviderError(
+      "That address is inside the server's own network, which this server does not call. Use an address that is reachable from the internet.",
+    );
+  }
+  return address;
 }
 
 export interface ProviderInput {
@@ -159,7 +211,9 @@ export function saveProvider(db: Db, owner: ProviderOwner, input: ProviderInput)
   // An Anthropic provider may sit at its own address: a gateway or another
   // service that speaks the same interface. Its model ids are its own.
   const baseUrl =
-    input.kind === "openai_compatible" || input.baseUrl?.trim() ? checkedBaseUrl(input.baseUrl ?? "") : null;
+    input.kind === "openai_compatible" || input.baseUrl?.trim()
+      ? checkedBaseUrl(input.baseUrl ?? "", "the provider's", existing?.base_url ?? null)
+      : null;
   const model = input.defaultModel.trim();
   const official = input.kind === "anthropic" && baseUrl === null;
   if (official ? !validModelId(model) : !/^[\w.:/@-]{1,100}$/.test(model)) {

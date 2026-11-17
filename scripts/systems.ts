@@ -192,6 +192,8 @@ async function main(): Promise<void> {
   process.env.DEMO_CARRIER_URL = freightUrl;
   process.env.DEMO_SYSTEMS_KEY = key;
   delete process.env.DEMO_LOGIN;
+  // The stand-in services of these checks sit on this machine.
+  process.env.ALLOW_PRIVATE_ADDRESSES = "1";
 
   const service = await import("../lib/server/officeService");
   const auth = await import("../lib/server/auth");

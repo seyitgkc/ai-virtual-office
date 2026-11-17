@@ -187,7 +187,7 @@ export async function checkSystem(db: Db, office: Office, input: SystemInput): P
 
   let baseUrl: string;
   try {
-    baseUrl = checkedBaseUrl(input.baseUrl, "the system's");
+    baseUrl = checkedBaseUrl(input.baseUrl, "the system's", existing?.base_url ?? null);
   } catch (error) {
     throw error instanceof ProviderError ? new SystemError(error.message) : error;
   }
