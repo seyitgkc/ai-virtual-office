@@ -272,8 +272,9 @@ export function walkBounds(rooms: Room[]): { minX: number; maxX: number; minZ: n
   };
 }
 
-/** How near a picked point must be to someone's seat to mean "go to this person". */
-const PICKS_PERSON = 1.1;
+/** How near a picked point must be to someone's seat to mean "go to this person": with a pointer, and with a finger. */
+export const PICKS_PERSON = 1.1;
+export const PICKS_PERSON_BY_TOUCH = 1.8;
 /** How far from a seat a walker stands when they go to its occupant. */
 const STANDS_OFF = 1.7;
 
@@ -291,6 +292,7 @@ export function landingSpot(
   closed: ReadonlySet<string>,
   from: WalkPose,
   picked: { x: number; z: number },
+  reach: number = PICKS_PERSON,
 ): Landing {
   const bounds = walkBounds(floorplan.rooms);
   const inBounds = (x: number, z: number): boolean => x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
@@ -303,7 +305,7 @@ export function landingSpot(
 
   // The seat that was picked, if one was: the nearest within reach of the point.
   let seat: { x: number; z: number } | null = null;
-  let nearest = PICKS_PERSON;
+  let nearest = reach;
   for (const desk of floorplan.desks) {
     if (!desk.occupantId || desk.roomId !== roomId) continue;
     const s = seatPosition(desk);

@@ -115,6 +115,8 @@ body {
 
 #minimap { margin-top: auto; }
 #minimap svg { display: block; width: 100%; height: auto; cursor: pointer; touch-action: manipulation; }
+/* The way back to the overview is in the title card, which a phone does not show beside the map. */
+#minimap .map-leave { display: none; margin: -4px 0; padding: 3px 9px; font-size: 10.5px; letter-spacing: 0; text-transform: none; }
 #minimap .map-shut { cursor: not-allowed; }
 #minimap .map-person { cursor: pointer; }
 #minimap .map-name {
@@ -795,6 +797,7 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
   .office[data-sheet="work"] #left #tasks { display: flex; flex: 1 1 auto; }
   .office[data-sheet="activity"] #feed { display: flex; flex: 1 1 auto; max-height: none; margin-top: 0; }
   .office[data-sheet="activity"] #minimap { display: block; margin-top: 0; }
+  #minimap .map-leave { display: inline-block; }
   /* The title card stays small so the office shows beneath it. */
   #title p, #title .legend, #title .sim { display: none; }
 
@@ -840,8 +843,11 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
   .login-card { padding: 18px; }
 }
 /* Walking needs a keyboard. */
+/* Help that names keys is for a keyboard, and its touch wording takes its place on a touch screen. */
+.for-touch { display: none; }
 @media (pointer: coarse) {
-  #title .btn.mode { display: none; }
+  .for-keys { display: none; }
+  .for-touch { display: inline; }
 }
 
 /* ---- room records and connected systems ---- */
@@ -883,9 +889,18 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
 .desk-state[data-tone="permission"]::before { background: #e0614f; }
 .desk-state[data-tone="review"]::before { background: #9b8ad9; }
 .interact-hint {
-  position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 3; pointer-events: none;
-  padding: 8px 14px; border-radius: 9px; font-size: 13px; color: #e8e6e1; white-space: nowrap;
+  position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 3;
+  border-radius: 9px; font-size: 13px; color: #e8e6e1; white-space: nowrap;
   background: rgba(18, 21, 27, 0.9); border: 1px solid rgba(255,255,255,0.16); box-shadow: 0 6px 22px rgba(0,0,0,0.35);
+}
+.interact-hint button {
+  display: block; padding: 8px 14px; font: inherit; color: inherit; cursor: pointer;
+  background: none; border: 0; border-radius: inherit;
+}
+.interact-hint button:hover { background: rgba(255,255,255,0.06); }
+@media (pointer: coarse) {
+  .interact-hint { font-size: 14px; border-color: rgba(110,169,217,0.6); }
+  .interact-hint button { padding: 11px 18px; }
 }
 .interact-hint kbd {
   display: inline-block; min-width: 20px; padding: 1px 6px; margin: 0 3px; text-align: center; font: inherit; font-weight: 600;

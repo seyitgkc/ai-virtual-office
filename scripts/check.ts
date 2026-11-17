@@ -1,7 +1,7 @@
 /** Exercises the access model against the seed office. Run: npx tsx check.ts */
 import { resolveAccess, hasConflict, canRead, type IndividualRule } from "../lib/model";
 import { office, contextFor, byId } from "../lib/seed";
-import { entryPose, freeDeskSpot, landingSpot, obstacles, planExtent, roomAt, stepWalker } from "../lib/geometry";
+import { entryPose, freeDeskSpot, landingSpot, obstacles, PICKS_PERSON_BY_TOUCH, planExtent, roomAt, stepWalker } from "../lib/geometry";
 
 const ctx = contextFor(office);
 let failures = 0;
@@ -139,6 +139,11 @@ console.log("\n-- walking the plan --");
   const facing = toSam.ok ? (-Math.sin(toSam.pose.yaw) * (samSeat.x - toSam.pose.x) + -Math.cos(toSam.pose.yaw) * (samSeat.z - toSam.pose.z)) / gap : 0;
   expect("turned to face them", facing > 0.999, true);
   expect("on the side the walker came from", toSam.ok && toSam.pose.z > samSeat.z, true);
+  const nearSam = { x: 8.5, z: 3.32 };
+  const byPointer = landingSpot(office.floorplan, none, here, nearSam);
+  expect("a pick a metre and a half from someone is a place", byPointer.ok && `${byPointer.pose.x} ${byPointer.pose.z}`, "8.5 3.32");
+  const byFinger = landingSpot(office.floorplan, none, here, nearSam, PICKS_PERSON_BY_TOUCH);
+  expect("the same pick by a finger goes to that person", byFinger.ok && Math.abs(Math.hypot(byFinger.pose.x - samSeat.x, byFinger.pose.z - samSeat.z) - 1.7) < 0.01, true);
   expect("a person in a room one may not enter cannot be picked", JSON.stringify(landingSpot(office.floorplan, new Set(["reception"]), here, samSeat)), '{"ok":false,"why":"shut"}');
   const emptyDesk = { ...office.floorplan, desks: office.floorplan.desks.map((d) => (d.id === "desk-pla-1" ? { ...d, occupantId: null } : d)) };
   const byDesk = landingSpot(emptyDesk, none, here, { x: 15, z: 3.54 });

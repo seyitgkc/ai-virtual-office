@@ -339,6 +339,11 @@ you may enter, or the nearest one when you pick a wall or a desk. Pick a
 person on the map and you are a step back from them, facing them, with the
 prompt to talk already up. A room that is closed to you refuses, and says so.
 Point at anyone on the map to see their name.
+
+On a phone or a tablet you walk by touch. Tap a place or a person on the map
+to go there, drag a finger over the view to look around, and tap the prompt
+to talk to whoever you face. A phone opens the walk on the map, with the view
+under it, and the map carries its own way back to the overview.
 The inbox, the report, settings and sign out stay in reach while you walk.
 Escape returns to the overview. The view rises, falls and sways a little with
 each stride, and holds still for anyone whose system asks for reduced motion.
@@ -2082,8 +2087,8 @@ playbook.
   left, and cannot be brought back: inviting them again gives them a new desk
   and a second entry under the same name.
 - On a phone the interface shows one section at a time, chosen from a bar at
-  the bottom, and walking is unavailable because it needs a keyboard. Settings
-  tables scroll sideways there, and an office of more than four or five rooms
+  the bottom. Walking there is by taps on the map: there is no way to move a
+  step at a time without a keyboard. Settings tables scroll sideways there, and an office of more than four or five rooms
   along its corridor is wider than the screen until the view is pinched out.
 - With a task open on a window narrower than about 1,100 pixels, the strip
   left for the office is small and a long office is drawn small in it.

@@ -157,7 +157,8 @@ export function WalkControls({
     let lastY = 0;
 
     const down = (e: PointerEvent) => {
-      if (e.button !== 0) return;
+      // One finger looks around. A second one is ignored.
+      if (e.button !== 0 || !e.isPrimary) return;
       dragging = true;
       lastX = e.clientX;
       lastY = e.clientY;
@@ -166,7 +167,7 @@ export function WalkControls({
       el.style.cursor = "grabbing";
     };
     const move = (e: PointerEvent) => {
-      if (!dragging) return;
+      if (!dragging || !e.isPrimary) return;
       pose.current.yaw -= (e.clientX - lastX) * LOOK_SENSITIVITY;
       pitch.current = Math.min(
         MAX_PITCH,
@@ -180,15 +181,21 @@ export function WalkControls({
       el.style.cursor = "grab";
     };
 
+    // A finger dragged over the view turns the walker. Without this the browser takes the drag for scrolling.
+    const touchBefore = el.style.touchAction;
+    el.style.touchAction = "none";
     el.style.cursor = "grab";
     el.addEventListener("pointerdown", down);
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
     return () => {
       el.style.cursor = "";
+      el.style.touchAction = touchBefore;
       el.removeEventListener("pointerdown", down);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
     };
   }, [gl, pose]);
 

@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type RefObject } from "react";
 import type { Office } from "../lib/model";
 import {
   landingSpot,
+  PICKS_PERSON,
+  PICKS_PERSON_BY_TOUCH,
   planExtent,
   seatPosition,
   wallSegments,
@@ -29,6 +31,7 @@ export function Minimap({
   participantAlert,
   closedRooms,
   viewerId,
+  onLeave,
 }: {
   office: Office;
   pose: RefObject<WalkPose>;
@@ -38,6 +41,8 @@ export function Minimap({
   /** Rooms the walker may not enter. They cannot be picked. */
   closedRooms: ReadonlySet<string>;
   viewerId: string;
+  /** Ends the walk. On a phone the map fills the view, so the way back is offered here too. */
+  onLeave: () => void;
 }) {
   const { rooms, desks } = office.floorplan;
   const marker = useRef<SVGGElement>(null);
@@ -51,12 +56,29 @@ export function Minimap({
     return () => window.clearTimeout(timer);
   }, [said]);
 
-  const pick = (e: MouseEvent<SVGSVGElement>): void => {
+  // A pick is taken from where the pointer went down. A browser moves the
+  // click of a finger towards whatever it thinks was meant, which on a map
+  // this small is a metre or more.
+  const pressed = useRef<{ id: number; x: number; y: number } | null>(null);
+  const press = (e: PointerEvent<SVGSVGElement>): void => {
+    pressed.current = e.isPrimary && e.button === 0 ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+  };
+  const pick = (e: PointerEvent<SVGSVGElement>): void => {
+    const from = pressed.current;
+    pressed.current = null;
+    // A finger that slid was not a tap.
+    if (!from || from.id !== e.pointerId || Math.hypot(e.clientX - from.x, e.clientY - from.y) > 10) return;
     const svg = plan.current;
     const toPlan = svg?.getScreenCTM()?.inverse();
     if (!svg || !toPlan) return;
-    const at = new DOMPoint(e.clientX, e.clientY).matrixTransform(toPlan);
-    const landing = landingSpot(office.floorplan, closedRooms, pose.current, { x: at.x, z: at.y });
+    const at = new DOMPoint(from.x, from.y).matrixTransform(toPlan);
+    const landing = landingSpot(
+      office.floorplan,
+      closedRooms,
+      pose.current,
+      { x: at.x, z: at.y },
+      e.pointerType === "touch" ? PICKS_PERSON_BY_TOUCH : PICKS_PERSON,
+    );
     if (landing.ok) {
       // The walk reads this pose on its next frame, so the view moves at once.
       Object.assign(pose.current, landing.pose);
@@ -89,6 +111,9 @@ export function Minimap({
     <div className="panel" id="minimap">
       <div className="panel-head">
         <span>Map</span>
+        <button type="button" className="btn map-leave" onClick={onLeave}>
+          Back to overview
+        </button>
         <span>{current ? current.name : "Outside"}</span>
       </div>
       <svg
@@ -98,7 +123,9 @@ export function Minimap({
         }`}
         role="img"
         aria-label="Floor plan with your position. Pick a place to go there."
-        onClick={pick}
+        onPointerDown={press}
+        onPointerUp={pick}
+        onPointerCancel={() => (pressed.current = null)}
       >
         {rooms.map((room) => {
           const halt = roomHighlight(room.id);
@@ -185,7 +212,8 @@ export function Minimap({
           );
         })}
 
-        <g ref={marker}>
+        {/* The walker's mark and its cone of view do not take the pointer, so whoever is under them can still be picked. */}
+        <g ref={marker} pointerEvents="none">
           <path d="M0 -1.9 L4.2 -7.5 L-4.2 -7.5 Z" fill="#ffffff" opacity={0.1} />
           <circle r={0.72} fill="#ffffff" stroke="#16181d" strokeWidth={0.14} />
           <path d="M0 -1.5 L0.62 -0.5 L-0.62 -0.5 Z" fill="#ffffff" />

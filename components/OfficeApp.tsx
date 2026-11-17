@@ -89,6 +89,21 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
     return () => window.removeEventListener("keydown", leave);
   }, [mode]);
 
+  // On a phone the walk opens on the map, with the view under it, since the
+  // map is how someone without a keyboard moves. Leaving returns to the office.
+  const toggleMode = (): void => {
+    const walking = mode !== "walk";
+    setMode(walking ? "walk" : "overview");
+    if (window.matchMedia("(max-width: 720px)").matches) setSheet(walking ? "activity" : "office");
+  };
+  /** Open someone's panel with the keyboard in the message box. */
+  const talkTo = (id: string): void => {
+    setSelectedPersonId(id);
+    setSelectedTaskId(null);
+    setSheet("detail");
+    setTalkFocus((n) => n + 1);
+  };
+
   const ctx = useMemo(() => contextOf(office, now), [office, now]);
 
   // A newly filed request opens in the inspector straight away.
@@ -173,12 +188,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
         closedRooms={closedRooms}
         inspectorOpen={task !== null || participant !== null || setup !== null}
         onFaceParticipant={setFacedId}
-        onInteract={(id) => {
-          setSelectedPersonId(id);
-          setSelectedTaskId(null);
-          setSheet("detail");
-          setTalkFocus((n) => n + 1);
-        }}
+        onInteract={talkTo}
         roomHighlight={roomHighlight}
         participantAlert={participantAlert}
         agentLoad={view.agentLoad}
@@ -192,7 +202,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
       <div id="left">
         <TitleCard
           mode={mode}
-          onToggleMode={() => setMode((m) => (m === "walk" ? "overview" : "walk"))}
+          onToggleMode={toggleMode}
           viewer={view.viewer}
           officeName={office.name}
           offices={view.offices}
@@ -243,6 +253,7 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
             participantAlert={participantAlert}
             closedRooms={closedRooms}
             viewerId={viewer.id}
+            onLeave={toggleMode}
           />
         ) : (
           <Feed feed={feed} office={office} />
@@ -300,13 +311,25 @@ export function OfficeApp({ initial }: { initial: OfficeView }) {
       </nav>
 
       {faced && faced.id !== selectedPersonId && (
+        // With a keyboard the prompt names the key. It can be clicked or tapped as well, which is how a touch screen talks.
         <div className="interact-hint" role="status">
-          Press <kbd>F</kbd>{" "}
-          {faced.kind === "human"
-            ? `to write to ${faced.displayName}`
-            : faced.agentType === "ai"
-              ? `to talk to ${faced.displayName}`
-              : `to ask ${faced.displayName} where its work stands`}
+          <button type="button" onClick={() => talkTo(faced.id)}>
+            <span className="for-keys">
+              Press <kbd>F</kbd>{" "}
+              {faced.kind === "human"
+                ? `to write to ${faced.displayName}`
+                : faced.agentType === "ai"
+                  ? `to talk to ${faced.displayName}`
+                  : `to ask ${faced.displayName} where its work stands`}
+            </span>
+            <span className="for-touch">
+              {faced.kind === "human"
+                ? `Write to ${faced.displayName}`
+                : faced.agentType === "ai"
+                  ? `Talk to ${faced.displayName}`
+                  : `Ask ${faced.displayName} where its work stands`}
+            </span>
+          </button>
         </div>
       )}
 

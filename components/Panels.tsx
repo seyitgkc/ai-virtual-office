@@ -165,20 +165,22 @@ export function TitleCard({
       <div className="panel" id="title">
         <h1>Walking the office</h1>
         <div className="keys">
-          <span>
+          <span className="for-keys">
             <kbd>W</kbd>
             <kbd>A</kbd>
             <kbd>S</kbd>
             <kbd>D</kbd> move
           </span>
-          <span>
+          <span className="for-keys">
             <kbd>Shift</kbd> faster
           </span>
+          <span className="for-touch">Tap a place or a person on the map to go there</span>
           <span>Drag to look around</span>
-          <span>
+          <span className="for-keys">
             <kbd>F</kbd> talk to whoever you face
           </span>
-          <span>Pick a place on the map to go there</span>
+          <span className="for-touch">Tap the prompt to talk to whoever you face</span>
+          <span className="for-keys">Pick a place on the map to go there</span>
         </div>
         <button className="btn mode" onClick={onToggleMode}>
           Back to overview
