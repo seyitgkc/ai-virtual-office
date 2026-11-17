@@ -3,7 +3,7 @@ import { LoginForm } from "@/components/LoginForm";
 import { may } from "@/lib/model";
 import { usersInOffice } from "@/lib/server/auth";
 import { currentSession } from "@/lib/server/http";
-import { DEMO_OFFICE_ID, demoLoginEnabled, officeDatabase } from "@/lib/server/officeService";
+import { DEMO_OFFICE_ID, demoLoginEnabled, officeDatabase, signupEnabled } from "@/lib/server/officeService";
 import { loadEngineState } from "@/lib/server/officeStore";
 
 export const dynamic = "force-dynamic";
@@ -33,5 +33,5 @@ export default async function LoginPage() {
         })
     : [];
 
-  return <LoginForm demoAccounts={demoAccounts} />;
+  return <LoginForm demoAccounts={demoAccounts} canSignUp={signupEnabled()} />;
 }

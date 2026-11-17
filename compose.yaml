@@ -16,6 +16,8 @@ services:
       ADMIN_NAME: ${ADMIN_NAME:-}
       # The demo office and password-free entry to it. Set to 0 to turn off.
       DEMO_LOGIN: ${DEMO_LOGIN:-1}
+      # Whether anyone can create an account. Set to 0 to turn off.
+      SIGNUP: ${SIGNUP:-1}
       # The sample services below, which the demo office is connected to.
       # They are reached over the stack's own network and published nowhere.
       DEMO_STOREFRONT_URL: http://storefront:8081

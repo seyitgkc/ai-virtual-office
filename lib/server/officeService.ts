@@ -43,6 +43,8 @@ import { listAccessTokens, syncAccessTokens, tokenProblem } from "./accessTokens
 import {
   addMembership,
   createUser,
+  issueSession,
+  passwordProblem,
   seatsOf,
   setPassword,
   switchSeat,
@@ -112,6 +114,9 @@ export const isDemoOffice = (officeId: string | null): boolean => officeId === D
 /** Demo sign-in lets a visitor enter the demo office as a seeded person. */
 export const demoLoginEnabled = (): boolean => process.env.DEMO_LOGIN !== "0";
 
+/** Sign-up lets a visitor create an account, which starts with an empty office of its own. */
+export const signupEnabled = (): boolean => process.env.SIGNUP !== "0";
+
 const MAX_OFFICES_PER_ACCOUNT = 12;
 
 export class OfficeError extends Error {
@@ -164,6 +169,42 @@ function createBlankOfficeFor(db: Db, user: User, name: string): { officeId: str
   const participantId = office.participants[0].id;
   addMembership(db, user.id, participantId);
   return { officeId: office.id, participantId };
+}
+
+/**
+ * Create an account for someone who signed up, with an empty office of their
+ * own, and sign them in. The email is only a name to sign in with: nothing is
+ * sent to it, so it is not checked beyond its shape.
+ */
+export function registerAccount(input: { displayName: string; email: string; password: string }): Promise<{ token: string }> {
+  return inTurn(async () => {
+    const db = officeDatabase();
+    if (!signupEnabled()) throw new OfficeError(403, "Creating an account is turned off here. Ask someone in an office to invite you.");
+    const displayName = input.displayName.trim().replace(/\s+/g, " ");
+    if (displayName.length < 2 || displayName.length > 60) throw new OfficeError(400, "Enter your name (2 to 60 characters).");
+    const email = input.email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 200) {
+      throw new OfficeError(400, "Enter a valid email address.");
+    }
+    const problem = passwordProblem(input.password);
+    if (problem) throw new OfficeError(400, problem);
+    if (userByEmail(db, email)) throw new OfficeError(409, "That email already has an account. Sign in with it.");
+
+    const made = transaction(db, () => {
+      const user = createUser(db, { email, displayName, password: input.password });
+      const seat = createBlankOfficeFor(db, user, "My office");
+      recordAudit(db, {
+        officeId: seat.officeId,
+        officeClock: Date.now(),
+        actorId: seat.participantId,
+        actionType: "CREATE_OFFICE",
+        subject: NO_SUBJECT,
+        notes: [`${displayName} created an account and this office.`],
+      });
+      return { user, participantId: seat.participantId };
+    });
+    return issueSession(db, made.user, made.participantId);
+  });
 }
 
 /**

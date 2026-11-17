@@ -194,9 +194,11 @@ pricing, and a finance approval before a quote goes out.
   access, deciding reviews or inviting people, ticked per role in a table.
 - **Many offices.** An account can add offices, switch between them and remove
   them. Each office is separate, and a new one starts empty.
+- **Accounts.** Anyone can create an account on the sign-in page. It starts
+  with an empty office of its own, in which that person is the administrator.
 - **Invites.** Someone whose role may invite adds a person, who gets a desk
-  and sets their own password. There is no open sign-up: an account comes
-  from an invite link, or from the administrator settings of the deployment.
+  and sets their own password. This is how a second person joins an office
+  that exists.
 - **Leaving.** A person who is removed loses their desk, their access and
   their sign-in to that office. If they asked, answered or decided anything
   there, their name stays on it, and what was meant for them goes to someone
@@ -288,14 +290,17 @@ not shown that room while it works on a different task, or in a conversation.
 
 ## User guide
 
-**Signing in.** The sign-in page takes an email and password. An account
-signed in this way starts with an empty office of its own.
+**Signing in.** The sign-in page takes an email and password. *Create an
+account* on the same page asks for a name, an email and a password of at least
+10 characters, and signs you in. A new account starts with an empty office of
+its own: one room, and you in it with every permission. The email is only the
+name you sign in with. Nothing is sent to it.
 
 The page also lists the people of the **demo office** for password-free entry.
 The demo office is the seeded distributor described above. It is separate from
 every account's own offices and nothing in it carries over to them.
 
-![The sign-in page, with demo access for the two seeded people](docs/sign-in.jpg)
+![The sign-in page: sign in, create an account, or enter the demo as one of its two seeded people](docs/sign-in.jpg)
 
 | Demo person | Role | What they can do |
 | --- | --- | --- |
@@ -1149,6 +1154,7 @@ last reason, until `r-02` is revoked.
 | Method and path | Who | Purpose |
 | --- | --- | --- |
 | `POST /api/auth/login` | anyone | Sign in with email and password |
+| `POST /api/auth/register` | anyone, when sign-up is on | Create an account with an empty office of its own, and sign in |
 | `POST /api/auth/demo` | anyone, when demo sign-in is on | Enter the demo office as one of its people |
 | `POST /api/auth/logout` | signed in | Revoke the session |
 | `GET /api/office` | signed in | The office as this viewer may see it |
@@ -1715,7 +1721,7 @@ what exists, and what a real deployment would add.
 | Persistence | SQLite, with migrations that bring an older database forward on start. | Postgres, for more than one server process, point-in-time backups and row-level locking. The schema carries over as it is. |
 | Real AI | Working today: several providers per office or per account, a model per agent, structured replies that are validated, a retry on an unreadable reply, and limits enforced outside the model. | Streaming, so a long step shows progress. Per-office spending limits and usage reports. Tools an agent can call during a step, in place of a fixed snapshot of each system. |
 | Outside systems | Any service that describes itself, read and write, behind the room's access rules, with per-action approval and repeat-safe requests. Tested against five sample services. | Connectors for named products such as Shopify or an accounting package, and retries with backoff when a system is down. |
-| Identity | Password accounts, sessions, invites and a public demo sign-in. | Single sign-on, password reset by email, and two-factor sign-in. |
+| Identity | Password accounts, sign-up, sessions, invites and a public demo sign-in. | Single sign-on, password reset by email, and two-factor sign-in. |
 | Operations | A container that checks itself before it builds, a health check, an audit log. | Metrics, alerting, log shipping and a staging environment. |
 
 ## What is functional, simulated and proposed
@@ -1932,6 +1938,10 @@ playbook.
 - **Demo sign-in is on by default.** It lets anyone enter as a seeded person.
   That suits a public demo and nothing else. Set `DEMO_LOGIN=0` for any office
   that holds something you care about.
+- **Sign-up is on by default.** Anyone who reaches the sign-in page can create
+  an account and offices of their own. One address can create five accounts an
+  hour and the whole server sixty. Set `SIGNUP=0` to leave invites as the only
+  way in.
 
 ## Limitations
 
@@ -1982,6 +1992,8 @@ playbook.
 - When a connected system refuses or cannot be reached, the thread says so and
   the task carries on. It does not halt.
 - No password reset and no email. An administrator would issue a new invite.
+  An email given at sign-up is not verified, so nothing proves that the person
+  owns it.
 - Browsers poll for changes every five seconds, and every second and a half
   while agents are at work. A tab that is not in view does not poll.
 - SQLite suits one server process. More than one would need a different
@@ -2059,6 +2071,7 @@ All optional. See `.env.example`.
 | `AUTH_SECRET` | generated and kept beside the database | Signs session and permission tokens. At least 32 characters. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | unset | Creates an account at start-up, with an empty office of its own. |
 | `DEMO_LOGIN` | `1` | Creates the demo office and allows password-free entry to it. `0` turns that off. |
+| `SIGNUP` | `1` | Lets anyone create an account on the sign-in page. `0` turns that off, which leaves invites and the administrator account. |
 | `OFFICE_DB_PATH` | `./data/office.db` | Where the SQLite file lives. |
 | `ADMIN_NAME` | taken from the email | The administrator's display name. |
 | `DEMO_STOREFRONT_URL`, `DEMO_CARRIER_URL`, `DEMO_LEDGER_URL`, `DEMO_SUPPLIER_URL`, `DEMO_SERVICE_DESK_URL` | set by `compose.yaml` | Where the demo office and a sample office find each sample service. A service with no address is not connected. |
@@ -2125,11 +2138,11 @@ of the three with a database file starts sample services the same way.
 | Access precedence, expiry, read gating, walking the hall and through doors, doorways closed to someone who may not enter, desk placement | `npm run check` | 36 of 36 pass |
 | A full order from request to approval, including the grant that fails | `npm run scenario` | 22 of 22 pass |
 | Database round trip after every action and every set-up change, including playbooks and permissions, foreign keys, integrity | `npm run store` | 48 of 48 pass |
-| Passwords, sessions and seats, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 43 of 43 pass |
+| Passwords, sessions and seats, limits on repeated tries, policy, input parsing, per-viewer views, permission tokens | `npm run auth` | 47 of 47 pass |
 | What an agent is shown, cleaning of a model's reply, halts at review that end in a decision, the follow-up step after an action, desk states, what a conversation is shown, notes, how data is marked for a model, grants limited to their task, reading a reply that is nearly right, a need passed to a colleague, documents on a task, earlier work shown within an agent's access, records kept from a thread, the report, ids replaced by names in what an agent writes, and tasks named by number | `npm run agents` | 200 of 200 pass |
 | Which playbook step applies, and an AI agent's steps and conversations through an OpenAI compatible service and an Anthropic compatible one | `npm run providers` | 56 of 56 pass |
 | Set-up changes, permissions, playbooks, their refusals, rooms lining up along a corridor, what a new office still needs, a person leaving, and an office built from nothing | `npm run admin` | 125 of 125 pass |
-| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, a person leaving and losing their sign-in, the demo office giving out no password accounts, removal | `npm run offices` | 112 of 112 pass |
+| Several offices in one database: isolation, several AI providers and their keys, what each permission allows, a person leaving and losing their sign-in, the demo office giving out no password accounts, creating an account, removal | `npm run offices` | 131 of 131 pass |
 | The five sample services and what each refuses, a system describing itself, rewording its description, live records, orders placed only with `act` on the room, messages between people and with agents, notes and their read state, actions held for approval, an invoice voided, a rejected task whose order is cancelled in the storefront, and resetting the demo | `npm run systems` | 171 of 171 pass |
 | Agents working between clicks, each through a queue of its own and several at once, a click that does not wait for a model, steps that are owed and asked for again, waits, work that is written down and picked up after a failure or a restart, urgent work first, standing work, who is on a task, a rejected task wound up between clicks and after a restart, providers that belong to an account, and the sample office | `npm run loop` | 118 of 118 pass |
 | A rejected task that had placed orders: the question to the person, each thing taken back by the agent that did it, refusals, an agent stopped from naming another task's record, playbook agents, and systems that hold actions for approval | `npm run windup` | 61 of 61 pass |

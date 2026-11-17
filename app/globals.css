@@ -371,6 +371,7 @@ fieldset.moves { border: 0; margin: 0; padding: 0; min-width: 0; }
   color: #f1c9c1; background: rgba(224,97,79,0.14);
   border: 1px solid rgba(224,97,79,0.4); border-radius: 7px;
 }
+.login-card .login-switch { width: 100%; margin: 8px 0 0; padding: 9px 10px; font-size: 12.5px; }
 .demo { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); }
 .demo p { margin-bottom: 10px; }
 .demo-account {

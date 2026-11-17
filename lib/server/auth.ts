@@ -339,11 +339,14 @@ const attempts = new Map<string, number[]>();
 const WINDOW_MS = 60_000;
 const MAX_ATTEMPTS = 8;
 
-/** True when this key (an address plus an email) has tried too often. */
-export function tooManyAttempts(key: string): boolean {
+/** Count one more try for this key. True when it has had more than `max` within `windowMs`. */
+export function overLimit(key: string, max: number, windowMs: number): boolean {
   const now = Date.now();
-  const recent = (attempts.get(key) ?? []).filter((t) => now - t < WINDOW_MS);
+  const recent = (attempts.get(key) ?? []).filter((t) => now - t < windowMs);
   recent.push(now);
   attempts.set(key, recent);
-  return recent.length > MAX_ATTEMPTS;
+  return recent.length > max;
 }
+
+/** True when this key (an address plus an email) has tried too often. */
+export const tooManyAttempts = (key: string): boolean => overLimit(key, MAX_ATTEMPTS, WINDOW_MS);

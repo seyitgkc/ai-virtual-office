@@ -12,6 +12,7 @@ import {
   createUser,
   hashPassword,
   issueSession,
+  overLimit,
   readSession,
   revokeSession,
   seatsOf,
@@ -78,6 +79,13 @@ async function main(): Promise<void> {
   expect("missing token refused", await readSession(db, undefined), null);
   revokeSession(db, session!.sessionId);
   expect("signed-out token refused", await readSession(db, token), null);
+
+  console.log("\n-- limits on repeated tries --");
+  const tries = [1, 2, 3, 4, 5, 6].map(() => overLimit("signup:203.0.113.7", 5, 3_600_000));
+  expect("five tries in the window are let through", tries.slice(0, 5).some(Boolean), false);
+  expect("the sixth is over the limit", tries[5], true);
+  expect("another address is counted by itself", overLimit("signup:203.0.113.8", 5, 3_600_000), false);
+  expect("a window that has passed counts for nothing", overLimit("signup:203.0.113.7", 5, 0), false);
 
   console.log("\n-- who may do what --");
   const may = (who: string, action: Action) =>

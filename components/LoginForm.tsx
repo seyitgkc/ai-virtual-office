@@ -27,7 +27,17 @@ async function post(url: string, body: unknown): Promise<string | null> {
   }
 }
 
-export function LoginForm({ demoAccounts }: { demoAccounts: DemoAccount[] }) {
+export function LoginForm({
+  demoAccounts,
+  canSignUp,
+}: {
+  demoAccounts: DemoAccount[];
+  /** Whether a visitor may create an account here. */
+  canSignUp: boolean;
+}) {
+  // The same card signs someone in or creates their account.
+  const [creating, setCreating] = useState(false);
+  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -49,16 +59,33 @@ export function LoginForm({ demoAccounts }: { demoAccounts: DemoAccount[] }) {
       <div className="login-card">
         <h1>Virtual Office</h1>
         <p>
-          Sign in to enter the office. What you can see and do depends on your role
-          and on the access rules that apply to you.
+          {creating
+            ? "Create an account to get an office of your own. It starts empty, with one room and you in it as its administrator."
+            : "Sign in to enter the office. What you can see and do depends on your role and on the access rules that apply to you."}
         </p>
 
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            void enter("/api/auth/login", { email, password });
+            void enter(
+              creating ? "/api/auth/register" : "/api/auth/login",
+              creating ? { displayName, email, password } : { email, password },
+            );
           }}
         >
+          {creating && (
+            <>
+              <label htmlFor="display-name">Your name</label>
+              <input
+                id="display-name"
+                autoComplete="name"
+                maxLength={60}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                required
+              />
+            </>
+          )}
           <label htmlFor="email">Email</label>
           <input
             id="email"
@@ -68,11 +95,11 @@ export function LoginForm({ demoAccounts }: { demoAccounts: DemoAccount[] }) {
             onChange={(e) => setEmail(e.target.value)}
             required
           />
-          <label htmlFor="password">Password</label>
+          <label htmlFor="password">{creating ? "Password, at least 10 characters" : "Password"}</label>
           <input
             id="password"
             type="password"
-            autoComplete="current-password"
+            autoComplete={creating ? "new-password" : "current-password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
@@ -83,9 +110,23 @@ export function LoginForm({ demoAccounts }: { demoAccounts: DemoAccount[] }) {
             </div>
           )}
           <button type="submit" className="btn primary" disabled={busy}>
-            Sign in
+            {creating ? "Create account and enter" : "Sign in"}
           </button>
         </form>
+
+        {canSignUp && (
+          <button
+            type="button"
+            className="btn login-switch"
+            disabled={busy}
+            onClick={() => {
+              setCreating(!creating);
+              setError(null);
+            }}
+          >
+            {creating ? "I already have an account" : "Create an account"}
+          </button>
+        )}
 
         {demoAccounts.length > 0 && (
           <div className="demo">

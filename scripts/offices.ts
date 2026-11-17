@@ -28,6 +28,7 @@ async function main(): Promise<void> {
   process.env.ADMIN_PASSWORD = adminPassword;
   process.env.ADMIN_NAME = "Alex Kim";
   delete process.env.DEMO_LOGIN;
+  delete process.env.SIGNUP;
 
   // Imported after the environment is set, because the server reads it once.
   const service = await import("../lib/server/officeService");
@@ -261,6 +262,35 @@ async function main(): Promise<void> {
   expect("so no account came of it", auth.userByEmail(db, "stranger@example.test"), null);
   await service.resetDemoOffice(await dana.read());
   expect("a reset takes the added person out again", auth.usersInOffice(db, service.DEMO_OFFICE_ID).length, 2);
+
+  console.log("\n-- creating an account --");
+  const usersSoFar = count("SELECT COUNT(*) AS n FROM users");
+  const officesSoFar = count("SELECT COUNT(*) AS n FROM offices");
+  const joPassword = randomBytes(18).toString("base64url");
+  const signedUp = await service.registerAccount({ displayName: "  Jo   Reviewer ", email: "Jo@Example.test", password: joPassword });
+  const jo = { read: async () => (await auth.readSession(db, signedUp.token))! };
+  const joView = service.getView(await jo.read());
+  expect("signing up signs the person in", (await jo.read()).hasPassword, true);
+  expect("under a tidied name", joView.viewer.displayName, "Jo Reviewer");
+  expect("with the email in lower case", joView.viewer.email, "jo@example.test");
+  expect("one account was made", count("SELECT COUNT(*) AS n FROM users"), usersSoFar + 1);
+  expect("and one office", count("SELECT COUNT(*) AS n FROM offices"), officesSoFar + 1);
+  expect("the office is their own", joView.offices.map((o) => o.name).join(), "My office");
+  expect("and is not the demo", joView.isDemoOffice, false);
+  expect("it is empty: only them, no work", `${joView.office.participants.map((p) => p.displayName).join()}|${joView.office.tasks.length}`, "Jo Reviewer|0");
+  expect("they hold every permission in it", joView.viewer.permissions.length, 11);
+  expect("nothing of anyone else's is in it", JSON.stringify(joView).includes("Robin Park") || JSON.stringify(joView).includes("Northline"), false);
+  expect("the audit log records it", (all(db, "SELECT note FROM audit_notes ORDER BY rowid DESC LIMIT 1") as { note: string }[])[0]?.note, "Jo Reviewer created an account and this office.");
+  expect("the password signs them in afterwards", auth.authenticate(db, "jo@example.test", joPassword)?.displayName, "Jo Reviewer");
+  expect("the same email cannot sign up twice", await refusal(() => service.registerAccount({ displayName: "Jo Again", email: "JO@example.test", password: joPassword })), 409);
+  expect("nor an email that an invited person holds", await refusal(() => service.registerAccount({ displayName: "Robin", email: "robin@example.test", password: joPassword })), 409);
+  expect("a short password is refused", await refusal(() => service.registerAccount({ displayName: "Sam Short", email: "short@example.test", password: "too-short" })), 400);
+  expect("so is a bad email", await refusal(() => service.registerAccount({ displayName: "Sam Short", email: "not an email", password: joPassword })), 400);
+  expect("and a missing name", await refusal(() => service.registerAccount({ displayName: " ", email: "noname@example.test", password: joPassword })), 400);
+  process.env.SIGNUP = "0";
+  expect("with sign-up turned off nobody can create an account", await refusal(() => service.registerAccount({ displayName: "Late Comer", email: "late@example.test", password: joPassword })), 403);
+  delete process.env.SIGNUP;
+  expect("none of the refusals left an account behind", count("SELECT COUNT(*) AS n FROM users"), usersSoFar + 1);
 
   console.log("\n-- removing offices --");
   const participantsBefore = count("SELECT COUNT(*) AS n FROM participants WHERE office_id = ?", second.officeId);
