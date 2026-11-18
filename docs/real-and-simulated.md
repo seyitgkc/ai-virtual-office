@@ -200,6 +200,17 @@ playbook.
   would still check every action, and a step where nothing on the shortlist
   fits would fall back to the full list. This has not been tried, and the
   published figures for the model's accuracy are its maker's own.
+- A sturdier sign-in. Today's is sized for a demonstration. Passwords,
+  sessions and invitations work and are enforced on the server, and there is
+  no password reset, no verified email, no single sign-on and no second
+  factor. A real installation would add those, or hand sign-in to the
+  organisation's own identity provider.
+- Screens for what is stored and not yet shown. The audit trail keeps every
+  action with who did it, when, and the task, person, rule and room it was
+  about. The Activity panel shows its latest sixty lines as sentences. A
+  full view would search the trail by person, task and date and export it.
+  Each person's open sessions are stored as well, with no screen from which
+  to see them or end one.
 - More playbook conditions, such as the answer to an earlier question.
 - A drag-and-drop floorplan editor. Rooms are added today through a form.
 - Workflows with a different number of stages.

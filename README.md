@@ -437,6 +437,10 @@ the stored data.
   every system an agent may use is listed in its step. The shortlist would be
   drawn only from what the agent's access allows, and the engine would still
   check the action.
+- A sturdier sign-in. Today's is sized for a demonstration: it has no
+  password reset, verified email, single sign-on or second factor.
+- Screens for records that are stored and not yet shown, such as the full
+  audit trail with search and export, and a person's open sessions.
 - Workflows with a different number of stages, and more playbook conditions.
 - A drag-and-drop floorplan editor.
 - Live updates pushed to the browser in place of polling.
