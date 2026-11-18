@@ -68,6 +68,16 @@ Part of the documentation of the [AI Virtual Office](../README.md).
 - AI providers that belong to an account, usable in each of its offices, and
   the permission that lets other people hand them to agents.
 - The sample office with AI agents.
+- An office built by hand, on the deployed site, by following the
+  [walkthrough](walkthrough.md): three rooms, three roles, three AI agents
+  on providers that belong to an account, and the storefront and the ledger
+  connected by typing their addresses and key. A second account accepted an
+  invitation into it and filed a stock question, which reached review in 14
+  seconds with ten messages withheld from that person. An order waited for
+  approval, was placed as SO-1001 and invoiced at the dealer's tier by the
+  reviewing agent. A second order was rejected at review: the invoice was
+  voided, the cancellation waited for approval, and the task closed with
+  nothing left standing.
 - A large office on the deployed site: nine rooms and 18 AI agents on two
   providers that belong to an account. One request ran from intake into
   execution in about two minutes with no click. The intake agent's needs for

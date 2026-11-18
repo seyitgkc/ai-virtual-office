@@ -72,7 +72,7 @@ Each role can now enter, read and act in its own room and nowhere else.
 2. Under *Add an agent*, leave the name empty (one is picked), and give a
    title such as `Intake and planning agent`. Choose the role *Front office*
    and a desk in *Front office*. Keep **AI agent** selected. Under *AI
-   provider*, choose the provider marked *from your account*. Click **Add
+   provider*, choose a provider marked *from your account*. Click **Add
    agent**.
 3. Add a second agent with the role and desk *Warehouse*, and a third with
    the role and desk *Accounts*.
@@ -136,7 +136,9 @@ the way, answer it under *Your move* and the task carries on.
 The task moves through intake and planning in the Front office, execution in
 the Warehouse and review in Accounts, with nobody clicking. Lamps light at
 each desk as its agent works, and the handoffs cross the office. It should
-reach *In review* within a minute.
+reach *In review* within a minute. The Accounts agent may not read the
+Warehouse, so it asks the Warehouse agent for the count in a note and gets
+its answer the same way. Nothing halts for that.
 
 Open the task. The thread says how many messages were said in rooms you
 cannot read and leaves them out, and the review buttons are disabled with
@@ -153,16 +155,20 @@ Click **Sign out**.
    count the Warehouse agent read from the storefront. Click **Approve**.
 3. Click **New request**. Title: `Order: two ecobee thermostats for
    Northline Mechanical`. Details: `Northline Mechanical, account NOR-0188,
-   orders two ECOBEE-T thermostats to ship from Laval.` Send it.
+   orders two ECOBEE-T thermostats from Laval. The dealer collects them
+   from the branch, so no freight applies.` Send it.
 4. The task stops in the Warehouse, outlined in amber, and the summary at
    the top counts it as waiting for a person. Under *Your move* the agent
    asks whether it may place the order in Storefront, with the account, the
    branch and the items. Click **Approve**.
 5. The thread shows the storefront's answer with an order number such as
-   SO-1001, and the task moves on to review. Under Settings, Connected
-   systems, **Live records** on the storefront row shows Laval's
-   thermostats down by two.
-6. Back on the task, click **Approve** to complete it.
+   SO-1001, and the task moves on to review. There the Accounts agent
+   checks the dealer's credit and raises the invoice in the ledger, at the
+   dealer's tier discount. The ledger was connected without the approval
+   box, so that goes straight through.
+6. Under Settings, Connected systems, **Live records** on the storefront
+   row shows Laval's thermostats down by two.
+7. Back on the task, click **Approve** to complete it.
 
 The agent asked because the storefront holds every action for approval.
 That rule is enforced by the engine, whatever the model writes.
@@ -171,14 +177,20 @@ That rule is enforced by the engine, whatever the model writes.
 
 1. File a third request. Title: `Order: one PTAC unit for Brightline
    Mechanical`. Details: `Brightline Mechanical, account BRT-0931, orders
-   one PTAC-12 unit to ship from Laval.`
+   one PTAC-12 unit from Laval. The dealer collects it from the branch, so
+   no freight applies.`
 2. Approve the order when the agent asks, and wait for the task to reach
    review.
-3. Click **Reject**. The order is still an order in the storefront, so the
-   task stays open and asks what should happen to it.
-4. Click **Undo all of them**. The Warehouse agent cancels the order and
-   says so in the thread, and the task closes as rejected. **Live records**
-   shows the PTAC unit back in stock.
+3. Click **Reject**. The order is still an order in the storefront and the
+   invoice still stands in the ledger, so the task stays open. It lists
+   what it did and asks what should happen to it.
+4. Click **Undo all of them**. The Accounts agent voids the invoice at
+   once. The Warehouse agent asks whether it may cancel the order, because
+   the storefront holds a cancellation for approval like any other action.
+5. Click **Approve**. The order is cancelled and the task closes as
+   rejected, with a last line saying that nothing it did is left standing.
+   **Live records** shows the order as cancelled and the PTAC unit back in
+   stock.
 
 ## More to try
 
