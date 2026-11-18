@@ -852,7 +852,8 @@ function PlaybookEditor({
                       value={then.need.scope}
                       onChange={(e) => setThen({ need: { ...then.need!, scope: e.target.value as AccessScope } })}
                     >
-                      {ALL_SCOPES.map((scope) => (
+                      {/* An agent does not walk, so entering a room is not something it can need. */}
+                      {(["read", "act"] as AccessScope[]).map((scope) => (
                         <option key={scope} value={scope}>
                           {scope}
                         </option>

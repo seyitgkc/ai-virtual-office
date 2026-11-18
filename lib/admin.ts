@@ -223,7 +223,7 @@ function cleanPlaybook(office: Office, steps: PlaybookStep[], newId: () => strin
       refuse(`${label}: the question is addressed to someone who is not in the office.`);
     }
     if (need && !rooms.has(need.room)) refuse(`${label}: the room it needs does not exist.`);
-    if (need && !ALL_SCOPES.includes(need.scope)) refuse(`${label}: choose a scope.`);
+    if (need && need.scope !== "read" && need.scope !== "act") refuse(`${label}: an agent can need to read a room or to act in it.`);
 
     const cleaned: PlaybookStep = {
       id: step.id || `pb-${newId()}`,

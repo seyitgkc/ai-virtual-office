@@ -176,7 +176,9 @@ The pipeline is intake in Reception, planning in Planning, execution in
 Fulfilment, review in Finance, then done. Advancing a stage is an ordinary
 handoff: the task goes to whoever is seated in the next room and allowed to act
 there. A permission block comes from an agent declaring, in the middle of its
-step, that it needs a scope on another room.
+step, that it needs to read another room or to act in it. An agent cannot
+need to enter a room. Entering is about a person walking in, and an agent
+that says it anyway is taken to mean reading.
 
 ```mermaid
 stateDiagram-v2

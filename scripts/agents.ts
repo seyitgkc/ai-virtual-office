@@ -20,7 +20,7 @@ import { splitAtTasks, taskLabel, taskNamed, withTaskLabels } from "../lib/taskL
 import { span, workReport } from "../lib/report";
 import { buildChatSystem } from "../lib/server/chat";
 import { briefingFacts, composeBriefing, tidyBriefing } from "../lib/briefing";
-import { buildStepPrompt, dataMarker, readReply, SYSTEM_PROMPT, systemPrompt, toStepResult } from "../lib/server/modelRuntime";
+import { buildStepPrompt, dataMarker, JSON_INSTRUCTIONS, readReply, SYSTEM_PROMPT, systemPrompt, toStepResult } from "../lib/server/modelRuntime";
 
 let failures = 0;
 function expect(label: string, actual: unknown, wanted: unknown): void {
@@ -187,6 +187,10 @@ async function main(): Promise<void> {
   expect("a missing permission at review halts the task", `${reviewTask().stage}/${reviewTask().status}`, "review/blocked_permission");
   const aroundIt = await reduce(review.at, { type: "ADVANCE", taskId: review.id }, needing);
   expect("a task halted for access cannot be moved on around the halt", `${aroundIt.state.office.tasks.find((t) => t.id === review.id)!.status} ${aroundIt.notes.some((n) => n.includes("halted for access"))}`, "blocked_permission true");
+  const entering = reviewer({ questions: [], assumptions: [], needs: [{ room: closedRoom.id, scope: "enter", purpose: "The stock count for this order." }] });
+  const walked = await toReview(entering);
+  const asksFor = walked.at.office.messages.findLast((m) => m.kind === "escalation" && m.taskId === walked.id)!;
+  expect("an agent that says it needs to enter a room is taken to need to read it", `${walked.at.office.tasks.find((t) => t.id === walked.id)!.status} ${asksFor.kind === "escalation" && asksFor.deniedDecision?.scope}`, "blocked_permission read");
   const wall = review.at.office.messages.findLast((m) => m.kind === "escalation" && m.taskId === review.id)!;
   expect("the escalation names the room", wall.body.includes(`access to ${closedRoom.name}.`), true);
   expect("and reads cleanly", wall.body.includes(".. ") || wall.body.includes(closedRoom.id + "."), false);
@@ -501,6 +505,9 @@ async function main(): Promise<void> {
   for (let i = 0; i < 3; i++) late = (await reduce(late, { type: "ADVANCE", taskId: late.office.tasks.at(-1)!.id }, lateFind)).state;
   expect("a task cannot wait at review", `${late.office.tasks.at(-1)!.status} ${late.office.tasks.at(-1)!.wait}`, "in_review undefined");
   expect("but what the reviewer found outstanding is said, with how to make it wait", late.office.messages.at(-1)!.body.includes("still to do on 15 January 2027: The second order is placed then. A task cannot wait at this stage. Send it back"), true);
+  const wantsIn = readReply(JSON.stringify({ statusNote: "Stopped.", questions: [], assumptions: [], needs: [{ room: "finance", scope: "Enter", purpose: "The tier." }, { room: "finance", scope: "own", purpose: "x" }], actions: [], notes: [], output: null, wait: null }));
+  expect("a model's need to enter a room is read as a need to read it, and an unknown scope is dropped", "step" in wantsIn && wantsIn.step.needs.map((n) => n.scope).join(), "read");
+  expect("the reply format offers only read and act", JSON_INSTRUCTIONS.includes('"scope" as "read" or "act"') && !JSON_INSTRUCTIONS.includes('"enter"'), true);
   const spoken = readReply(JSON.stringify({ statusNote: "Shipped five.", questions: [], assumptions: [], needs: [], actions: [], notes: [], output: null, wait: { until: "2027-01-15T00:00:00Z", reason: "Stock arrives." } }));
   expect("a wait in a model's own reply survives being read", "step" in spoken ? JSON.stringify(toStepResult(spoken.step, vera).wait) : "unread", JSON.stringify({ until: "2027-01-15", reason: "Stock arrives." }));
   const longNote = Array.from({ length: 110 }, (_, i) => `word${i}`).join(" ");

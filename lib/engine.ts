@@ -1959,7 +1959,10 @@ async function runAgent(
     );
   const passedOn: { to: Participant; need: AccessNeed }[] = [];
   const haltingNeeds: AccessNeed[] = [];
-  for (const need of result.needs ?? []) {
+  // An agent does not walk into a room. A need to enter one, from an older
+  // playbook or a reply that slipped past the format, is a need to read it.
+  const needs = (result.needs ?? []).map((need): AccessNeed => (need.scope === "enter" ? { ...need, scope: "read" } : need));
+  for (const need of needs) {
     const colleague = participant.agentType === "ai" && need.scope === "read" ? colleagueIn(need.room) : undefined;
     if (colleague && resolveAccess(participant, need.room, "read", ctx).effect !== "allow") {
       passedOn.push({ to: colleague, need });

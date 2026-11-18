@@ -199,6 +199,9 @@ async function main(): Promise<void> {
   expect("blank answer options are dropped", book[1].then.question?.options.join(), "Laval,Ottawa");
   expect("a step that does nothing is refused", refusal(people, { type: "SET_PLAYBOOK", participantId: scout.id, steps: [step({})] })?.includes("does nothing yet"), true);
   expect("a step may not need a room that does not exist", refusal(people, { type: "SET_PLAYBOOK", participantId: scout.id, steps: [step({ need: { room: "vault", scope: "read", purpose: "x" } })] })?.includes("does not exist"), true);
+  const mainRoomId = people.floorplan.rooms[0].id;
+  expect("a step cannot need to enter a room, since an agent does not walk", refusal(people, { type: "SET_PLAYBOOK", participantId: scout.id, steps: [step({ need: { room: mainRoomId, scope: "enter", purpose: "x" } })] })?.includes("to read a room or to act in it"), true);
+  expect("it can need to act in one", refusal(people, { type: "SET_PLAYBOOK", participantId: scout.id, steps: [step({ need: { room: mainRoomId, scope: "act", purpose: "x" } })] }), null);
   expect("nor ask someone who is not in the office", refusal(people, { type: "SET_PLAYBOOK", participantId: scout.id, steps: [step({ question: { body: "Hello?", to: "p-nobody", blocking: false, options: [] } })] }) !== null, true);
   expect("a person has no playbook", refusal(people, { type: "SET_PLAYBOOK", participantId: "p-dana", steps: [] }), "Only an agent has a playbook.");
   booked = apply(booked, { type: "UPDATE_PARTICIPANT", participantId: scout.id, agentType: "ai", providerId: null, model: "some-model" });

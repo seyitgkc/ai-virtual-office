@@ -342,8 +342,8 @@ changeable afterwards:
 - A **playbook agent** follows an ordered list of steps. Each step has
   conditions under *When* (the stage the work is at, text the request
   contains, who the request is from) and an outcome under *Then* (a line for
-  the activity log, an output, a question, an assumption, a need for access to
-  a room, something to do in a connected system, a note for someone). The agent takes the first step whose conditions all hold. When no
+  the activity log, an output, a question, an assumption, a need to read a
+  room or to act in it, something to do in a connected system, a note for someone). The agent takes the first step whose conditions all hold. When no
   step applies it does nothing and says so.
 
 ### AI providers

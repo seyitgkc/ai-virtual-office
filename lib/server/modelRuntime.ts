@@ -120,7 +120,8 @@ export const StepSchema = z.object({
   needs: z.array(
     z.object({
       room: z.string(),
-      scope: z.enum(["enter", "read", "act"]),
+      // An agent has no body to bring into a room, so it asks to read or to act.
+      scope: z.enum(["read", "act"]),
       purpose: z.string(),
     }),
   ),
@@ -505,7 +506,7 @@ export function toStepResult(raw: RawStep, input: AgentStepInput): AgentStepResu
 export const JSON_INSTRUCTIONS = `
 
 Reply with one JSON object and nothing else. It must have exactly these fields:
-"statusNote" (string), "questions" (array of objects with "body", "toParticipantId", "blocking" and "options"), "assumptions" (array of objects with "assumed", "because" and "confidence" as "low", "medium" or "high"), "needs" (array of objects with "room", "scope" as "enter", "read" or "act", and "purpose"), "actions" (array of objects with "system", "operation" and "fields", where "fields" is an array of objects with "name" and "value"), "notes" (array of objects with "to" and "body"), "output" (an object with "label" and "body", or null), and "wait" (an object with "until" as a day written YYYY-MM-DD and "reason", or null). Use empty arrays where there is nothing to report.`;
+"statusNote" (string), "questions" (array of objects with "body", "toParticipantId", "blocking" and "options"), "assumptions" (array of objects with "assumed", "because" and "confidence" as "low", "medium" or "high"), "needs" (array of objects with "room", "scope" as "read" or "act", and "purpose"), "actions" (array of objects with "system", "operation" and "fields", where "fields" is an array of objects with "name" and "value"), "notes" (array of objects with "to" and "body"), "output" (an object with "label" and "body", or null), and "wait" (an object with "until" as a day written YYYY-MM-DD and "reason", or null). Use empty arrays where there is nothing to report.`;
 
 /** Pull the JSON object out of a reply that may be wrapped in a code fence. */
 export function parseReply(text: string): unknown {
@@ -555,8 +556,10 @@ export function tidyReply(parsed: unknown): unknown {
     }),
     needs: list(raw.needs).flatMap((n) => {
       const item = record(n);
-      const scope = word(item.scope).toLowerCase();
-      return scope === "enter" || scope === "read" || scope === "act"
+      // A model that asks to enter a room wants what the room holds, so that is a need to read.
+      const said = word(item.scope).toLowerCase();
+      const scope = said === "enter" ? "read" : said;
+      return scope === "read" || scope === "act"
         ? [{ room: word(item.room), scope, purpose: word(item.purpose) }]
         : [];
     }),

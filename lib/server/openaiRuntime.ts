@@ -62,7 +62,7 @@ const STEP_JSON_SCHEMA = {
         required: ["room", "scope", "purpose"],
         properties: {
           room: { type: "string" },
-          scope: { type: "string", enum: ["enter", "read", "act"] },
+          scope: { type: "string", enum: ["read", "act"] },
           purpose: { type: "string" },
         },
       },
