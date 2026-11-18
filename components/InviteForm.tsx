@@ -81,7 +81,7 @@ export function InviteForm({ token, invite }: { token: string; invite: InviteDet
             </div>
           )}
           <button type="submit" className="btn primary" disabled={busy}>
-            Create account and enter
+            Accept and enter
           </button>
         </form>
       </div>
