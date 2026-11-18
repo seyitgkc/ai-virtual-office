@@ -14,10 +14,12 @@ The access details are sent separately from this repository. They hold:
 
 - the address of the site;
 - the email and password of the administrator's account;
-- the email and password of a second person's account;
 - the address of each mock service, and the API key they share. The
   services run beside the office and have no address on the internet, so
   these are the names the office itself reaches them by.
+
+The second person in step 7 is an account you make yourself, on the
+invitation's own page, with any email and a password you choose.
 
 No model key is needed. The administrator's account already holds an AI
 provider, listed under Settings, *Your AI providers*, and it can be given to
@@ -106,16 +108,20 @@ to do.
 ## 7. Invite a person and accept as them
 
 1. On the title card, click **Invite**.
-2. Give the second person's name and a job title, choose the role *Front
-   office* and a desk in *Front office*, and click **Create invite**.
+2. Give a name and a job title for the person you are inviting, choose the
+   role *Front office* and a desk in *Front office*, and click **Create
+   invite**.
 3. Click **Copy link**. The link is shown once. The invitation waits in the
    list below it until it is accepted, and nobody is in the office before
    then.
 4. Click **Done**, then **Sign out**.
 5. Open the copied link. The page names the office, the role and the desk.
-   Enter the second person's email and password and click **Accept and
-   enter**. An email that already has an account joins with that account,
-   which is the case here. A new email would create an account.
+   Enter an email and a password of at least 10 characters and click
+   **Accept and enter**. That creates the invited person's account. The
+   email is only the name they sign in with, and nothing is sent to it.
+   Keep both if you want to sign in as that person again. An email that
+   already has an account would join with that account and its own
+   password.
 
 You are now in the office as the second person, at a desk in *Front office*.
 There is no Invite or Report button and Settings holds only that person's
