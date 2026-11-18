@@ -370,7 +370,8 @@ being usable in an office once you no longer have a seat there.
 
 ### A sample office
 
-Under *Your offices*, *Add the sample office* creates the
+The [walkthrough](walkthrough.md) builds an office by hand, one step at a
+time. Under *Your offices*, *Add the sample office* creates the
 demo's distributor as an office of your own: the same five rooms, roles and
 records, the mock services where the server has them, five AI
 agents on the provider you pick from your account, and you as its manager. It

@@ -50,6 +50,11 @@ says how much work is open and what is waiting for a person.
 5. Click **Walk the office** to go through it on foot. Enter as Sam instead
    to meet the doorways Sam may not pass.
 
+The demo runs on written playbooks. To see agents on a real language model,
+the [walkthrough](docs/walkthrough.md) builds an office from nothing: rooms,
+roles, three AI agents, two connected services, an invited person and three
+requests.
+
 ### Real and simulated parts
 
 The access rules, the workflow, sign-in,
@@ -525,6 +530,7 @@ refuses to build unless it passes.
 | [What it does](docs/features.md) | Every feature, one paragraph each |
 | [User guide](docs/user-guide.md) | Daily use, every panel, walking, messages, the inbox and every settings page |
 | [Example workflows](docs/example-workflows.md) | Five walkthroughs in the demo office |
+| [Walkthrough with AI agents](docs/walkthrough.md) | Building an office of your own step by step: rooms, roles, AI agents, connected services, an invitation and three requests |
 | [Architecture](docs/architecture.md) | Layers, the access model, the workflow's states, agents, sign-in, tokens, the API |
 | [Database](docs/database.md) | All 66 tables, with diagrams |
 | [What is functional, simulated and proposed](docs/real-and-simulated.md) | The full list, with what was run on the live site |
