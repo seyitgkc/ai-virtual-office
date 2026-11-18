@@ -164,9 +164,15 @@ export function internalHost(hostname: string): boolean {
  * Refuse addresses that are malformed, point at a machine's own metadata, or
  * lie inside the server's own network. `kept` is the address already stored
  * for the thing being changed: saving it again unchanged is always allowed,
- * so a system the server connected by itself can still be edited.
+ * so a system the server connected by itself can still be edited. `own` holds
+ * addresses the server was itself told to call, which may be named by anyone.
  */
-export function checkedBaseUrl(input: string, whose = "the provider's", kept: string | null = null): string {
+export function checkedBaseUrl(
+  input: string,
+  whose = "the provider's",
+  kept: string | null = null,
+  own: ReadonlySet<string> = new Set(),
+): string {
   let url: URL;
   try {
     url = new URL(input.trim());
@@ -181,7 +187,7 @@ export function checkedBaseUrl(input: string, whose = "the provider's", kept: st
     throw new ProviderError("That address is not allowed.");
   }
   const address = url.toString().replace(/\/+$/, "");
-  if (address !== kept && !internalAddressesAllowed() && internalHost(url.hostname)) {
+  if (address !== kept && !own.has(address) && !internalAddressesAllowed() && internalHost(url.hostname)) {
     throw new ProviderError(
       "That address is inside the server's own network, which this server does not call. Use an address that is reachable from the internet.",
     );

@@ -15,7 +15,9 @@ The access details are sent separately from this repository. They hold:
 - the address of the site;
 - the email and password of the administrator's account;
 - the email and password of a second person's account;
-- the address of each mock service, and the API key they share.
+- the address of each mock service, and the API key they share. The
+  services run beside the office and have no address on the internet, so
+  these are the names the office itself reaches them by.
 
 No model key is needed. The administrator's account already holds an AI
 provider, listed under Settings, *Your AI providers*, and it can be given to

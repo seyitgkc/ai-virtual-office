@@ -77,8 +77,9 @@ Part of the documentation of the [AI Virtual Office](../README.md).
   address inside the server's own network: this machine, a private or
   link-local range, or a bare host name of the kind one container uses to
   reach another. A stranger's account could otherwise make the server call
-  services that were never published. The mock services are connected by
-  the server itself and are not affected. A private installation, with
+  services that were never published. The mock services the server was
+  itself told about are the exception: anyone may connect them by hand,
+  because the server already calls them and each still asks for its key. A private installation, with
   `SIGNUP=0` or `ALLOW_PRIVATE_ADDRESSES=1`, may name its own network, for a
   model running on the same machine for example. The check reads the address
   as typed. A public name that resolves to a private address is not caught.

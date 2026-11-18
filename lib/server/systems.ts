@@ -187,7 +187,9 @@ export async function checkSystem(db: Db, office: Office, input: SystemInput): P
 
   let baseUrl: string;
   try {
-    baseUrl = checkedBaseUrl(input.baseUrl, "the system's", existing?.base_url ?? null);
+    // The mock services the server runs beside itself can be connected by
+    // hand: the server already calls them, and each still wants its key.
+    baseUrl = checkedBaseUrl(input.baseUrl, "the system's", existing?.base_url ?? null, sampleUrls());
   } catch (error) {
     throw error instanceof ProviderError ? new SystemError(error.message) : error;
   }

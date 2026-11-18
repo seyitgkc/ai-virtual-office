@@ -352,6 +352,25 @@ async function main(): Promise<void> {
   expect("and what the system says can be done in it", view.systems[0].operations.join(), "Place an order,Cancel an order");
   expect("an address that is not such a system is refused", await refusal(async () => service.saveSystemSettings(await owner(), { name: "Nothing", description: "", roomId: warehouse, baseUrl: "http://127.0.0.1:9", apiKey: key })), 400);
   expect("and so is a key the system rejects", await refusal(async () => service.saveSystemSettings(await owner(), { name: "Shop two", description: "", roomId: warehouse, baseUrl: shopUrl, apiKey: "not-the-right-key" })), 400);
+  {
+    // On a server open to sign-up, only the mock services it was told about may be named by hand.
+    delete process.env.ALLOW_PRIVATE_ADDRESSES;
+    const said = async (baseUrl: string, apiKey: string): Promise<string> => {
+      try {
+        await service.saveSystemSettings(await owner(), { name: "By hand", description: "", roomId: warehouse, baseUrl, apiKey });
+        return "connected";
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+    expect("a server open to sign-up refuses a service inside its own network", (await said(booksUrl, key)).includes("inside the server's own network"), true);
+    expect("one of its own mock services still wants the right key", (await said(freightUrl, "not-the-right-key")) === "connected", false);
+    expect("and can be connected by hand with it", await said(freightUrl, key), "connected");
+    const byHand = service.getView(await owner()).systems.find((s) => s.name === "By hand")!;
+    view = await service.removeSystemSettings(await owner(), byHand.id);
+    expect("it disconnects like any other", view.systems.some((s) => s.name === "By hand"), false);
+    process.env.ALLOW_PRIVATE_ADDRESSES = "1";
+  }
   view = await service.saveSystemSettings(await owner(), { id: shopId, name: "Shop", description: "Use this only for restocking jobs. Check the branch stock before ordering.", roomId: warehouse, baseUrl: shopUrl });
   expect("the description can be reworded", view.office.systems[0].description, "Use this only for restocking jobs. Check the branch stock before ordering.");
   expect("and its operations stay", view.office.systems[0].operations.length, 2);

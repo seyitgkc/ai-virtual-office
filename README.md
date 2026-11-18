@@ -512,13 +512,13 @@ or an outside system, it starts a stand-in on a local port.
 | Playbook steps, and AI agents through both provider interfaces against stand-in services | `npm run providers` | 56 of 56 pass |
 | Set-up changes and their refusals, permissions, playbooks, rooms, a person leaving, an office built from nothing | `npm run admin` | 127 of 127 pass |
 | Several offices in one database: isolation, providers and their keys, invitations, accounts, the briefing, removal | `npm run offices` | 206 of 206 pass |
-| The five mock services and what each refuses, live records, actions held for approval, messages and notes, and a demo reset that puts the services back | `npm run systems` | 181 of 181 pass |
+| The five mock services and what each refuses, live records, actions held for approval, messages and notes, and a demo reset that puts the services back | `npm run systems` | 185 of 185 pass |
 | Agents working between clicks: queues, waits, restarts, urgent work, standing work | `npm run loop` | 118 of 118 pass |
 | A rejected task that had placed orders, and taking them back | `npm run windup` | 61 of 61 pass |
 | Types | `npx tsc --noEmit` | clean under `--strict` |
 | Production build | `npm run build` | standalone server |
 
-That is 1,173 checks.
+That is 1,177 checks.
 
 `npm run verify` runs all of the above except the build. The Docker image
 refuses to build unless it passes.

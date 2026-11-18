@@ -79,7 +79,9 @@ front of it. The services publish no port: only the office reaches them,
 over the stack's own network. An office other than the demo can connect to
 them too, at `http://storefront:8081`, `http://carrier:8082`,
 `http://ledger:8083`, `http://supplier:8084` and `http://service-desk:8085`,
-with the value of `DEMO_SYSTEMS_KEY`. Back up the office by copying the volume.
+with the value of `DEMO_SYSTEMS_KEY`. These are the addresses in the
+`DEMO_..._URL` settings, and they are the only ones inside the server's
+network that can be typed into Settings while sign-up is on. Back up the office by copying the volume.
 
 The deployed site runs the same six containers without compose, as six
 applications in one Dokploy project that build from this repository. The
