@@ -4,8 +4,8 @@ Part of the documentation of the [AI Virtual Office](../README.md).
 
 ## 1. A quote blocked at the Finance door
 
-If the demo has been used and T-1 is no longer halted, open Settings, This
-office, and click **Reset the demo**. That puts back the seeded people, rules
+If the demo has been used and T-1 is no longer halted, open Settings,
+General, and click **Reset the demo**. That puts back the seeded people, rules
 and three tasks for every visitor. It also puts the mock services back to
 their starting data, so the order T-1 places is placed afresh each time. The
 mock services are shared by every office on the server that connects to them,
@@ -20,7 +20,7 @@ outlined in red.
 
 1. Read *Your move*. Quill explains what it needs and names the rule that
    stopped it.
-2. Click **Grant read on finance, for this task only**. An individual allow
+2. Click **Grant read on Finance, for this task only**. An individual allow
    outranks a role deny, so the task returns to *in progress*. A permission
    token for Quill appears in Quill's inspector. Quill takes its step again
    now that it can read Finance: its draft quote lands in the thread, it
@@ -28,7 +28,7 @@ outlined in red.
    the order in the storefront connected to Fulfilment. The task waits.
 3. Click **Approve** under the question. The order is placed, the thread
    shows the order number, and Laval's stock of that product drops by six
-   under Settings, Records and systems. Quill's step is now finished, so
+   under Settings, Connected systems. Quill's step is now finished, so
    within a second or two the task moves to Finance by itself and Ledger
    picks it up. Nobody clicks Advance.
 4. Click **Approve**. The task completes, the grant from step 2 expires with
@@ -44,7 +44,7 @@ This is the more instructive path, and it starts from a new request.
    itself, each agent taking its step as the work arrives.
 3. In Fulfilment the task goes to Vera, who needs to read Finance to price the
    order. Vera is blocked.
-4. Click **Grant read on finance, for this task only**. The task stays blocked.
+4. Click **Grant read on Finance, for this task only**. The task stays blocked.
 5. The reason is on screen. Vera carries two older individual rules: `r-01`
    allows reading Finance (left over from a margin review project) and `r-02`
    denies it (added by a later security review). Deny wins among individual
@@ -61,7 +61,7 @@ and that the system will explain it. The same story runs headless under
 > Advance to Execution
    - T-1 moved to Execution (Fulfilment), owner Vera
    - Vera recorded an assumption: The dealer will accept shipment from Laval
-   - Vera blocked on read access to finance. Denied by individual rule r-02 (deny: Security review: fulfilment agents should not read credit data); overrides individual rule r-01 (allow: Needed landed-cost visibility for the margin review project)
+   - Vera blocked on read access to Finance. Denied by individual rule r-02 (deny: Security review: fulfilment agents should not read credit data); overrides individual rule r-01 (allow: Needed landed-cost visibility for the margin review project)
    pass  blocked on permission -> blocked_permission
 
 > Dana grants Vera read on Finance
@@ -108,9 +108,9 @@ Approve T-1 and call again: refused, because the task has closed.
 
 ## 5. A task waiting on an answer
 
-**T-1002** is a branch transfer. Vera asked whether to send four units now or
+**T-2** is a branch transfer. Vera asked whether to send four units now or
 split the shipment, and the task waits in amber until someone chooses. It is
 the same halt as T-1 with a different cause and a different fix.
 
-**T-1003** is already complete, so the full path from request to approval can
+**T-3** is already complete, so the full path from request to approval can
 be read in its thread without clicking through anything.

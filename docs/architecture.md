@@ -55,7 +55,7 @@ sequenceDiagram
   participant E as Engine
   participant D as SQLite
 
-  P->>B: Click "Grant read on finance"
+  P->>B: Click "Grant read on Finance"
   B->>A: POST /api/office/actions
   A->>A: Verify the session cookie
   A->>S: applyAction(session, action)
@@ -90,6 +90,8 @@ lib/systems.ts            kinds of connected system and the operations each offe
 lib/referenceData.ts      the records the demo office's rooms start with
 lib/geometry.ts           walls, doors, walking collision, desk placement
 lib/useOffice.ts          browser hook: holds the view, sends actions
+lib/view.ts               the office as one viewer is sent it
+lib/initialState.ts       the state the demo office starts from
 lib/server/schema.ts      the database schema
 lib/server/db.ts          SQLite connection and transactions
 lib/server/officeStore.ts maps the office to tables and back
@@ -98,6 +100,8 @@ lib/server/auth.ts        password hashing, users, seats, JWT sessions
 lib/server/secrets.ts     encryption for stored API keys
 lib/server/accessTokens.ts   scoped permission tokens
 lib/server/invites.ts     inviting people
+lib/server/inviteRows.ts  the invitations that wait, as stored
+lib/server/http.ts        the session behind a request, and error replies
 lib/server/providers.ts   an office's AI providers and the runtime each AI agent gets
 lib/agentState.ts         what someone at a desk is doing right now, and who is on a task
 lib/recall.ts             the closed tasks that bear on the one in hand
@@ -216,8 +220,12 @@ asynchronous because it waits for the agent runtime.
 reduce(state, action, runtime): Promise<{ state, emitted, notes }>
 ```
 
-Actions: `SUBMIT_REQUEST`, `ADVANCE`, `ANSWER_QUESTION`, `GRANT_ACCESS`,
-`REVOKE_RULE`, `REASSIGN`, `RESOLVE_ASSUMPTION`, `DECIDE`.
+A person's actions are `SUBMIT_REQUEST`, `ADVANCE`, `ANSWER_QUESTION`,
+`GRANT_ACCESS`, `REVOKE_RULE`, `REASSIGN`, `RESOLVE_ASSUMPTION`, `DECIDE`,
+`SET_URGENT`, `ADD_DOCUMENT` and `WAKE_TASK`, which ends a wait. Three more
+are raised only by the office and refused from a browser: `AGENT_RESUME` and
+`AGENT_ATTEND` put work in front of an agent, and `WIND_UP` carries on with
+a rejected task.
 
 ## Who may do what
 
@@ -227,11 +235,14 @@ server enforces it and the interface uses it to disable controls.
 | Action | Needs |
 | --- | --- |
 | File a request | `act` in Reception |
-| Advance a task, confirm or contradict an assumption | `act` in the room where the task is |
+| Advance a task, end its wait, confirm or contradict an assumption | `act` in the room where the task is |
 | Answer a question | being the person asked, or `act` in that room |
+| Approve an action held in a connected system | being the person asked, or the Manage access permission |
+| Add a document to an open task | having filed it, or `act` in the room where the task is |
+| Mark a task urgent | having filed it, the Hand work over permission, or `act` in the room where the task is |
 | Grant or revoke an access rule | the Manage access permission |
 | Hand work to another owner | the Hand work over permission |
-| Approve or reject at review, or reject an open task before it | the Decide reviews permission |
+| Approve or reject at review, or reject an open task before it | the Decide reviews permission, and `act` in the room where the task is |
 | Change the office's set-up | the permission for that part: rooms, people and agents, roles, AI providers or the office itself |
 
 The server overwrites every "who did this" field with the signed-in person
@@ -251,7 +262,10 @@ interface AgentStepResult {
   questions: DraftQuestion[];      // blocking or not, with optional choices
   assumptions: DraftAssumption[];  // what was assumed, why, how confident
   needs?: AccessNeed[];            // { room, scope, purpose }
+  actions?: SystemAction[];        // things to do in connected systems
+  notes?: DraftNote[];             // one person or agent each, blocking nothing
   output?: { label: string; body: string };
+  wait?: { until: string; reason: string };  // a day, YYYY-MM-DD
 }
 ```
 
@@ -270,11 +284,12 @@ flowchart LR
 ```
 
 A playbook step is data: conditions (stage, text in the request, who asked) and
-an outcome made of the same five parts as `AgentStepResult`. `lib/playbook.ts`
-finds the first step that applies and returns its outcome. No model is called.
+an outcome made of the same parts as `AgentStepResult`, apart from the wait,
+which only an AI agent sets. `lib/playbook.ts` finds the first step that
+applies and returns its outcome. No model is called.
 
 An AI agent's step is one model call. Both kinds of provider are given the
-same prompt and must return the same five fields. A service may not enforce a
+same prompt and must return the same fields. A service may not enforce a
 reply format, so the format is described in the instructions and every reply
 is checked before the engine sees it. An Anthropic compatible provider is
 sent a plain Messages request. For an OpenAI compatible provider the reply
@@ -341,7 +356,7 @@ colleague as a note. The colleague looks, answers with a note, and the first
 agent takes its step again with the answer. Nothing the first agent may not
 read is shown to it: it gets the colleague's answer, written by an agent that
 is allowed to read the room. A task still halts for a person when nobody in
-that room can answer, when the need is to enter or act, and whenever a
+that room can answer, when the need is to act, and whenever a
 playbook says so, because a playbook's need was written by a person.
 
 ### Between clicks
@@ -408,6 +423,26 @@ shown a room's records, a system's live records and a task's messages only
 when both it and the person asking may read them, so asking an agent never
 reveals what the person could not have read for themselves. A conversation
 has no way to act: the reply is text, and nothing in it is carried out.
+
+### The briefing
+
+The sentence or two at the top of the screen is written apart from any
+agent's step. The counts beside it are worked out from the tasks for every
+view. The briefing is asked for when a browser reads the office, and only
+when no agent is at work and the work list differs from the one the stored
+briefing was written for. The model of the first AI agent with a usable provider is given the
+work list as data: the twelve most pressing open tasks and the three closed
+last, each with its number, title, state, owner, and the day and reason it
+waits for. Nothing from a thread or a room's records goes in, so the same
+text can be shown to every viewer. The call is made outside the turn that
+changes the office. The model is asked for at most two sentences and 34
+words, its answer is cut at 300 characters, and it is stored with a
+fingerprint of the work list it describes. A call that fails is left for
+five minutes. Until an answer is stored, and in an office with no model, the
+view carries a briefing composed from the same facts. `BRIEFING=0` turns the
+model's part off.
+
+### Acting in a connected system
 
 An agent's reply may also ask for something to be done in a connected system.
 The engine decides whether it happens:
@@ -504,14 +539,14 @@ last reason, until `r-02` is revoked.
 | `POST /api/auth/register` | anyone, when sign-up is on | Create an account with an empty office of its own, and sign in |
 | `POST /api/auth/demo` | anyone, when demo sign-in is on | Enter the demo office as one of its people |
 | `POST /api/auth/logout` | signed in | Revoke the session |
-| `GET /api/office` | signed in | The office as this viewer may see it |
+| `GET /api/office` | signed in | The office as this viewer may see it. Asks for a new briefing when one is due |
 | `POST /api/office/actions` | signed in | Apply one action |
 | `POST /api/admin` | the permission for that change | Apply one set-up change |
 | `POST /api/admin/providers` | Manage AI providers, password account. For one's own: a password account | Add, change, remove or test an AI provider of the office, or of the signed-in account |
 | `POST /api/admin/standing` | Manage the office | Add, change, pause, resume or remove standing work, or file one now |
 | `POST /api/admin/systems` | Manage rooms, and read on the room | Read a connected system's live records. With a password account: connect, change or disconnect one |
 | `POST /api/chat` | signed in. For an agent: may enter its room | Send a direct message to a person or an agent, or mark a conversation or a note as opened |
-| `POST /api/offices` | signed in | Add an empty or a sample office, switch to another, or remove one. In the demo, with Manage the office: reset it |
+| `POST /api/offices` | signed in | Add an empty or a sample office, switch to another, or remove one. In the demo, with Manage the office: reset it and the mock services |
 | `POST /api/invites` | Invite people | Create an invitation and its link, give a waiting invitation a new link, or withdraw one. In the demo office: add a person and a desk, entered without a password |
 | `POST /api/invites/accept` | invite holder | Set email and password, get a desk in the office, sign in |
 | `POST /api/tokens/:id` | Manage access, or holder to reveal | Reveal or revoke a permission token |

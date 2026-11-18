@@ -46,6 +46,11 @@ Part of the documentation of the [AI Virtual Office](../README.md).
   lowers the chance that a planted sentence, such as a product name reading
   "ignore your rules", is obeyed. It does not make that impossible, which is
   why the limits above do not depend on it.
+- The briefing at the top of the screen is one text for everyone in the
+  office, so it is written only from what everyone already sees in the work
+  list: a task's number, title, state and owner, and the day and reason it
+  waits for. Nothing said in a room and no record goes to the model that
+  writes it. Titles and reasons are wrapped as data like any other text.
 - Each kind of set-up change needs its own permission, and nobody can grant a
   permission, or give or invite into a role, beyond what they hold.
 - Offices are isolated on the server. Every request acts on the office of the

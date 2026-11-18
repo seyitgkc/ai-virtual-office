@@ -112,9 +112,10 @@ Two things follow from that, and they shape the whole system.
 1. Access control is the orchestration mechanism. Work moves between rooms and
    rooms have permissions, so a permission failure is a visible event with a
    location.
-2. A task halts for exactly two reasons. Its owner lacks permission, or its
-   owner lacks information. Both need a person, for different reasons, and the
-   office draws them differently: red for access, amber for a question.
+2. A task halts only where a person is needed. Its owner lacks permission,
+   or it lacks something only a person can give: an answer, an approval or
+   the final decision. The office draws the first two differently: red for
+   access, amber for a question.
 
 The model is generic. The demo data is specific to an HVAC distributor with
 several branches: dealer orders, inter-branch stock transfers, dealer tier
@@ -226,8 +227,8 @@ setting.
 
 A quote blocked at the Finance door, from the halt to completion.
 
-If the demo has been used and T-1 is no longer halted, open Settings, This
-office, and click **Reset the demo**. That puts back the seeded people, rules
+If the demo has been used and T-1 is no longer halted, open Settings,
+General, and click **Reset the demo**. That puts back the seeded people, rules
 and three tasks for every visitor. It also puts the mock services back to
 their starting data, so the order T-1 places is placed afresh each time. The
 mock services are shared by every office on the server that connects to them,
@@ -242,7 +243,7 @@ outlined in red.
 
 1. Read *Your move*. Quill explains what it needs and names the rule that
    stopped it.
-2. Click **Grant read on finance, for this task only**. An individual allow
+2. Click **Grant read on Finance, for this task only**. An individual allow
    outranks a role deny, so the task returns to *in progress*. A permission
    token for Quill appears in Quill's inspector. Quill takes its step again
    now that it can read Finance: its draft quote lands in the thread, it
@@ -250,7 +251,7 @@ outlined in red.
    the order in the storefront connected to Fulfilment. The task waits.
 3. Click **Approve** under the question. The order is placed, the thread
    shows the order number, and Laval's stock of that product drops by six
-   under Settings, Records and systems. Quill's step is now finished, so
+   under Settings, Connected systems. Quill's step is now finished, so
    within a second or two the task moves to Finance by itself and Ledger
    picks it up. Nobody clicks Advance.
 4. Click **Approve**. The task completes, the grant from step 2 expires with
@@ -417,6 +418,8 @@ the stored data.
   scripts cover it with a clock of their own.
 - An agent that cannot be reached while a rejected task is wound up, on the
   live site. The check scripts cover it.
+- A real phone or tablet. The phone layout and walking by touch were run in
+  a desktop browser set to a phone's size and touch input.
 
 ### Proposed
 

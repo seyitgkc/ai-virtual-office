@@ -58,6 +58,16 @@ its name tag says which task it is on. Each new line in a thread shows at
 the desk of whoever wrote it, and a handoff, a question, an answer or a note
 is seen crossing the office to the desk it is for.
 
+## A summary and a briefing, always in view
+
+The top of the screen counts the open tasks, how many wait for a person, how
+many agents are at work and how many tasks are urgent. Under the counts a
+briefing says in a sentence or two which tasks need a person and what each
+needs. In an office with an AI agent that agent's model writes it once the
+work has gone quiet. Elsewhere it is put together from the same facts. It is
+written only from what everyone sees in the work list, so one briefing
+serves every viewer.
+
 ## Urgent work
 
 A person can mark a task urgent when filing it or later.
@@ -124,6 +134,14 @@ what came of it. The task closes only when nothing is left standing or a
 person says to leave it. If something cannot be taken back, the person is
 told why and asked what next.
 
+## A request can be rejected at any open stage
+
+Whoever may decide reviews can turn a request down before it reaches
+review: while it is halted on a question, set to wait, or still being
+planned. Its open questions and its wait go with it, and anything it already
+did in a connected system is settled as it would be at review. Approving and
+sending work back stay at review.
+
 ## Tasks have short numbers
 
 A task is T-1, T-2 and so on within its
@@ -146,7 +164,8 @@ distributor as an office of their own, staffed by real AI agents.
 
 A provider is any service that speaks
 the OpenAI chat completions interface or the Anthropic Messages interface.
-Each AI agent names the provider and model it uses.
+Both are set up the same way, with an address, a model id and a key if the
+service needs one. Each AI agent names the provider and model it uses.
 
 ## Records and connected systems per room
 
@@ -161,7 +180,9 @@ A storefront, a freight carrier, an
 accounts ledger, a supplier portal and a service desk run as their own
 containers beside the office. Each refuses what its real counterpart would,
 such as an invoice past a credit limit. The demo office is connected to all
-of them, and its agents place a real order in the storefront.
+of them, and its agents place a real order in the storefront. An office
+connected to any of them names them on its title card and says that their
+data is simulated. Resetting the demo puts them back to their starting data.
 
 ## Systems that describe themselves
 
@@ -232,4 +253,8 @@ count of what is new.
 
 The office can be seen from above, or walked in a first-person mode with
 a map. Every desk's screen shows what its occupant is doing right now, and
-facing someone offers a key to talk to them.
+facing someone offers a key to talk to them. Picking a place on the map
+puts you there, picking a person puts you in front of them, and pointing at
+anyone on the map shows their name. A doorway into a room you may not enter
+is closed, on foot and on the map. On a phone or a tablet the walk is by
+touch.

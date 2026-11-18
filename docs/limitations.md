@@ -42,6 +42,24 @@ Part of the documentation of the [AI Virtual Office](../README.md).
 - A wait is stored with the task, so it survives a restart. The office looks
   for waits that have ended once a minute. The demo office keeps a clock that
   only moves with a click, so a wait there ends only when a person ends it.
+- Some of what keeps an AI agent sensible is an instruction to a model: to
+  stay in its own stage, to ask before guessing, and to wait only for
+  something already arranged. A model can ignore an instruction. The limits
+  that must hold are enforced outside it: what an agent is shown, what it may
+  do in a system, and what waits for a person's approval.
+- The briefing at the top is written by the model of the first AI agent that
+  has a provider it can use. It is asked for when someone has the office open,
+  the agents have gone quiet and the work has changed since the last one, so
+  it follows a change by a few seconds. It is written from the work list
+  alone, so it cannot say why a task is stuck beyond the task's state, and
+  the model is shown the twelve most pressing open tasks and no more.
+  Until it arrives, and in an office with no model, the briefing is put
+  together from the same facts with no model involved.
+- The mock services are shared by every office on the server that connects
+  to them. They return to their starting data when a service restarts, once a
+  day, and when the demo is reset, so a task that waits longer than a day
+  finds its earlier orders gone, and a reset of the demo clears what other
+  offices did there.
 - A task stops being carried after forty background steps, until a person
   acts on it.
 - A provider from someone's account can be used in an office only while its
@@ -66,8 +84,11 @@ Part of the documentation of the [AI Virtual Office](../README.md).
   and a second entry under the same name.
 - On a phone the interface shows one section at a time, chosen from a bar at
   the bottom. Walking there is by taps on the map: there is no way to move a
-  step at a time without a keyboard. Settings tables scroll sideways there, and an office of more than four or five rooms
-  along its corridor is wider than the screen until the view is pinched out.
+  step at a time without a keyboard. Settings tables scroll sideways there,
+  and an office of more than four or five rooms along its corridor is wider
+  than the screen until the view is pinched out. The phone layout and
+  walking by touch were tried in a desktop browser set to a phone's size
+  and touch input, and on no real phone or tablet.
 - With a task open on a window narrower than about 1,100 pixels, the strip
   left for the office is small and a long office is drawn small in it.
 - The demo office shows a fixed demo clock that steps forward three minutes
@@ -86,10 +107,10 @@ of a human one.
 | --- | --- |
 | Memory across jobs: who paid late, which branch miscounts | An agent is shown up to three closed tasks that share an account, part or order number with the one in hand, each with its result, and a person can keep a line from a thread as a room record in one click. Agents do not write records themselves, and earlier work is matched on shared numbers and uncommon words, so a related job described in different terms is missed. |
 | Initiative: someone notices stock running low and starts the work | The office files standing work by itself on a schedule a person sets, such as a stock check every Monday. Agents still do not decide for themselves that something needs doing. |
-| Time: due dates, a reminder on Friday, a job that waits for a delivery | A task can wait for one day at a time and is picked up again then. There are no due dates, no reminders to people and no working hours, and an agent takes the day from the thread or the records and cannot look ahead in a calendar. |
-| Conversation: two rooms talk a problem through | Agents leave each other notes of up to 120 words on a task and answer them in turn. They cannot meet, and a reviewer cannot ask the worker a question without sending the work back. |
+| Time: due dates, a reminder on Friday, a job that waits for a delivery | A task can wait for one day at a time and is picked up again then. An agent is told to wait only for something already arranged, such as an order that was placed, and that is an instruction to a model. There are no due dates, no reminders to people and no working hours, and an agent takes the day from the thread or the records and cannot look ahead in a calendar. |
+| Conversation: two rooms talk a problem through | Agents leave each other notes of up to 120 words on a task and answer them in turn. A person can ask an agent about its work at its desk, including work it has handed on, and the agent answers from what both may read. That answer stays between the two of them and is not part of the task, so a reviewer's question that should change the work still means sending it back. Nobody can meet: there is no conversation of more than two. |
 | Parallel work: Finance and Purchasing on the same order at once | A task has one owner in one room. Colleagues do their parts at the same time through notes, each from its own queue. Those parts are written down, tried again when they fail, and the task is not handed on until they are done. The task panel names who is on it. There is still no second owner. |
-| Priority and load: this one is urgent, that desk is swamped | A person can mark a task urgent, and agents take urgent work first. The report and the status line show what each agent is on and how much waits behind it. There is no finer order than urgent or not, no due date, and work is not moved from a busy agent to a free one. |
+| Priority and load: this one is urgent, that desk is swamped | A person can mark a task urgent, and agents take urgent work first. A summary at the top counts open work, what waits for a person and what is urgent, and a briefing under it names the tasks that need someone. The report and the status line show what each agent is on and how much waits behind it. There is no finer order than urgent or not, no due date, and work is not moved from a busy agent to a free one. |
 | Documents: a purchase order as a PDF, an email from the dealer | Up to five text documents of 20,000 characters each can be attached to a task: text, CSV, Markdown, a saved email. PDFs, images and spreadsheets are turned away, and nothing is sent outside the office. |
-| A different path for different work | Every task passes all four stages. A stage with nothing to do says so in a line and passes it on. |
+| A different path for different work | A request can be rejected at any open stage, so one that should never have been filed need not travel to review. A task that carries on still passes all four stages. A stage with nothing to do says so in a line and passes it on. |
 | Reporting: how did we do last month | A report counts everything since the office began. It cannot be narrowed to a period, compared with an earlier one, or exported. |

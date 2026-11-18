@@ -45,6 +45,7 @@ All optional. See `.env.example`.
 | `BRIEFING` | `1` | Lets an office's model write the briefing at the top of the screen. `0` leaves the composed briefing everywhere and makes no model call for it. |
 | `ALLOW_PRIVATE_ADDRESSES` | unset | `1` lets a connected system or an AI provider sit at an address inside the server's own network while sign-up is on. |
 | `OFFICE_DB_PATH` | `./data/office.db` | Where the SQLite file lives. |
+| `OFFICE_PORT` | `8080` | The port on this machine that `compose.yaml` publishes the office on. |
 | `ADMIN_NAME` | taken from the email | The administrator's display name. |
 | `DEMO_STOREFRONT_URL`, `DEMO_CARRIER_URL`, `DEMO_LEDGER_URL`, `DEMO_SUPPLIER_URL`, `DEMO_SERVICE_DESK_URL` | set by `compose.yaml` | Where the demo office and a sample office find each mock service. A service with no address is not connected. |
 | `DEMO_SYSTEMS_KEY` | `sample-systems-key` in `compose.yaml` | The key the office and the mock services share. |
@@ -87,8 +88,9 @@ from `services/Dockerfile` with the build argument `SERVICE`, has `PORT` and
 `API_KEY` in its environment, and is set to watch `services/**`, so it is
 rebuilt and restarted only by a push that changes something in that folder.
 A service keeps its data in memory, so a restart puts its starting data back,
-and without that setting every push to the office would do so. No service has a domain, so only the office
-reaches them, by their internal names on Dokploy's network.
+and without that setting every push to the office would do so. No service
+has a domain, so only the office reaches them, by their internal names on
+Dokploy's network.
 
 ## Plesk
 

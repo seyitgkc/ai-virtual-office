@@ -26,6 +26,18 @@ The store rebuilds the engine's state from these tables and writes back only
 what an action changed. The engine never mutates, so anything that is still
 the same object as before is left alone.
 
+Two tables stand apart from the diagrams below. `schema_meta` holds one row,
+the version of the schema, which is 23. `briefings` holds at most one row
+per office: the briefing a model last wrote for it, the model's name, the
+time, and a fingerprint of the work list it was written for. It is not part
+of the engine's state. A briefing is shown only while the office's work list
+still gives the same fingerprint.
+
+The diagrams draw 48 of the tables and name the rest in the text beside
+them. To stay readable they leave out some columns that only keep order or
+time, such as `position`, `office_id` and `created_at`. The schema in
+`lib/server/schema.ts` has every column.
+
 ## Office, people and access
 
 ```mermaid

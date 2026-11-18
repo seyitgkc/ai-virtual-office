@@ -296,7 +296,7 @@ belong to your account, whichever office you are in, come after.
 | People and agents | Manage people and agents | Add an AI agent or a playbook agent with a desk and a role. An agent added with no name is given one that nobody in the office has. Choose an agent's provider and model, or write its playbook. Rename anyone, change their role, or move their desk. Remove an agent that has no history. Remove a person: their sign-in to this office ends at once, and if the office's record names them they are listed under *People who have left* with their name kept on that work. A person who still owns open work has to hand it over first. |
 | Roles and access | Manage roles | Three parts under one page. Roles: add, rename or remove a role. Permissions: tick what each role held by people may do. Room access: Tick allow or deny for each scope in each room, or set a whole row in one choice: work here, look in, walk through, keep out or not set. |
 | Access rules | Manage access | See every individual rule in a table and revoke one. Add rules for a person or agent by ticking cells and giving a reason. |
-| AI providers | Manage AI providers | Add, edit, test and remove the office's own providers. Each holds a type, a default model and an API key. See which providers people have brought in from their accounts. |
+| AI providers | Manage AI providers | Add, edit, test and remove the office's own providers. Each holds a name, the interface it speaks, the address of its API, a default model and an API key if the service needs one. See which providers people have brought in from their accounts. |
 | Your offices | none | See every office your account has a seat in. Open another one. Add a new, empty office, or a sample office with AI agents. Remove one you manage. |
 | Your AI providers | none, with a password account | Add, edit, test and remove providers that belong to your account. They can be used in every office you have a seat in. |
 
@@ -370,7 +370,7 @@ being usable in an office once you no longer have a seat there.
 
 ### A sample office
 
-Under *Offices*, *Add the sample office* creates the
+Under *Your offices*, *Add the sample office* creates the
 demo's distributor as an office of your own: the same five rooms, roles and
 records, the mock services where the server has them, five AI
 agents on the provider you pick from your account, and you as its manager. It
@@ -437,5 +437,6 @@ A new office starts empty: a corridor and one room on it with you inside, two st
 agents, no work and no rules. Until the first request is filed, the panel on
 the right lists what the office still needs, worked out from the office
 itself: a role that may work in each room that hosts a stage, an agent who can
-take each stage, a provider with a working key for each AI agent. Each step
-names what is missing and opens the Settings tab where it is done. Demo access cannot add offices.
+take each stage, a provider each AI agent can use. Each step names what is
+missing and opens the Settings page where it is done. Demo access cannot add
+offices.

@@ -24,6 +24,13 @@ Part of the documentation of the [AI Virtual Office](../README.md).
   was granted for that task, and the other halted at review because it could
   not read the room the answers were given in. The check scripts cover the
   same path against a stand-in service on the same machine.
+- AI agents on an Anthropic compatible provider, and both interfaces in one
+  office. On the deployed site an office of five AI agents had three on a
+  provider that speaks chat completions and two on one that speaks the
+  Messages interface. A stock check went through four of them, two on each
+  interface, in 15 seconds and reached review with the count confirmed
+  against the storefront's live record. Both kinds of provider are set up
+  the same way: an address, a model id and a key if the service needs one.
 - Room records edited in Settings, and connected systems. The office calls the
   mock services over HTTP with a stored key, reads their records live,
   and places and cancels orders and shipments in them. In the demo office, the
@@ -42,6 +49,18 @@ Part of the documentation of the [AI Virtual Office](../README.md).
 - Approval for actions in a connected system: the held action, the question
   to a person, and carrying it out only on Approve.
 - Resetting the demo office to its seeded state, without signing anyone out.
+  The reset also puts the mock services back to their starting data. On the
+  deployed site the README's walkthrough was run twice in a row with a reset
+  between, and the order was placed afresh each time.
+- The summary and the briefing at the top of the screen. The counts are
+  worked out from the tasks for every viewer. On the deployed site the
+  briefing of an office of five AI agents was written by its own model once
+  the agents had gone quiet, within the two sentences and 34 words it is
+  held to. The demo office has no model, so its briefing is put together
+  from the same facts.
+- Rejecting a request before review. On the deployed site two orders were
+  rejected while they were halted at Planning, one on a question and one set
+  to wait, and each closed with its question and its wait removed.
 - Answering a question by picking one of the agent's choices or by typing an
   answer.
 - Agents carrying work forward in the background: the step taken again after
@@ -110,6 +129,10 @@ Part of the documentation of the [AI Virtual Office](../README.md).
   whoever you face. The lamps, the task names at each desk and everything seen
   moving are drawn from the office's own tasks and messages, one mark per real
   message.
+- Picking a place or a person on the map to stand there, names shown when
+  pointing at someone on the map, and the refusal for a room that is closed
+  to the walker. Walking by touch: taps on the map, a finger to look around,
+  and a tap on the prompt to talk.
 
 ## Simulated
 
@@ -140,6 +163,12 @@ playbook.
 - An agent that cannot be reached while a rejected task is wound up, on the
   deployed site. The check scripts cover it: three tries, then the person is
   asked.
+- A real phone or tablet. The phone layout and walking by touch were run in
+  a desktop browser set to a phone's size and touch input, against the
+  deployed site.
+- The briefing with `BRIEFING=0`, and a briefing call that fails, on the
+  deployed site. The check scripts cover both: a failed call leaves the
+  composed briefing in place and is not repeated straight away.
 
 ## Proposed
 
