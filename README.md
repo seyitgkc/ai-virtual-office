@@ -424,6 +424,11 @@ the stored data.
   a small service in front of the product that describes it to the office.
 - Lookups an AI agent chooses for itself during a step. Today it is shown a
   fixed snapshot of each system it may read.
+- A small tool-calling model, such as Needle from Cactus Compute, to pick the
+  right operation when an agent can reach many. Today every operation of
+  every system an agent may use is listed in its step. The shortlist would be
+  drawn only from what the agent's access allows, and the engine would still
+  check the action.
 - Workflows with a different number of stages, and more playbook conditions.
 - A drag-and-drop floorplan editor.
 - Live updates pushed to the browser in place of polling.

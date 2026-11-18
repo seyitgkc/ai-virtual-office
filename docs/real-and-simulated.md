@@ -149,6 +149,18 @@ playbook.
   needs no change for a new system.
 - Lookups an AI agent chooses for itself during a step. Today it is shown a
   fixed snapshot of each system it may read.
+- A small tool-calling model in front of the connected systems, such as
+  Needle from Cactus Compute. Needle is an open model of a few tens of
+  megabytes that picks a function and fills in its arguments, and it can run
+  beside the office with no provider behind it. Today an agent's step lists
+  every operation of every system it may use. That works for a storefront
+  with two operations and would stop working for a system with two hundred,
+  or for an agent that reaches many systems. The small model would shortlist
+  the operations that fit the task before the agent's own model is asked. It
+  would choose only among what the agent's access already allows, the engine
+  would still check every action, and a step where nothing on the shortlist
+  fits would fall back to the full list. This has not been tried, and the
+  published figures for the model's accuracy are its maker's own.
 - More playbook conditions, such as the answer to an earlier question.
 - A drag-and-drop floorplan editor. Rooms are added today through a form.
 - Workflows with a different number of stages.
