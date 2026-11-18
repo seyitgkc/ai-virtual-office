@@ -7,7 +7,7 @@ it gets stuck you can see where and why.
 People sign in. The server decides what each person can see and do, using the
 same access rules it applies to the agents.
 
-**Live demo:** https://office.example.invalid
+**Live demo:** the address is sent with the submission.
 
 ![The office at load: five rooms along a hall, with Fulfilment outlined in red because a quote is waiting on access to Finance](docs/office.jpg)
 
@@ -39,8 +39,8 @@ says how much work is open and what is waiting for a person.
 
 ### What to try first
 
-1. Open the [live demo](https://office.example.invalid) and enter as Dana, the
-   operations manager. No password is needed.
+1. Open the live demo and enter as Dana, the operations manager. No
+   password is needed.
 2. The dealer order **T-1** is halted at the Finance door. Click **Grant
    read on Finance, for this task only**.
 3. The agent asks whether it may place the order in the storefront. Click
@@ -50,7 +50,7 @@ says how much work is open and what is waiting for a person.
 5. Click **Walk the office** to go through it on foot. Enter as Sam instead
    to meet the doorways Sam may not pass.
 
-### What is real and what is not
+### Real and simulated parts
 
 The access rules, the workflow, sign-in,
 the database, the audit trail and the calls to the five mock services are
@@ -84,11 +84,11 @@ business data is made up. The full list is under
 
 | If you are looking for | It is here |
 | --- | --- |
-| A 3D office you can move through, with agents in recognisable roles | The [live demo](https://office.example.invalid): five agents and two people at desks in five rooms. See [Everyday use](#everyday-use). |
+| A 3D office you can move through, with agents in recognisable roles | The live demo: five agents and two people at desks in five rooms. See [Everyday use](#everyday-use). |
 | A task going from request to completion, with its owner, status and handoffs | [Example workflow](#example-workflow). In the demo, T-3 is already complete, so its thread shows the whole path. |
 | Starting a task, inspecting an agent, following progress and reading outputs | *New request*, a click on any figure, and the task panel. The [user guide](docs/user-guide.md) covers each. |
 | How a team uses it day to day, and how a person supervises and steps in | [Everyday use](#everyday-use) |
-| What is real and what is mock | [What is real, simulated and proposed](#what-is-real-simulated-and-proposed), and the labels on screen |
+| Real and mock parts | [What is real, simulated and proposed](#what-is-real-simulated-and-proposed), and the labels on screen |
 | Architecture, who does what, data flow and the stack | [Architecture](#architecture), [Design decisions](#design-decisions), [Tech stack](#tech-stack) |
 | How it would run in production | [A production version](#a-production-version) |
 | What it cannot do | [Limitations](#limitations) |
