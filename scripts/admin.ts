@@ -344,7 +344,7 @@ async function main(): Promise<void> {
   const freshMember = Object.values(fresh.roles).find((r) => r.permissions.length === 0)!.id;
   expect("a new office still needs an agent and a first request", todo(fresh), "agents,request");
   let staffed = apply(fresh, { type: "ADD_AGENT", displayName: "", title: "Helper", roleId: freshMember, roomId: freshMain, capabilities: [], agentType: "ai", providerId: "prov-x" }, freshMe);
-  expect("an AI agent needs a provider with a working key", todo(staffed), "provider,request");
+  expect("an AI agent needs a provider it can use", todo(staffed), "provider,request");
   expect("and with one, only the request is left", todo(staffed, [{ id: "prov-x", usable: true }]), "request");
   staffed = apply(staffed, { type: "ADD_ROOM", name: "Accounts", purpose: "", width: 8, depth: 8, attachTo: "", side: "along" }, freshMe);
   staffed = apply(staffed, { type: "SET_STAGE_ROOM", stage: "review", roomId: staffed.floorplan.rooms.at(-1)!.id }, freshMe);

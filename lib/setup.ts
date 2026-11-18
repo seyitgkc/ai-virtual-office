@@ -89,8 +89,8 @@ export function setupSteps(office: Office, now: number, providers: { id: string;
         ai.length === 0
           ? "There are no AI agents. Playbook agents need no provider."
           : noProvider.length === 0
-            ? "Every AI agent has a provider with a working key."
-            : `${listed(noProvider)} ${noProvider.length === 1 ? "has" : "have"} no provider with a working key.`,
+            ? "Every AI agent has a provider it can use."
+            : `${listed(noProvider)} ${noProvider.length === 1 ? "has" : "have"} no provider ${noProvider.length === 1 ? "it" : "they"} can use.`,
       done: noProvider.length === 0,
       optional: ai.length === 0,
       tab: "providers",
